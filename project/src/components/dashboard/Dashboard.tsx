@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   BarChart3, 
   Phone, 
@@ -13,12 +13,15 @@ import {
   PhoneCall,
   MessageCircle,
   Activity,
-  Eye
+  Eye,
+  LogOut,
+  User as UserIcon
 } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Agent } from '../../types';
 import { LiveConversations } from './LiveConversations';
 import { AnalyticsOverview } from './AnalyticsOverview';
+import { useAuth } from '../../context/AuthContext';
 
 const mockAgents: Agent[] = [
   {
@@ -78,6 +81,34 @@ export const Dashboard: React.FC<DashboardProps> = ({ onCreateAgent }) => {
   const [agents, setAgents] = useState(mockAgents);
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'agents' | 'conversations' | 'analytics'>('overview');
+  const [showUserMenu, setShowUserMenu] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+  
+  const { user, logout } = useAuth();
+
+  // Close user menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
+        setShowUserMenu(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+      // The App.tsx will automatically redirect to home page since user will be null
+    } catch (error) {
+      console.error('Logout error:', error);
+      // Even if logout fails, we'll still be redirected due to local storage being cleared
+    }
+  };
 
   const toggleAgentStatus = (agentId: string) => {
     setAgents(prev => prev.map(agent => 
@@ -98,10 +129,63 @@ export const Dashboard: React.FC<DashboardProps> = ({ onCreateAgent }) => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-            <Button onClick={onCreateAgent}>
-              <Plus className="h-4 w-4 mr-2" />
-              Create New Agent
-            </Button>
+            
+            <div className="flex items-center space-x-4">
+              <Button onClick={onCreateAgent}>
+                <Plus className="h-4 w-4 mr-2" />
+                Create New Agent
+              </Button>
+              
+              {/* User Menu */}
+              <div className="relative" ref={userMenuRef}>
+                <button
+                  onClick={() => setShowUserMenu(!showUserMenu)}
+                  className="flex items-center space-x-2 p-2 rounded-lg hover:bg-gray-100 transition-colors"
+                >
+                  <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center">
+                    <UserIcon className="h-4 w-4 text-white" />
+                  </div>
+                  <span className="text-sm font-medium text-gray-700">
+                    {user?.name || user?.email || 'User'}
+                  </span>
+                </button>
+                
+                {/* Dropdown Menu */}
+                {showUserMenu && (
+                  <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg ring-1 ring-black ring-opacity-5 z-50">
+                    <div className="py-1">
+                      <div className="px-4 py-2 text-sm text-gray-700 border-b border-gray-100">
+                        <div className="font-medium">{user?.name || 'User'}</div>
+                        <div className="text-gray-500">{user?.email}</div>
+                        {user?.company && (
+                          <div className="text-gray-500">{user.company}</div>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => {
+                          setShowUserMenu(false);
+                          // Add settings functionality here if needed
+                        }}
+                        className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                      >
+                        <Settings className="h-4 w-4 mr-2" />
+                        Settings
+                      </button>
+                      <button
+                        onClick={() => {
+                          setShowUserMenu(false);
+                          handleLogout();
+                        }}
+                        className="flex items-center w-full px-4 py-2 text-sm text-red-700 hover:bg-red-50"
+                      >
+                        <LogOut className="h-4 w-4 mr-2" />
+                        Logout
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
           
           {/* Navigation Tabs */}
