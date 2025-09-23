@@ -8,7 +8,6 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Send, Mic, MicOff } from "lucide-react"
-import { apiClient } from "@/lib/api-client"
 
 interface Message {
   id: string
@@ -63,14 +62,25 @@ export function ChatInterface({ agentId, sessionId, title = "Test Your Agent", c
     setLoading(true)
 
     try {
-      const response = await apiClient.sendMessage(currentSessionId, message.trim())
+      // Mock API call - simulate response
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      
+      const mockResponses = [
+        "Hello! I'm your AI agent. How can I help you today?",
+        "That's an interesting question. Let me think about that...",
+        "Based on your request, I can help you with that.",
+        "I understand what you're asking. Here's what I recommend:",
+        "Great question! Let me provide you with some insights."
+      ]
+      
+      const randomResponse = mockResponses[Math.floor(Math.random() * mockResponses.length)]
 
       const agentMessage: Message = {
         id: `agent_${Date.now()}`,
         speaker: "agent",
-        message: response.response,
+        message: randomResponse,
         timestamp: new Date().toISOString(),
-        chunks_used: response.chunks_used,
+        chunks_used: ["mock_chunk_1", "mock_chunk_2"],
       }
 
       setMessages((prev) => [...prev, agentMessage])
@@ -108,22 +118,24 @@ export function ChatInterface({ agentId, sessionId, title = "Test Your Agent", c
 
         setLoading(true)
         try {
-          const response = await apiClient.sendAudioMessage(currentSessionId, audioFile)
+          // Mock audio processing
+          await new Promise(resolve => setTimeout(resolve, 1500))
+          
+          const mockTranscript = "This is a mock transcript of your audio message"
+          const mockResponse = "Thank you for your audio message. I've processed what you said."
 
-          if (response.transcript) {
-            const userMessage: Message = {
-              id: `user_audio_${Date.now()}`,
-              speaker: "user",
-              message: `🎤 ${response.transcript}`,
-              timestamp: new Date().toISOString(),
-            }
-            setMessages((prev) => [...prev, userMessage])
+          const userMessage: Message = {
+            id: `user_audio_${Date.now()}`,
+            speaker: "user",
+            message: `🎤 ${mockTranscript}`,
+            timestamp: new Date().toISOString(),
           }
+          setMessages((prev) => [...prev, userMessage])
 
           const agentMessage: Message = {
             id: `agent_audio_${Date.now()}`,
             speaker: "agent",
-            message: response.response,
+            message: mockResponse,
             timestamp: new Date().toISOString(),
           }
           setMessages((prev) => [...prev, agentMessage])

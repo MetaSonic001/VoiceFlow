@@ -15,8 +15,6 @@ import { RealtimeMetrics } from "@/components/dashboard/realtime-metrics"
 import { LiveConversations } from "@/components/dashboard/live-conversations"
 import { QuickActions } from "@/components/dashboard/quick-actions"
 import { Search, Plus, Filter, Activity, Phone, MessageCircle, Users, TrendingUp } from "lucide-react"
-import { apiClient } from "@/lib/api-client"
-import { useRealtimeData } from "@/hooks/use-realtime-data"
 
 const mockAgents = [
   {
@@ -81,7 +79,16 @@ export function AgentDashboard() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const { realtimeMetrics, isConnected } = useRealtimeData()
+  // Mock realtime metrics since we removed the backend dependency
+  const realtimeMetrics = {
+    totalCalls: 156,
+    activeCalls: 8,
+    totalChats: 89,
+    activeChats: 12,
+    successRate: 94.2,
+    avgResponseTime: 2.1
+  }
+  const isConnected = true
 
   useEffect(() => {
     loadAgents()
@@ -91,12 +98,14 @@ export function AgentDashboard() {
     try {
       setLoading(true)
       setError(null)
-      const response = await apiClient.getAgents()
-      setAgents(response)
+      // Simulate API call delay and use mock data
+      await new Promise(resolve => setTimeout(resolve, 500))
+      setAgents(mockAgents)
     } catch (err) {
       console.error("[v0] Failed to load agents:", err)
       setError("Failed to load agents. Using demo data.")
       // Keep using mock data on error
+      setAgents(mockAgents)
     } finally {
       setLoading(false)
     }

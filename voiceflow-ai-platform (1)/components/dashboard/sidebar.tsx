@@ -6,7 +6,6 @@ import { Badge } from "@/components/ui/badge"
 import { Brain, Bot, BarChart3, Settings, HelpCircle, LogOut, Users, Phone } from "lucide-react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { apiClient } from "@/lib/api-client"
 
 export function DashboardSidebar() {
   const [activeItem, setActiveItem] = useState("agents")
@@ -24,11 +23,12 @@ export function DashboardSidebar() {
   const handleLogout = async () => {
     setIsLoggingOut(true)
     try {
-      await apiClient.logout()
+      // Mock logout - simulate API call
+      await new Promise(resolve => setTimeout(resolve, 500))
     } catch (error) {
       console.error("Logout error:", error)
     } finally {
-      // Clear local storage regardless of API response
+      // Clear local storage
       localStorage.removeItem("auth_token")
       localStorage.removeItem("session_id")
       localStorage.removeItem("user")

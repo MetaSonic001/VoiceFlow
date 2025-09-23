@@ -10,7 +10,6 @@ import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { Brain, Loader2 } from "lucide-react"
 import { useRouter } from "next/navigation"
-import { apiClient } from "@/lib/api-client"
 
 interface AuthModalProps {
   open: boolean
@@ -33,23 +32,40 @@ export function AuthModal({ open, onOpenChange, mode, onModeChange }: AuthModalP
     setError("")
 
     try {
-      let response
+      // Mock authentication - no backend required
+      // Simulate API call delay
+      await new Promise(resolve => setTimeout(resolve, 1000))
+
+      // Create mock user data
+      const mockUser = {
+        id: Date.now().toString(),
+        email: email || "demo@voiceflow.ai",
+        name: companyName || "Demo User",
+        company: companyName || "Demo Company"
+      }
+
+      const mockResponse = {
+        token: "mock_token_" + Date.now(),
+        session_id: "mock_session_" + Date.now(),
+        user: mockUser
+      }
+
+      // Store auth data in localStorage
+      localStorage.setItem("auth_token", mockResponse.token)
+      localStorage.setItem("session_id", mockResponse.session_id)
+      localStorage.setItem("user", JSON.stringify(mockResponse.user))
+
+      onOpenChange(false)
+
+      // Navigate to appropriate page
       if (mode === "login") {
-        response = await apiClient.login(email, password)
         router.push("/dashboard")
       } else {
-        response = await apiClient.signup(email, password, companyName)
         router.push("/onboarding")
       }
 
-      // Store auth token and session ID
-      localStorage.setItem("auth_token", response.token)
-      localStorage.setItem("session_id", response.session_id)
-      localStorage.setItem("user", JSON.stringify(response.user))
-
-      onOpenChange(false)
     } catch (err: any) {
-      setError(err.message || "Authentication failed. Please try again.")
+      setError("Something went wrong. Please try again.")
     } finally {
       setLoading(false)
     }
@@ -75,47 +91,44 @@ export function AuthModal({ open, onOpenChange, mode, onModeChange }: AuthModalP
         <form onSubmit={handleSubmit} className="space-y-4">
           {mode === "signup" && (
             <div className="space-y-2">
-              <Label htmlFor="company" className="text-sm font-medium">
-                Company Name
-              </Label>
-              <Input
-                id="company"
-                type="text"
-                placeholder="Acme Inc."
-                value={companyName}
-                onChange={(e) => setCompanyName(e.target.value)}
-                required
-                className="h-11"
-              />
+                          <Label htmlFor="company" className="text-sm font-medium">
+              Company Name (Optional)
+            </Label>
+            <Input
+              id="company"
+              type="text"
+              placeholder="Company Name (optional)"
+              value={companyName}
+              onChange={(e) => setCompanyName(e.target.value)}
+              className="h-11"
+            />
             </div>
           )}
 
           <div className="space-y-2">
             <Label htmlFor="email" className="text-sm font-medium">
-              Email
+              Email (Optional)
             </Label>
             <Input
               id="email"
               type="email"
-              placeholder="you@company.com"
+              placeholder="you@company.com (optional)"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              required
               className="h-11"
             />
           </div>
 
           <div className="space-y-2">
             <Label htmlFor="password" className="text-sm font-medium">
-              Password
+              Password (Optional)
             </Label>
             <Input
               id="password"
               type="password"
-              placeholder="••••••••"
+              placeholder="••••••••• (optional)"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              required
               className="h-11"
             />
           </div>
