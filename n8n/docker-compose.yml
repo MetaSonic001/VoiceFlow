@@ -1,0 +1,54 @@
+services:
+  n8n:
+    image: n8n-custom  # Changed from n8nio/n8n
+    restart: always
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=admin
+      - N8N_BASIC_AUTH_PASSWORD=password123
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - N8N_EXECUTIONS_DATA_SAVE_ON_SUCCESS=all # Save full output
+      - N8N_EXECUTIONS_DATA_SAVE_ON_ERROR=all
+      - NODE_OPTIONS=--max-old-space-size=8192 # Increase Node.js memory (8GB)
+      - N8N_EXECUTIONS_DATA_MAX_SIZE=100000000 # Increase execution data limit (100MB)
+      - N8N_EXECUTIONS_BUFFER_SIZE=500000000 # Increase buffer size (500MB)
+      - N8N_DEFAULT_BINARY_DATA_MODE=filesystem # Store large data on filesystem
+      - N8N_EXECUTIONS_DATA_SAVE_MANUAL_EXECUTIONS=true # Save manual executions
+      - N8N_LOG_LEVEL=debug # Enable debug logging
+      - N8N_EXECUTIONS_PROCESS=main # Use main process for executions
+      - N8N_PAYLOAD_SIZE_MAX=100000000 # Max payload size (100MB)
+      - N8N_METRICS=false # Disable metrics to save memory
+      - N8N_DISABLE_PRODUCTION_MAIN_PROCESS=false # Ensure main process handles large data
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./scripts:/app/scripts # Mount the script
+      
+  ollama:
+    image: ollama/ollama
+    restart: always
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+      
+  postgres:
+    image: postgres:15
+    restart: always
+    environment:
+      - POSTGRES_DB=n8n_db
+      - POSTGRES_USER=n8n_user
+      - POSTGRES_PASSWORD=n8n_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+volumes:
+  n8n_data:
+  postgres_data:
+  ollama_data:
