@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, ArrowRight, CheckCircle } from 'lucide-react';
-import { Button } from './Button';
+import { Button } from '../../components/ui/Button copy';
 
 interface HelpModalProps {
   isOpen: boolean;
