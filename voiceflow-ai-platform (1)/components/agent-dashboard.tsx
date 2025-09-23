@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge"
 import { DashboardSidebar } from "@/components/dashboard/sidebar"
 import { AgentCard } from "@/components/dashboard/agent-card"
 import { AgentDetails } from "@/components/dashboard/agent-details"
-import { CreateAgentDialog } from "@/components/dashboard/create-agent-dialog"
+import { OnboardingWizard } from "@/components/dashboard/onboarding-wizard"
 import { LiveActivityFeed } from "@/components/dashboard/live-activity-feed"
 import { RealtimeMetrics } from "@/components/dashboard/realtime-metrics"
 import { LiveConversations } from "@/components/dashboard/live-conversations"
@@ -322,7 +322,14 @@ export function AgentDashboard() {
         </div>
       </div>
 
-      <CreateAgentDialog open={showCreateDialog} onOpenChange={setShowCreateDialog} />
+      <OnboardingWizard 
+        open={showCreateDialog} 
+        onOpenChange={setShowCreateDialog}
+        onComplete={() => {
+          // Refresh agents list or add new agent to state
+          console.log('Agent creation completed')
+        }}
+      />
     </div>
   )
 }
