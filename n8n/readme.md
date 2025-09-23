@@ -117,6 +117,7 @@ docker-compose ps
 # Install required Ollama models
 docker exec -it <ollama-container-id> ollama pull nomic-embed-text
 docker exec -it <ollama-container-id> ollama pull llama3.2:1b
+# docker exec -it f79d9dd4bc38 ollama pull llama3.2:1b
 
 # Verify models are installed
 docker exec -it <ollama-container-id> ollama list

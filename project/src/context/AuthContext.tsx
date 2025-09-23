@@ -52,7 +52,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const login = async (email: string, password: string): Promise<void> => {
     try {
-      const response = await fetch('http://localhost:8000/auth/login', {
+      const response = await fetch('http://localhost:8001/auth/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
