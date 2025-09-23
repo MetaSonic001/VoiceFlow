@@ -1,0 +1,662 @@
+{
+  "name": "Document ingestion",
+  "nodes": [
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "526e76d7-f286-4d7a-81c7-e7473d3dbaa0",
+              "leftValue": "={{ $json.document_type }}",
+              "rightValue": "pdf",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        64,
+        -136
+      ],
+      "id": "6ee2b58d-d6b8-4b8e-a652-9eb1ef1f45e9",
+      "name": "If",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.ocr.space/parse/image",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "K87991680288957"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "base64Image",
+              "value": "={{ $json.file_data }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1184,
+        -304
+      ],
+      "id": "b9d9b9a2-086a-470b-87a7-4f2a018db8e3",
+      "name": "PDF Processing",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Detect document type and prepare data\nconst items = $input.all();\nconst item = items[0];\n\n// The webhook data is in item.json.body (nested body)\nconst webhookData = item.json.body || {};\n\nconsole.log(\"=== WEBHOOK DATA ===\", JSON.stringify(webhookData, null, 2));\n\nlet documentType = 'text';\nlet processUrl = null;\n\n// Detect file type\nif (webhookData.file_type) {\n  if (webhookData.file_type.includes('pdf')) {\n    documentType = 'pdf';\n    processUrl = 'https://api.ocr.space/parse/image';\n  } else if (webhookData.file_type.includes('audio')) {\n    documentType = 'audio';\n  } else if (webhookData.file_type === 'website' && webhookData.url) {\n    documentType = 'website';\n    processUrl = webhookData.url;\n  }\n}\n\nconst result = {\n  document_type: documentType,\n  process_url: processUrl,\n  company_id: webhookData.company_id || 'default',\n  project_id: webhookData.project_id || 'default', \n  text_content: webhookData.text_content || '',\n  file_data: webhookData.file_data || ''\n};\n\nconsole.log(\"=== RESULT ===\", JSON.stringify(result, null, 2));\n\nreturn [{ json: result }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -160,
+        -136
+      ],
+      "id": "13cc6a23-f274-4321-ae3d-96be87eaf460",
+      "name": "File Type Detection",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ingest-document",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": false
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -384,
+        -136
+      ],
+      "id": "fee78ad6-244f-48e0-8138-1965706eeabc",
+      "name": "ingest-document webhook",
+      "webhookId": "9b273781-7fdf-47d3-8bb0-a0c006d6179e",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconsole.log('Text Processing Input:', JSON.stringify(items));\n\nif (!items.length) {\n  return [{ json: { error: \"No input items received\" } }];\n}\n\nconst chunks = [];\nconst chunkSize = 500;\nconst overlap = 100;\n\nfor (const item of items) {\n  let extractedText = '';\n  let sourceUrl = '';\n  let companyId = 'frcrce';\n  let projectId = 'faq_scraping';\n\n  // Handle scraped file content\n  if (item.json.stdout) {\n    try {\n      const scrapedData = JSON.parse(item.json.stdout);\n      \n      // Check if it's an error response\n      if (scrapedData.error) {\n        chunks.push({\n          error: \"Scraping failed: \" + scrapedData.error,\n          url: scrapedData.url || '',\n          company_id: companyId,\n          project_id: projectId\n        });\n        continue;\n      }\n      \n      extractedText = scrapedData.text || '';\n      sourceUrl = scrapedData.url || '';\n      \n    } catch (e) {\n      chunks.push({\n        error: \"Failed to parse scraped data: \" + e.message,\n        company_id: companyId,\n        project_id: projectId\n      });\n      continue;\n    }\n  } else {\n    chunks.push({\n      error: \"No scraped data found in input\",\n      company_id: companyId,\n      project_id: projectId\n    });\n    continue;\n  }\n\n  // Check if we got any text\n  if (!extractedText || extractedText.trim().length < 50) {\n    chunks.push({\n      error: \"No meaningful text extracted from source\",\n      url: sourceUrl,\n      company_id: companyId,\n      project_id: projectId\n    });\n    continue;\n  }\n\n  // Split into chunks with overlap\n  const words = extractedText.split(/\\s+/);\n  for (let i = 0; i < words.length; i += chunkSize - overlap) {\n    const chunk = words.slice(i, i + chunkSize).join(' ');\n    if (chunk.trim().length > 50) {\n      chunks.push({\n        text: chunk.trim(),\n        chunk_index: chunks.filter(c => !c.error).length,\n        company_id: companyId,\n        project_id: projectId,\n        source_type: 'website',\n        url: sourceUrl,\n        timestamp: new Date().toISOString()\n      });\n    }\n  }\n}\n\nif (!chunks.length) {\n  return [{ json: { error: \"No valid chunks created\" } }];\n}\n\nconsole.log(`Created ${chunks.length} chunks for processing`);\nreturn chunks.map(chunk => ({ json: chunk }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1408,
+        -256
+      ],
+      "id": "1f5b02a2-f971-41a2-8844-8fc1d0101ef0",
+      "name": "Text Processing",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ollama:11434/api/embeddings",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"nomic-embed-text\",\n  \"prompt\": \"{{ $json.text }}\"\n}",
+        "options": {
+          "allowUnauthorizedCerts": false,
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1856,
+        -256
+      ],
+      "id": "c4f7e5e7-883a-420d-b8d6-710075355185",
+      "name": "Request for Embeddings",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://knowledge-base-768-yy52212.svc.aped-4627-b74a.pinecone.io/vectors/upsert",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "pineconeApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"vectors\": [\n    {\n      \"id\": \"{{ $json.company_id }}_{{ $json.project_id }}_{{ $json.chunk_index }}_{{ Date.now() }}\",\n      \"values\": {{ JSON.stringify($json.embedding) }},\n      \"metadata\": {\n        \"text\": {{ JSON.stringify($json.text) }},\n        \"company_id\": \"{{ $json.company_id }}\",\n        \"project_id\": \"{{ $json.project_id }}\",\n        \"url\": \"{{ $json.url }}\",\n        \"chunk_index\": {{ $json.chunk_index }},\n        \"timestamp\": \"{{ $json.timestamp }}\",\n        \"source_type\": \"{{ $json.source_type }}\",\n        \"embedding_model\": \"{{ $json.embedding_model }}\",\n        \"embedding_size\": {{ $json.embedding_size }}\n      }\n    }\n  ]\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2304,
+        -256
+      ],
+      "id": "928ac51b-40b8-4071-ba83-fa32f4ca1c01",
+      "name": "Vector Storage (Pinecone)",
+      "alwaysOutputData": true,
+      "credentials": {
+        "pineconeApi": {
+          "id": "CCqmNfYhx1L3jFCY",
+          "name": "PineconeApi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseCode": 200,
+          "responseKey": "={\n  \"status\": \"{{ $json.status }}\",\n  \"message\": \"{{ $json.message }}\",\n  \"chunks_created\": {{ $json.chunks_created }},\n  \"company_id\": \"{{ $json.company_id }}\",\n  \"project_id\": \"{{ $json.project_id }}\",\n  \"source_type\": \"{{ $json.source_type }}\",\n  \"url\": \"{{ $json.url }}\"\n}"
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        2752,
+        -256
+      ],
+      "id": "3e9971aa-b7e4-4b76-9b1a-6d7afc6ef449",
+      "name": "Respond to Webhook",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "eb903929-43da-4c0f-b300-cb70a6fe3343",
+              "leftValue": "={{ $json.process_url }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        288,
+        -64
+      ],
+      "id": "ccfc7bcd-95b9-4ab0-86a8-d96f4715eccd",
+      "name": "If1",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "2d857ff1-2c15-4a62-8ea7-de732b446926",
+              "name": "Set Error",
+              "value": "error_message = \"URL is empty for website type\"",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        512,
+        -160
+      ],
+      "id": "03fb7295-9362-463b-99cf-5f8be50d53da",
+      "name": "Edit Fields",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseCode": 400,
+          "responseKey": "={   \"status\": \"error\",   \"message\": \"{{ $json.error_message }}\",   \"company_id\": \"{{ $json.company_id }}\" }"
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        736,
+        -160
+      ],
+      "id": "381b0424-188e-4b15-b1a9-d73cf7300850",
+      "name": "Respond to Webhook1",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "command": "=scrape \"{{ $json.url }}\""
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        736,
+        32
+      ],
+      "id": "8718cc1d-f16a-4389-b194-17618a824a71",
+      "name": "Execute Command",
+      "executeOnce": true,
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "7fc1efee-2679-4725-8e0d-d8addc1ee130",
+              "leftValue": "={{ $json.stdout && !JSON.parse($json.stdout).error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1184,
+        32
+      ],
+      "id": "cb10de7b-c923-4e7a-a798-180074d7eb01",
+      "name": "Check Scrape Success"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "2d857ff1-2c15-4a62-8ea7-de732b446926",
+              "name": "\"Set Scrape Error\"",
+              "value": "error_message = {{ $json.error || \"No text found in parsed data\" }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1408,
+        80
+      ],
+      "id": "55a3a07b-0b69-4a20-bea9-6467aa4d2ddd",
+      "name": "Edit Fields3",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseCode": 400,
+          "responseKey": "={   \"status\": \"error\",   \"message\": \"{{ $json.error_message }}\",   \"company_id\": \"{{ $json.company_id }}\" }"
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1632,
+        80
+      ],
+      "id": "a0a382a9-f44f-46b2-b17f-3b50ca96b7de",
+      "name": "Respond to Webhook2",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    company_id: $input.first().json.company_id || 'frcrce',\n    project_id: $input.first().json.project_id || 'faq_scraping',\n    document_type: $input.first().json.file_type || 'website',\n    url: $input.first().json.process_url // Ensure url is passed\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        512,
+        32
+      ],
+      "id": "614afb54-1a8f-4e0c-8b64-92b19635d24b",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "command": "=read-scraped-data {{ JSON.parse($json.stdout).file_path }}"
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        960,
+        32
+      ],
+      "id": "cfd3b5a3-1523-43df-bb7e-f7100fa813cd",
+      "name": "Execute Command1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconsole.log('Input to Embeddings:', JSON.stringify(items));\nif (!items.length || !items[0].json.text) {\n  return [{ json: { error: \"No text available for embeddings\" } }];\n}\nreturn items;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1632,
+        -256
+      ],
+      "id": "d41a6001-422b-4131-badc-91bc47df7634",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst currentItem = items[0];\n\nif (!currentItem || !currentItem.json.embedding) {\n  return [{ json: { error: \"No embedding received from Ollama\" } }];\n}\n\nconst embedding = currentItem.json.embedding;\n\n// Get text data from Text Processing node\nlet textData;\ntry {\n  textData = $('Text Processing').first().json;\n  if (!textData || !textData.text) {\n    throw new Error(\"No text data found\");\n  }\n} catch (e) {\n  return [{ json: { error: \"Failed to access Text Processing output: \" + e.message } }];\n}\n\n// Return complete merged data (THIS is what should go to Pinecone)\nreturn [{\n  json: {\n    embedding: embedding,\n    text: textData.text,\n    chunk_index: textData.chunk_index,\n    company_id: textData.company_id,\n    project_id: textData.project_id,\n    source_type: textData.source_type,\n    url: textData.url,\n    timestamp: textData.timestamp,\n    embedding_model: \"nomic-embed-text\",\n    embedding_size: embedding.length\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2080,
+        -256
+      ],
+      "id": "8594cdd0-2500-4263-9527-cf2f100404c0",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare final response with actual data\nconst allInputs = $input.all();\nconst chunks_created = allInputs.length;\n\n// Get data from the first successful item\nconst sampleItem = allInputs.find(item => item.json && !item.json.error) || allInputs[0];\n\nreturn [{\n  json: {\n    status: \"success\",\n    message: \"Document processed and stored in knowledge base\",\n    chunks_created: chunks_created,\n    company_id: sampleItem?.json?.company_id || \"unknown\",\n    project_id: sampleItem?.json?.project_id || \"unknown\", \n    source_type: sampleItem?.json?.source_type || \"unknown\",\n    url: sampleItem?.json?.url || \"unknown\"\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2528,
+        -256
+      ],
+      "id": "d5274bea-e59c-4a27-aac1-90aaa1bb4d0c",
+      "name": "Code in JavaScript3"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "If": {
+      "main": [
+        [
+          {
+            "node": "PDF Processing",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "File Type Detection": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ingest-document webhook": {
+      "main": [
+        [
+          {
+            "node": "File Type Detection",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PDF Processing": {
+      "main": [
+        [
+          {
+            "node": "Text Processing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Text Processing": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Request for Embeddings": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vector Storage (Pinecone)": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Command": {
+      "main": [
+        [
+          {
+            "node": "Execute Command1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Scrape Success": {
+      "main": [
+        [
+          {
+            "node": "Text Processing",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Edit Fields3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields3": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Execute Command",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Command1": {
+      "main": [
+        [
+          {
+            "node": "Check Scrape Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Request for Embeddings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "Vector Storage (Pinecone)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript3": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "c958a777-c6fa-4f96-ab84-c43aae7dd182",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "8a37715193231f986dbc5f1614f54415df47c0b9a5ed4ae73891042f8cc966d1"
+  },
+  "id": "XPUt5IqATvmU3uJv",
+  "tags": []
+}

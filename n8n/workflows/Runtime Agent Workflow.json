@@ -1,0 +1,293 @@
+{
+  "name": "Runtime Agent Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "agent-chat",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        -272
+      ],
+      "id": "f8b7ddc4-9fd6-4ce9-a6ed-b84fd7883d6f",
+      "name": "agent-chat",
+      "webhookId": "ff8d7cfd-55ad-49e3-8960-93bcb038cdf2",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ollama:11434/api/embeddings",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"nomic-embed-text\",\n  \"prompt\": \"{{ $json.query }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        448,
+        -272
+      ],
+      "id": "a8eff35b-fb4e-4529-b464-0de170f97800",
+      "name": "Ollama Query Embeddings"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://knowledge-base-768-yy52212.svc.aped-4627-b74a.pinecone.io/query",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "pineconeApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"vector\": {{ $json.embedding_vector }},\n  \"filter\": {\n    \"company_id\": \"{{ $json.company_id }}\"\n  },\n  \"topK\": 3,\n  \"includeMetadata\": true\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        896,
+        -272
+      ],
+      "id": "ffe20bb5-4d05-4c23-a5a9-13a8e13715e2",
+      "name": "Vector Search",
+      "credentials": {
+        "pineconeApi": {
+          "id": "CCqmNfYhx1L3jFCY",
+          "name": "PineconeApi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ollama:11434/api/generate",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"llama3.2:1b\",\n  \"prompt\": {{ JSON.stringify($json.prompt) }},\n  \"stream\": false,\n  \"options\": {\n    \"temperature\": 0.7,\n    \"num_predict\": 200\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1344,
+        -272
+      ],
+      "id": "0eac63b6-e184-4934-a721-b02a24b6d70e",
+      "name": "LLM Generation"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format final response - PRESERVE ALL DATA\nlet response = \"I'm sorry, I don't have information about that.\";\n\n// Handle Ollama response\nif ($json.response) {\n  response = $json.response.trim();\n} else if ($json.generated_text) {\n  response = $json.generated_text.trim();\n} else if (Array.isArray($json) && $json[0]?.generated_text) {\n  response = $json[0].generated_text.trim();\n}\n\n// Try to get the original data from anywhere in the input chain\nlet conversationId = \"unknown\";\nlet companyId = \"unknown\";\n\n// Check current item first\nif ($json.conversation_id) conversationId = $json.conversation_id;\nif ($json.company_id) companyId = $json.company_id;\n\n// Check input chain if not found\nconst inputItems = $input.all();\nfor (let item of inputItems) {\n  if (item.json.conversation_id && conversationId === \"unknown\") {\n    conversationId = item.json.conversation_id;\n  }\n  if (item.json.company_id && companyId === \"unknown\") {\n    companyId = item.json.company_id;\n  }\n}\n\nreturn [{\n  json: {\n    response: response,\n    conversation_id: conversationId,\n    company_id: companyId,\n    timestamp: new Date().toISOString(),\n    success: true\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        -272
+      ],
+      "id": "238a3fac-a4c2-46e4-a1af-b2a77a9937cf",
+      "name": "Response Formatter"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"response\": {{ JSON.stringify($json.response) }},\n  \"conversation_id\": {{ JSON.stringify($json.conversation_id) }},\n  \"company_id\": {{ JSON.stringify($json.company_id) }},\n  \"timestamp\": {{ JSON.stringify($json.timestamp) }}\n}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1792,
+        -272
+      ],
+      "id": "c5daee04-ca1c-4ccb-925f-224dea3ed7b1",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "7ee8ab56-1213-45f6-9e40-eb5eb23a8319",
+              "name": "embedding_vector",
+              "value": "={{ $('Ollama Query Embeddings').first().json.embedding }}",
+              "type": "string"
+            },
+            {
+              "id": "7bd7b19c-027e-4a6c-b4b1-c42481157ed8",
+              "name": "original_query",
+              "value": "={{ $('Query Processing').first().json.query }}",
+              "type": "string"
+            },
+            {
+              "id": "c8050553-ed03-4ac0-ba42-c93e1ee4f107",
+              "name": "company_id",
+              "value": "={{ $('Query Processing').first().json.company_id }}",
+              "type": "string"
+            },
+            {
+              "id": "fd9f79bf-d16e-4ee8-8172-aff2741c2679",
+              "name": "conversation_id",
+              "value": "={{ $('Query Processing').first().json.conversation_id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        672,
+        -272
+      ],
+      "id": "2c070a8b-7e04-4422-8a2f-693d7a0e1e18",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract and prepare query for processing\nconst body = $json.body;\n\nreturn [{\n  json: {\n    query: body.query || body.message,\n    company_id: body.company_id,\n    conversation_id: body.conversation_id || 'new_' + Date.now(),\n    channel: body.channel || 'chat'\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        -272
+      ],
+      "id": "b72edd75-7660-4395-8f99-f24147f821e0",
+      "name": "Query Processing"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build prompt with context - FIXED VERSION\nconst searchResults = $json.matches || [];\nconst query = $json.original_query;\nconst companyId = $json.company_id;\nconst conversationId = $json.conversation_id;\n\n// Extract context from search results\nconst context = searchResults\n  .map(match => match.metadata.text)\n  .join('\\n\\n');\n\n// Build the prompt\nlet companyContext = companyId ? ` for ${companyId}` : '';\nconst prompt = `You are a helpful customer service agent${companyContext}. Answer the question using only the provided context.\n\nContext:\n${context}\n\nQuestion: ${query}\n\nAnswer:`;\n\nreturn [{\n  json: {\n    prompt: prompt,\n    query: query,\n    context_found: searchResults.length > 0,\n    company_id: companyId,\n    conversation_id: conversationId,\n    context_chunks: searchResults.length\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        -272
+      ],
+      "id": "55e86af0-8ae5-4a0e-8007-506b5ed79e86",
+      "name": "RAG Prompt Builder",
+      "executeOnce": true
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "agent-chat": {
+      "main": [
+        [
+          {
+            "node": "Query Processing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama Query Embeddings": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vector Search": {
+      "main": [
+        [
+          {
+            "node": "RAG Prompt Builder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM Generation": {
+      "main": [
+        [
+          {
+            "node": "Response Formatter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Response Formatter": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Processing": {
+      "main": [
+        [
+          {
+            "node": "Ollama Query Embeddings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Vector Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RAG Prompt Builder": {
+      "main": [
+        [
+          {
+            "node": "LLM Generation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1579ff93-a213-4a5b-86c7-f31b20c51fc9",
+  "meta": {
+    "instanceId": "8a37715193231f986dbc5f1614f54415df47c0b9a5ed4ae73891042f8cc966d1"
+  },
+  "id": "F9Iiu40oCtFndvcZ",
+  "tags": []
+}
