@@ -79,7 +79,8 @@ CREATE INDEX idx_documents_created_at ON documents(created_at DESC);
 
 ### Development
 ```bash
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+# For local development without auto-reload (recommended to avoid multi-process startup issues):
+uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
 ### Production

@@ -1,0 +1,23 @@
+# Web Framework
+fastapi
+uvicorn[standard]
+python-multipart
+
+# Server-Sent Events for Streaming
+sse-starlette
+
+# Data Models
+pydantic
+
+# Vector Database
+chromadb
+
+# LLM Integration
+groq
+
+# Environment Variables
+python-dotenv
+
+requests
+numpy
+typing-extensions

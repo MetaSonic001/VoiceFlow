@@ -27,9 +27,8 @@ class VectorStore:
         Args:
             persist_directory: Directory for persistent storage
         """
-        # Allow overriding persistent directory via environment variable so
-        # development runs with --reload can keep DB/log files outside the
-        # watched source tree (preventing continuous reloads).
+    # Allow overriding persistent directory via environment variable so
+    # development runs can keep DB/log files outside the watched source tree.
         if persist_directory is None:
             try:
                 base_dir = os.path.dirname(os.path.abspath(__file__))

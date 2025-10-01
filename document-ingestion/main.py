@@ -606,30 +606,6 @@ async def root():
 
 if __name__ == "__main__":
     import uvicorn
-    # Control reload behavior via environment variables so running
-    # `python main.py` can optionally enable hot-reload like the CLI.
-    # ENV VARS:
-    #   ENABLE_RELOAD or UVICORN_RELOAD = true/1/yes to enable reload
-    #   RELOAD_DIRS = comma-separated list of directories to watch (optional)
-    reload_env = os.environ.get("ENABLE_RELOAD", os.environ.get("UVICORN_RELOAD", "false"))
-    enable_reload = str(reload_env).lower() in ("1", "true", "yes", "on")
-
-    if enable_reload:
-        # parse reload dirs from env or default to current project dir
-        reload_dirs_env = os.environ.get("RELOAD_DIRS")
-        if reload_dirs_env:
-            reload_dirs = [d.strip() for d in reload_dirs_env.split(",") if d.strip()]
-        else:
-            reload_dirs = [os.path.join(os.getcwd())]
-
-        logger.info(f"Starting uvicorn with reload enabled. Watching: {reload_dirs}")
-        uvicorn.run(
-            "main:app",
-            host="0.0.0.0",
-            port=8000,
-            reload=True,
-            reload_dirs=reload_dirs,
-        )
-    else:
-        logger.info("Starting uvicorn without reload (python main.py)")
-        uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
+    # Start uvicorn without auto-reload to avoid multi-process reload issues.
+    logger.info("Starting uvicorn without reload (python main.py)")
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
