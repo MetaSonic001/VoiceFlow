@@ -1,0 +1,37 @@
+# FastAPI and server
+fastapi
+uvicorn[standard]
+python-multipart
+python-dotenv
+
+# OCR with docTR
+python-doctr[torch]
+Pillow
+
+# Web scraping with Crawl4AI
+crawl4ai
+
+# Embeddings
+sentence-transformers
+torch
+
+# Vector database
+chromadb
+
+# Database
+supabase
+
+# File type detection
+python-magic
+
+# Data validation
+pydantic
+
+# HTTP client
+httpx
+
+# Utilities
+numpy
+
+libmagic
+python-magic-bin

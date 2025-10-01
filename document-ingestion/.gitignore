@@ -1,0 +1,62 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+.venv/
+venv/
+env/
+ENV/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# IDEs and editors
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+# Default ingestion log dir (configurable via INGESTION_LOG_DIR)
+ingestion_logs/
+ingestion_logs/*
+
+# ChromaDB persistent storage
+chroma_db/
+chroma_db/*
+chroma-data/
+chroma-data/*
+chroma_data/
+chroma_data/*
+chroma/
+
+# Common DB files
+*.sqlite3
+*.db
+
+# Environment / secrets
+.env
+secrets.env
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Misc
+*.pem
+*.key
+
+# Node / frontend artifacts (if present)
+node_modules/
+dist/
+
+# Ignore local VS Code settings folder
+.vscode/
