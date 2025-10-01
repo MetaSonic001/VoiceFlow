@@ -95,16 +95,16 @@ python app.py
 Or with uvicorn directly:
 
 ```bash
-uvicorn app:app --reload --host 0.0.0.0 --port 8000
+uvicorn app:app --reload --host 0.0.0.0 --port 8001
 ```
 
 ### Production Mode
 
 ```bash
-uvicorn app:app --host 0.0.0.0 --port 8000 --workers 4
+uvicorn app:app --host 0.0.0.0 --port 8001 --workers 4
 ```
 
-The API will be available at `http://localhost:8000`
+The API will be available at `http://localhost:8001` (this project uses port 8001 by default)
 
 ## 📡 API Endpoints
 
@@ -175,6 +175,7 @@ Main endpoint for asking questions to the RAG agent.
   "timestamp": "2025-10-01T12:00:00",
   "metadata": {
     "user_id": "user123",
+        ### 6. Streaming Query Endpoint (Server-Sent Events)
     "processing_time_ms": 1234,
     "documents_found": 3
   },
@@ -203,7 +204,7 @@ Twilio-compatible webhook that returns TwiML for SMS responses.
 
 ### 5. Twilio Webhook (JSON Response)
 
-**POST** `/webhook/twilio/json`
+        curl -N -X POST "http://localhost:8001/query/stream" \
 
 Alternative Twilio webhook that returns JSON instead of TwiML. Useful for testing.
 
@@ -214,7 +215,7 @@ Alternative Twilio webhook that returns JSON instead of TwiML. Useful for testin
 **Response:** Same as `/query` endpoint
 
 ## 🔄 RAG Workflow Steps
-
+          "http://localhost:8001/query/stream",
 The application follows this workflow:
 
 1. **Receive Query** - Accept user's question via API
