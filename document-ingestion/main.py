@@ -393,6 +393,51 @@ async def get_document(document_id: str):
         raise HTTPException(status_code=500, detail=f"Retrieval failed: {str(e)}")
 
 
+@app.get("/documents/{document_id}/embeddings")
+async def get_document_embeddings(document_id: str):
+    """
+    Return the number of embeddings/chunks stored in ChromaDB for a document
+    and a small sample of chunk metadata (no full chunk text to avoid large payloads).
+    """
+    logger.info(f"Embeddings query requested for document: {document_id}")
+
+    try:
+        chunks = await vector_store.get_by_document_id(document_id)
+
+        if not chunks:
+            return JSONResponse(content={
+                "status": "success",
+                "document_id": document_id,
+                "embeddings_count": 0,
+                "sample": []
+            })
+
+        # Build a small sample with id, chunk_index, total_chunks and a short snippet
+        sample = []
+        for c in chunks[:5]:
+            meta = c.get("metadata", {})
+            snippet = c.get("document")
+            if snippet:
+                snippet = snippet[:160].replace("\n", " ")
+            sample.append({
+                "id": c.get("id"),
+                "chunk_index": meta.get("chunk_index"),
+                "total_chunks": meta.get("total_chunks"),
+                "snippet": snippet
+            })
+
+        return JSONResponse(content={
+            "status": "success",
+            "document_id": document_id,
+            "embeddings_count": len(chunks),
+            "sample": sample
+        })
+
+    except Exception as e:
+        logger.error(f"Error retrieving embeddings for {document_id}: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Embeddings retrieval failed: {str(e)}")
+
+
 @app.get("/search")
 async def search_documents(query: str, limit: int = 10):
     """

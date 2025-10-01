@@ -31,7 +31,12 @@ class VectorStore:
         # development runs with --reload can keep DB/log files outside the
         # watched source tree (preventing continuous reloads).
         if persist_directory is None:
-            persist_directory = os.environ.get("CHROMA_PERSIST_DIR", "./chroma_db")
+            try:
+                base_dir = os.path.dirname(os.path.abspath(__file__))
+            except NameError:
+                base_dir = os.getcwd()
+            persist_directory = os.path.join(base_dir, "..", "chroma_db")
+            persist_directory = os.path.normpath(persist_directory)
 
         try:
             logger.info(f"Initializing ChromaDB at {persist_directory}")
