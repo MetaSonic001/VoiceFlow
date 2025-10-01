@@ -427,6 +427,12 @@ Answer:"""
                     "type": "content",
                     "content": "I don't have enough information in my knowledge base to answer that question. Please ask something related to the documents I have access to."
                 }
+                # Send an explicit empty sources event so clients expecting a sources event
+                # always receive a consistent event stream format.
+                yield {
+                    "type": "sources",
+                    "sources": []
+                }
                 yield {
                     "type": "end",
                     "metadata": {
@@ -444,6 +450,13 @@ Answer:"""
             logger.info("[STREAM] Streaming answer generation...")
             
             full_answer = ""
+            # Emit an immediate (possibly empty) content chunk so clients receive
+            # a 'content' event quickly and can measure time-to-first-byte even
+            # when the LLM doesn't stream incrementally.
+            yield {
+                "type": "content",
+                "content": ""
+            }
             for chunk in self.generate_answer_stream(prompt):
                 full_answer += chunk
                 yield {
@@ -566,7 +579,15 @@ async def query_stream_endpoint(request: QueryRequest):
                 "data": json.dumps({"type": "error", "error": str(e)})
             }
     
-    return EventSourceResponse(event_generator())
+    # Explicitly set media_type and disable buffering so clients receive SSE events promptly
+    return EventSourceResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no"
+        }
+    )
 
 @app.post("/webhook/twilio")
 async def twilio_webhook(request: Request):
@@ -649,4 +670,4 @@ async def twilio_webhook_json(request: Request):
 # ========================
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8001)

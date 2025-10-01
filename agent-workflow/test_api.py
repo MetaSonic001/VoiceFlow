@@ -10,7 +10,8 @@ from typing import Dict, Any
 from urllib.parse import urlencode
 
 # Configuration
-BASE_URL = "http://localhost:8000"
+# Default API URL for the RAG Agent Workflow app (agent-workflow runs on port 8001)
+BASE_URL = "http://localhost:8001"
 TEST_QUERIES = [
     "What information do you have?",
     "Tell me about the documents in your knowledge base",
@@ -546,12 +547,6 @@ def run_all_tests():
         ("Empty Query", test_empty_query),
         ("Streaming Endpoint", test_streaming_endpoint),
         ("Streaming vs Regular", test_streaming_vs_regular),
-        ("Twilio JSON Webhook", test_twilio_webhook_json),
-        ("Twilio TwiML Webhook", test_twilio_webhook_twiml),
-        ("Performance", test_performance),
-        ("Edge Cases", test_edge_cases),
-    ]: test_query_endpoint(TEST_QUERIES[1])),
-        ("Empty Query", test_empty_query),
         ("Twilio JSON Webhook", test_twilio_webhook_json),
         ("Twilio TwiML Webhook", test_twilio_webhook_twiml),
         ("Performance", test_performance),
