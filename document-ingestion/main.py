@@ -191,7 +191,7 @@ async def process_document(
         if not extracted_text or len(extracted_text.strip()) == 0:
             raise HTTPException(status_code=400, detail="No text could be extracted from the document")
         
-        # Step 2: Store original document in Supabase/Postgres
+    # Step 2: Store original document in Postgres
         logger.info("Storing original document in database")
         document_id = await db_manager.store_document(
             filename=filename,

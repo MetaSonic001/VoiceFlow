@@ -4,10 +4,10 @@ Utility to check document status and embeddings for a given document ID.
 Usage (from project root):
     python tools\check_document.py 6b9d6cd8-17c8-490c-a0e8-ccac76118a3f
 
-This will print the Supabase document record (status, metadata) and the
+This will print the document record (status, metadata) from Postgres and the
 number of chunks/embeddings found in ChromaDB for that document.
 
-Make sure your environment variables (SUPABASE_URL, SUPABASE_KEY, CHROMA_PERSIST_DIR)
+Make sure your environment variables (POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD, CHROMA_PERSIST_DIR)
 are set or provide a .env in the project root. Run this with the same Python
 environment you use for the ingestion service.
 """
@@ -40,7 +40,7 @@ async def main(document_id: str):
     db = DatabaseManager()
     vs = VectorStore()
 
-    # Fetch document metadata from Supabase/Postgres
+    # Fetch document metadata from Postgres
     print("Querying database for document metadata...")
     try:
         doc = await db.get_document(document_id)

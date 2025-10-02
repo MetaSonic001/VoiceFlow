@@ -8,7 +8,7 @@ A comprehensive FastAPI service for ingesting documents, images, PDFs, and URLs 
 - 📄 **OCR Processing**: Uses docTR for high-quality OCR on images and PDFs
 - 🌐 **Advanced Web Scraping**: Powered by Crawl4AI with support for JavaScript, pagination, and dynamic content
 - 🧠 **Vector Embeddings**: Generates embeddings using Sentence Transformers
-- 💾 **Dual Storage**: Original documents in Supabase, embeddings in ChromaDB
+- 💾 **Dual Storage**: Original documents in local Postgres (Docker), embeddings in ChromaDB
 - 🔌 **Webhook Ready**: Designed for easy integration with external services
 - 📊 **Full Logging**: Comprehensive logging for monitoring and debugging
 - 🎯 **Modular Design**: Easy to extend and customize
@@ -17,16 +17,16 @@ A comprehensive FastAPI service for ingesting documents, images, PDFs, and URLs 
 
 ```
 Upload → File Detection → Processing (OCR/Scraping) → Chunking → Embedding → Storage
-                                                                              ├── Supabase (Original)
+                                                                              ├── Postgres (Original)
                                                                               └── ChromaDB (Vectors)
 ```
 
 ## Installation
 
-### Prerequisites
+-### Prerequisites
 
 - Python 3.9+
-- PostgreSQL (via Supabase)
+- Docker & docker-compose (we provide a compose file to run Postgres locally)
 - System dependencies for python-magic:
   - **Ubuntu/Debian**: `sudo apt-get install libmagic1`
   - **macOS**: `brew install libmagic`
@@ -56,19 +56,19 @@ cp .env.example .env
 # Edit .env with your credentials
 ```
 
-5. **Create Supabase table**:
+5. **Create Postgres table** (the service will auto-create this on first run, but here's the SQL):
 ```sql
 CREATE TABLE documents (
-    id UUID PRIMARY KEY,
-    filename TEXT NOT NULL,
-    file_type TEXT NOT NULL,
-    file_size INTEGER,
-    content TEXT,  -- Base64 encoded
-    metadata JSONB,
-    status TEXT DEFAULT 'processing',
-    error_message TEXT,
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
+  id TEXT PRIMARY KEY,
+  filename TEXT,
+  file_type TEXT,
+  file_size BIGINT,
+  content BYTEA,
+  metadata JSONB,
+  status TEXT,
+  error_message TEXT,
+  created_at TIMESTAMP,
+  updated_at TIMESTAMP
 );
 
 CREATE INDEX idx_documents_status ON documents(status);

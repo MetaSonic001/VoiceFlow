@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-doc_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-doc_password}
+      POSTGRES_DB: ${POSTGRES_DB:-documents_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
+    name: document_ingestion_postgres_data

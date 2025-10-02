@@ -19,7 +19,7 @@ torch
 chromadb
 
 # Database
-supabase
+asyncpg
 
 # File type detection
 python-magic
