@@ -1,3 +1,28 @@
+# agent-workflow specific ignores
+
+# Environment files
+.env
+.env.local
+
+# ChromaDB persistent store
+chroma_db/
+
+# Vosk model directory
+models/
+
+# Test audio and simulator artifacts
+test_audio/
+
+# Logs
+ingestion_logs/
+*.log
+
+# Python caches
+__pycache__/
+*.py[cod]
+
+# VS Code
+.vscode/
 # Byte-compiled / caching
 __pycache__/
 *.py[cod]

@@ -21,3 +21,8 @@ python-dotenv
 requests
 numpy
 typing-extensions
+vosk
+soundfile
+twilio
+websockets
+aiohttp

@@ -501,9 +501,17 @@ def test_streaming_vs_regular():
         for line in response.iter_lines():
             if line and first_chunk_time is None:
                 decoded_line = line.decode('utf-8')
-                if 'data:' in decoded_line and '"type":"content"' in decoded_line:
-                    first_chunk_time = time.time()
-                    break
+                # Look for SSE data lines and attempt to parse JSON robustly
+                if 'data:' in decoded_line:
+                    try:
+                        data_str = decoded_line.split('data:', 1)[1].strip()
+                        data = json.loads(data_str)
+                        if data.get('type') == 'content':
+                            first_chunk_time = time.time()
+                            break
+                    except Exception:
+                        # If parsing fails, continue reading lines
+                        continue
         
         if first_chunk_time:
             ttfb = (first_chunk_time - start) * 1000
