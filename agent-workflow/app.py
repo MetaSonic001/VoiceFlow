@@ -52,6 +52,42 @@ def _safe_truncate(text: str, length: int = 300) -> str:
     return t
 
 
+def _sanitize_reply_for_customer(text: str, max_length: int = 600) -> str:
+    """Sanitize model answers for customer-facing TwiML output.
+
+    - Remove explicit 'Document N' citations (e.g., 'According to Document 1')
+    - Strip URLs to avoid reading long links in TTS
+    - Collapse whitespace and truncate to max_length
+    """
+    if not text:
+        return ""
+    t = str(text)
+    try:
+        import re
+
+        # Remove common citation patterns like 'According to Document 1,' or 'Document 2:'
+        t = re.sub(r"(?i)according to\s+document\s+\d+[:,]?\s*", "", t)
+        t = re.sub(r"(?i)document\s+\d+[:,]?\s*", "", t)
+
+        # Remove any URLs (http(s):// or www.)
+        t = re.sub(r"https?://\S+", "", t)
+        t = re.sub(r"www\.\S+", "", t)
+
+        # Remove stray file-sharing links or parentheses that include urls
+        t = re.sub(r"\[.*?https?://.*?\]", "", t)
+
+        # Collapse whitespace
+        t = re.sub(r"\s+", " ", t).strip()
+
+        # Truncate safely
+        if len(t) > max_length:
+            t = t[:max_length].rsplit(' ', 1)[0] + '...'
+    except Exception:
+        # Fallback: simple truncation
+        t = t[:max_length]
+    return t
+
+
 def log_interaction(source: str, session_id: Optional[str], user_text: str, reply_text: str, extra: Optional[Dict[str, Any]] = None):
     """Structured log for voice/SSE/WebSocket interactions.
 
@@ -81,6 +117,16 @@ app = FastAPI(
     description="A RAG-based agent that searches vector database and generates contextual answers",
     version="1.0.0"
 )
+
+# In-memory dedupe cache for Twilio speech webhooks to avoid processing
+# duplicate SpeechResult posts (Twilio may retry or deliver duplicates).
+# Keys are (call_sid, speech_hash). Values are the epoch timestamp when
+# the event was processed. Entries older than SPEECH_DEDUPE_WINDOW_SEC are
+# pruned lazily.
+processed_speech_cache = {}
+# window in seconds to consider duplicate requests
+SPEECH_DEDUPE_WINDOW_SEC = int(os.getenv('SPEECH_DEDUPE_WINDOW_SEC', '5'))
+processed_cache_lock = asyncio.Lock()
 
 # ========================
 # Configuration
@@ -704,20 +750,11 @@ Answer:"""
             try:
                 canned_msg = "I don't have enough information in my knowledge base to answer that question."
                 if isinstance(raw_answer, str) and canned_msg in raw_answer and search_results.get('found'):
-                    # Pick first document preview (truncate to a reasonable length)
-                    top_doc = search_results.get('documents', [None])[0]
-                    if top_doc:
-                        preview = top_doc[:600] + ('...' if len(top_doc) > 600 else '')
-                        # Append a concise note and the preview to the answer
-                        formatted['answer'] = (formatted.get('answer', '').strip() +
-                                               "\n\nNote: I found the following relevant excerpt in my documents which may help:\n" +
-                                               preview)
-                        # Annotate metadata so callers/logs know we patched the reply
-                        if 'metadata' not in locals():
-                            metadata = {}
-                        # We'll add a flag into the response metadata below when returning
-                        # by adding to timings as a lightweight signal
-                        timings['fallback_included_top_preview'] = True
+                    # We found documents but the LLM declined to answer. Instead
+                    # of appending raw previews into the reply (which can contain
+                    # links or long content), we simply mark a flag in timings so
+                    # callers/logs can detect this case and act accordingly.
+                    timings['fallback_retrieval_found_but_llm_refused'] = True
             except Exception:
                 logger.exception("Failed to append top-source preview to canned answer")
             
@@ -1136,6 +1173,31 @@ async def twilio_voice_result(request: Request):
         form = await request.form()
         speech_text = form.get('SpeechResult', '')
         caller = form.get('From')
+        call_sid = form.get('CallSid') or form.get('CallSid'.lower())
+
+        # De-duplicate near-duplicate webhook deliveries: normalize the
+        # speech_text and use (call_sid, caller, normalized_text) as key.
+        norm = (speech_text or '').strip().lower()
+        cache_key = (call_sid, caller, norm)
+        now_ts = time.time()
+        try:
+            async with processed_cache_lock:
+                # Prune old entries
+                expired = [k for k, v in processed_speech_cache.items() if now_ts - v > SPEECH_DEDUPE_WINDOW_SEC]
+                for k in expired:
+                    processed_speech_cache.pop(k, None)
+
+                if cache_key in processed_speech_cache:
+                    logger.info(f"Duplicate SpeechResult received for call {call_sid}; skipping processing")
+                    # Return an empty Response (no Say) to avoid re-speaking
+                    # the same reply. Twilio will accept the 200 and not retry.
+                    empty_twiml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Response></Response>"
+                    return Response(content=empty_twiml, media_type="application/xml")
+
+                # Mark as processed
+                processed_speech_cache[cache_key] = now_ts
+        except Exception:
+            logger.exception("Failed to check/process dedupe cache; proceeding with processing")
 
         logger.info(f"Received SpeechResult from Twilio: {speech_text}")
 
@@ -1183,7 +1245,9 @@ async def twilio_voice_result(request: Request):
         # Build TwiML that speaks the answer and then re-gathers to continue
         # the conversation. If the answer is long, Twilio will speak it.
         # Note: keep Say content reasonably short to avoid long blocking TTS.
-        safe_answer = answer.replace('&', 'and')[:600]  # basic sanitization/truncation
+        # Sanitize the answer for Twilio TTS: strip doc citations, URLs, and
+        # truncate to a safe length. Also replace ampersands to avoid XML issues.
+        safe_answer = _sanitize_reply_for_customer(answer, max_length=600).replace('&', 'and')
 
         twiml = (
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
