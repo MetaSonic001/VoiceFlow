@@ -30,6 +30,20 @@ import os as _os
 import uuid
 import time
 from twilio.rest import Client as TwilioRestClient
+# Hybrid retrieval imports
+from typing import List, Dict, Any
+# Import summarizer and whoosh from the document-ingestion services package
+try:
+    ingestion_path = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', 'document-ingestion'))
+    if ingestion_path not in sys.path:
+        sys.path.insert(0, ingestion_path)
+    from services.summarizer import Summarizer
+    from services.whoosh_index import WhooshIndex
+except Exception:
+    # If import fails, set to None and log later when attempted
+    Summarizer = None  # type: ignore
+    WhooshIndex = None  # type: ignore
+import numpy as np
 
 # Load environment variables
 load_dotenv()
@@ -142,6 +156,12 @@ class Config:
     # we will nudge the LLM to use the retrieved context and avoid
     # returning the canned 'I don't have enough information' reply.
     RETRIEVAL_CONFIDENCE_THRESHOLD = float(os.getenv("RETRIEVAL_CONFIDENCE_THRESHOLD", "0.5"))
+    # How many of the top-ranked documents to summarize (lazy summarization)
+    SUMMARIZE_TOP_K = int(os.getenv("SUMMARIZE_TOP_K", "3"))
+    # Maximum number of candidates to rerank (keeps latency bounded)
+    MAX_RERANK_CANDIDATES = int(os.getenv("MAX_RERANK_CANDIDATES", "10"))
+    # Dense embedding model to use for fast retrieval (MiniLM L6 is a good tradeoff)
+    DENSE_EMBEDDING_MODEL = os.getenv("DENSE_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
 
     @classmethod
     def validate(cls):
@@ -230,11 +250,27 @@ class RAGAgent:
                     sys.path.insert(0, ingestion_path)
                 from services.embedder import TextEmbedder
                 # Instantiate embedder (loads SentenceTransformer model)
-                self.embedder = TextEmbedder()
+                # Use a fast MiniLM model for low-latency retrieval
+                self.embedder = TextEmbedder(model_name=Config.DENSE_EMBEDDING_MODEL)
                 logger.info("TextEmbedder initialized for agent (shared embedding model)")
             except Exception as e:
                 logger.warning(f"Failed to initialize shared TextEmbedder: {e}")
                 self.embedder = None
+            # Initialize summarizer
+            try:
+                # prefer a small CPU-friendly summarizer
+                self.summarizer = Summarizer()
+            except Exception:
+                logger.exception("Failed to initialize summarizer; summaries will be passthrough")
+                self.summarizer = None
+
+            # Initialize Whoosh index wrapper for BM25 (uses document-ingestion whoosh index)
+            try:
+                whoosh_dir = os.path.join(Config.CHROMA_DB_PATH, 'whoosh_index')
+                self.whoosh = WhooshIndex(whoosh_dir)
+            except Exception:
+                logger.exception("Failed to initialize Whoosh index wrapper; BM25 disabled")
+                self.whoosh = None
             
             # Initialize Groq client
             self.groq_client = Groq(api_key=Config.GROQ_API_KEY)
@@ -503,24 +539,191 @@ class RAGAgent:
                 "metadatas": [r["metadata"] for r in filtered_results],
                 "distances": [r["distance"] for r in filtered_results]
             }
-
         except Exception as e:
             logger.error(f"Error during async vector search: {e}")
             raise
+
+    def _cosine_sim(self, a: List[float], b: List[float]) -> float:
+        try:
+            a_arr = np.array(a, dtype=np.float32)
+            b_arr = np.array(b, dtype=np.float32)
+            # normalize
+            if np.linalg.norm(a_arr) == 0 or np.linalg.norm(b_arr) == 0:
+                return 0.0
+            return float(np.dot(a_arr, b_arr) / (np.linalg.norm(a_arr) * np.linalg.norm(b_arr)))
+        except Exception:
+            return 0.0
+
+    def hybrid_retrieve_and_rerank(self, query: str, top_k_bm25: int = 3, top_k_dense: int = 3) -> Dict[str, Any]:
+        """Run BM25 and dense retrieval, union the top results, dedupe, limit to a bounded
+        number of candidates, rerank by cosine similarity using the embedder, and lazily
+        summarize only the top N results to keep latency low.
+
+        Behavior:
+        - BM25 top_k_bm25 + dense top_k_dense are retrieved
+        - unioned (BM25 first), duplicates removed by exact text
+        - candidates capped to Config.MAX_RERANK_CANDIDATES (<=10)
+        - compute cosine between query embedding and candidate embeddings
+        - sort descending and return up to MAX_RERANK_CANDIDATES results
+        - summarize only top Config.SUMMARIZE_TOP_K documents (lazy summarization)
+        """
+        timings = {}
+        t0 = time.time()
+
+        # 1) BM25
+        bm25_results = []
+        if self.whoosh:
+            try:
+                bm25_results = self.whoosh.search(query, top_k_bm25)
+            except Exception:
+                logger.exception("BM25 search failed")
+                bm25_results = []
+        t1 = time.time()
+        timings['bm25_ms'] = int((t1 - t0) * 1000)
+
+        # 2) Dense
+        dense_results = []
+        q_emb = None
+        if self.embedder and hasattr(self.embedder, 'model'):
+            try:
+                q_emb_raw = self.embedder.model.encode(
+                    query,
+                    show_progress_bar=False,
+                    convert_to_numpy=True
+                )
+                # flatten to 1D list
+                if hasattr(q_emb_raw, 'tolist'):
+                    q_vec = q_emb_raw.tolist()
+                    if isinstance(q_vec, list) and len(q_vec) > 0 and isinstance(q_vec[0], list):
+                        q_emb = q_vec[0]
+                    else:
+                        q_emb = q_vec
+                else:
+                    q_emb = list(q_emb_raw)
+            except Exception:
+                logger.exception("Query embedding failed")
+                q_emb = None
+
+        if q_emb is not None:
+            try:
+                dense_raw = self.collection.query(
+                    query_embeddings=[q_emb],
+                    n_results=top_k_dense,
+                    include=['documents', 'metadatas', 'distances']
+                )
+                if dense_raw and dense_raw.get('documents'):
+                    docs = dense_raw['documents'][0]
+                    metas = dense_raw.get('metadatas', [[]])[0]
+                    for i, doc in enumerate(docs):
+                        dense_results.append({'document': doc, 'metadata': metas[i] if metas else {}, 'source': 'dense'})
+            except Exception:
+                logger.exception("Dense retrieval failed")
+        t2 = time.time()
+        timings['dense_ms'] = int((t2 - t1) * 1000)
+
+        # 3) Union BM25 + Dense (BM25 first), dedupe by exact text
+        combined = []
+        seen_texts = set()
+        for r in bm25_results:
+            txt = r.get('document', '')
+            if not txt or txt in seen_texts:
+                continue
+            seen_texts.add(txt)
+            combined.append({'document': txt, 'metadata': r.get('metadata', {}), 'source': 'bm25'})
+        for r in dense_results:
+            txt = r.get('document', '')
+            if not txt or txt in seen_texts:
+                continue
+            seen_texts.add(txt)
+            combined.append({'document': txt, 'metadata': r.get('metadata', {}), 'source': 'dense'})
+        # 4) Cap candidates to a bounded number for reranking
+        # Keep the candidate set small to bound latency
+        max_candidates = max(1, int(getattr(Config, 'MAX_RERANK_CANDIDATES', 10)))
+        candidates = combined[: max_candidates]
+
+        # 5) Compute document embeddings for candidates and cosine with query
+        reranked = []
+        if q_emb is not None and self.embedder and candidates:
+            try:
+                docs_texts = [c['document'] for c in candidates]
+                doc_embs_raw = self.embedder.model.encode(
+                    docs_texts,
+                    show_progress_bar=False,
+                    convert_to_numpy=True
+                )
+                if hasattr(doc_embs_raw, 'tolist'):
+                    doc_embs = doc_embs_raw.tolist()
+                else:
+                    doc_embs = [list(e) for e in doc_embs_raw]
+
+                for doc, emb in zip(candidates, doc_embs):
+                    sim = self._cosine_sim(q_emb, emb)
+                    reranked.append({'document': doc['document'], 'metadata': doc.get('metadata', {}), 'score': sim})
+            except Exception:
+                logger.exception('Reranking failed using embedder')
+
+        # Fallback if reranking failed
+        if not reranked and candidates:
+            reranked = [{'document': c['document'], 'metadata': c.get('metadata', {}), 'score': 0.0} for c in candidates]
+
+        # Sort and trim to configured maximum
+        reranked.sort(key=lambda x: x.get('score', 0.0), reverse=True)
+        final = reranked[: max_candidates]
+
+        t3 = time.time()
+        timings['rerank_ms'] = int((t3 - t2) * 1000)
+
+        # 6) Lazy summarization: only summarize top SUMMARIZE_TOP_K results
+        summaries = []
+        try:
+            top_texts = [f"{i+1}. {r['document']}" for i, r in enumerate(final[: Config.SUMMARIZE_TOP_K])]
+            if self.summarizer and top_texts:
+                summaries_top = self.summarizer.summarize(top_texts, max_length=120)
+            else:
+                summaries_top = [t[:300] for t in top_texts]
+
+            # Fill summaries array aligning with final results: summarized top-N and raw previews for the rest
+            for i, r in enumerate(final):
+                if i < len(summaries_top):
+                    summaries.append(summaries_top[i])
+                else:
+                    txt = r['document']
+                    summaries.append(txt[:300])
+        except Exception:
+            logger.exception('Summarization failed; using raw texts')
+            summaries = [r['document'][:300] for r in final]
+
+        return {
+            'documents': [r['document'] for r in final],
+            'metadatas': [r.get('metadata', {}) for r in final],
+            'scores': [r.get('score', 0.0) for r in final],
+            'summaries': summaries,
+            'timings': timings,
+            'found': bool(final)
+        }
     
     def build_rag_prompt(self, query: str, search_results: Dict[str, Any]) -> str:
         """
         Step 3.2: Build RAG prompt with context from search results
         """
-        if not search_results["found"]:
+        # Support both legacy search_results (with 'found' boolean) and
+        # hybrid results which contain 'summaries' and 'documents'.
+        if not search_results:
             return None
-        
-        # Build context from retrieved documents
-        context_parts = []
-        for i, doc in enumerate(search_results["documents"], 1):
-            context_parts.append(f"Document {i}:\n{doc}\n")
-        
-        context = "\n".join(context_parts)
+
+        # If summaries are present (hybrid retrieval), use them as compressed context
+        if isinstance(search_results, dict) and search_results.get('summaries'):
+            context = "\n".join([f"Summary {i+1}: {s}" for i, s in enumerate(search_results.get('summaries', []))])
+        else:
+            # Build context from retrieved documents (legacy format)
+            try:
+                docs = search_results.get('documents') if isinstance(search_results, dict) else search_results['documents']
+            except Exception:
+                return None
+            context_parts = []
+            for i, doc in enumerate(docs, 1):
+                context_parts.append(f"Document {i}:\n{doc}\n")
+            context = "\n".join(context_parts)
         
         # Build the prompt
         prompt = f"""You are a helpful assistant that answers questions based ONLY on the provided context.
@@ -620,21 +823,44 @@ Answer:"""
             "answer": answer.strip(),
             "sources": []
         }
-        
-        # Add source information
-        if search_results["found"]:
-            for i, (doc, meta, dist) in enumerate(zip(
-                search_results["documents"],
-                search_results["metadatas"],
-                search_results["distances"]
-            ), 1):
-                source = {
-                    "document_number": i,
-                    "similarity_score": round(1 - dist, 3),  # Convert distance to similarity
-                    "metadata": meta,
-                    "preview": doc[:200] + "..." if len(doc) > 200 else doc
-                }
-                formatted["sources"].append(source)
+        # Add source information when available. Support both legacy and hybrid formats.
+        try:
+            if isinstance(search_results, dict) and search_results.get('documents'):
+                # If distances present (legacy), convert to similarity
+                if search_results.get('distances'):
+                    for i, (doc, meta, dist) in enumerate(zip(
+                        search_results.get('documents', []),
+                        search_results.get('metadatas', []),
+                        search_results.get('distances', [])
+                    ), 1):
+                        sim = None
+                        try:
+                            sim = round(1 - float(dist), 3) if dist is not None else None
+                        except Exception:
+                            sim = None
+                        source = {
+                            "document_number": i,
+                            "similarity_score": sim,
+                            "metadata": meta,
+                            "preview": doc[:200] + "..." if len(doc) > 200 else doc
+                        }
+                        formatted["sources"].append(source)
+                # If hybrid 'scores' exist (reranker), use them
+                elif search_results.get('scores'):
+                    for i, (doc, meta, score) in enumerate(zip(
+                        search_results.get('documents', []),
+                        search_results.get('metadatas', []),
+                        search_results.get('scores', [])
+                    ), 1):
+                        source = {
+                            "document_number": i,
+                            "similarity_score": round(float(score), 3) if score is not None else None,
+                            "metadata": meta,
+                            "preview": doc[:200] + "..." if len(doc) > 200 else doc
+                        }
+                        formatted["sources"].append(source)
+        except Exception:
+            logger.exception("Failed to format sources from search_results")
         
         return formatted
     
@@ -659,12 +885,13 @@ Answer:"""
             # Step 3: Search embeddings
             logger.info("[STEP 3.1] Searching vector database...")
             t2 = datetime.now()
-            search_results = self.search_embeddings(processed_query)
+            search_results = self.hybrid_retrieve_and_rerank(processed_query, top_k_bm25=3, top_k_dense=3)
             t3 = datetime.now()
             timings['vector_search_ms'] = int((t3 - t2).total_seconds() * 1000)
             
             # Check if we found relevant documents
-            if not search_results["found"]:
+            # hybrid_retrieve returns a dict with 'documents' list; treat empty as not found
+            if not search_results or not search_results.get('documents'):
                 logger.warning("No relevant documents found")
                 return QueryResponse(
                     success=True,
@@ -682,7 +909,18 @@ Answer:"""
             # Step 3.2: Build RAG prompt
             logger.info("[STEP 3.2] Building RAG prompt...")
             t4 = datetime.now()
-            prompt = self.build_rag_prompt(processed_query, search_results)
+            # Build RAG prompt using summaries (compressed) when available
+            try:
+                summaries = search_results.get('summaries') if isinstance(search_results, dict) else None
+                if summaries:
+                    # Build a condensed context from summaries
+                    context = "\n".join([f"Summary {i+1}: {s}" for i, s in enumerate(summaries)])
+                    prompt = f"""You are a helpful assistant that answers questions based ONLY on the provided context.\n\nContext summaries from knowledge base:\n{context}\n\nInstructions:\n1. Answer the question using ONLY information from the context above\n2. If the context doesn't contain enough information to answer the question, say \"I don't have enough information in my knowledge base to answer that question.\"\n3. Do not make up or infer information that isn't explicitly in the context\n4. Be concise and accurate\n5. Do NOT include raw document URLs or citations in the spoken response\n\nQuestion: {processed_query}\n\nAnswer:"""
+                else:
+                    prompt = self.build_rag_prompt(processed_query, search_results)
+            except Exception:
+                logger.exception('Failed to build prompt from summaries; falling back to full context')
+                prompt = self.build_rag_prompt(processed_query, search_results)
             # Compute top similarity (if distances are present) so we can
             # decide whether to instruct the LLM more strongly to use the
             # retrieved context. Distances returned by Chroma are used to
@@ -749,14 +987,12 @@ Answer:"""
             # where the LLM declines to answer even though retrieval found text.
             try:
                 canned_msg = "I don't have enough information in my knowledge base to answer that question."
-                if isinstance(raw_answer, str) and canned_msg in raw_answer and search_results.get('found'):
-                    # We found documents but the LLM declined to answer. Instead
-                    # of appending raw previews into the reply (which can contain
-                    # links or long content), we simply mark a flag in timings so
-                    # callers/logs can detect this case and act accordingly.
+                if isinstance(raw_answer, str) and canned_msg in raw_answer and (isinstance(search_results, dict) and search_results.get('documents')):
+                    # Do not append previews in customer-facing output; set metadata flag
+                    logger.info("LLM returned canned refusal but retrieval found documents; setting metadata flag")
                     timings['fallback_retrieval_found_but_llm_refused'] = True
             except Exception:
-                logger.exception("Failed to append top-source preview to canned answer")
+                logger.exception("Failed to detect canned LLM refusal with retrieval present")
             
             # Step 5: Return response
             logger.info("[STEP 5] Returning response")
@@ -815,10 +1051,10 @@ Answer:"""
             t1 = datetime.now()
             timings['process_query_ms'] = int((t1 - t0).total_seconds() * 1000)
 
-            # Step 3: Search embeddings (async non-blocking for encode)
-            logger.info("[STREAM] Searching vector database (async)...")
+            # Step 3: Hybrid retrieval (BM25 + dense) - do sync call (fast)
+            logger.info("[STREAM] Running hybrid retrieval (BM25 + dense)...")
             t2 = datetime.now()
-            search_results = await self.search_embeddings_async(processed_query)
+            search_results = self.hybrid_retrieve_and_rerank(processed_query, top_k_bm25=3, top_k_dense=3)
             t3 = datetime.now()
             timings['vector_search_ms'] = int((t3 - t2).total_seconds() * 1000)
 
@@ -847,7 +1083,9 @@ Answer:"""
             # useful context quickly while the LLM generates the full answer.
             # Sending this before prompt build reduces time-to-first-byte.
             try:
-                preview_text = "".join([f"Document {i+1}: {d[:200]}\n" for i, d in enumerate(search_results.get('documents', [])[:3])])
+                # Send compressed summaries as preview if available
+                previews = search_results.get('summaries') or []
+                preview_text = "\n".join(previews[:3])
                 yield {"type": "content", "content": preview_text}
             except Exception:
                 yield {"type": "content", "content": ""}

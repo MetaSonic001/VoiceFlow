@@ -100,33 +100,78 @@ class VectorStore:
         logger.info(f"Storing {len(embeddings)} embeddings for document {document_id}")
         
         try:
-            # Prepare IDs for each chunk
-            ids = [f"{document_id}_chunk_{i}" for i in range(len(chunks))]
-            
-            # Prepare metadata for each chunk
-            metadatas = []
-            for i, chunk in enumerate(chunks):
+            # Deduplicate near-identical chunks before inserting.
+            # Use a simple cosine threshold on the provided embeddings.
+            import numpy as np
+
+            unique_chunks = []
+            unique_embeddings = []
+            unique_metadatas = []
+            ids = []
+
+            def _cosine(a, b):
+                a = np.array(a, dtype=np.float32)
+                b = np.array(b, dtype=np.float32)
+                if np.linalg.norm(a) == 0 or np.linalg.norm(b) == 0:
+                    return 0.0
+                return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
+
+            for i, (chunk, emb) in enumerate(zip(chunks, embeddings)):
+                # Skip empty chunks
+                if not chunk or not chunk.strip():
+                    continue
+
+                is_dup = False
+                for u_emb in unique_embeddings:
+                    try:
+                        if _cosine(u_emb, emb) >= 0.95:
+                            is_dup = True
+                            break
+                    except Exception:
+                        continue
+
+                if is_dup:
+                    continue
+
+                uid = f"{document_id}_chunk_{i}"
+                ids.append(uid)
+                unique_chunks.append(chunk)
+                unique_embeddings.append(emb)
                 chunk_metadata = {
                     "document_id": document_id,
                     "chunk_index": i,
-                    "chunk_text": chunk[:500],  # Store first 500 chars
+                    "chunk_text": chunk[:500],
                     "total_chunks": len(chunks),
                     "timestamp": datetime.now().isoformat(),
                     **metadata
                 }
-                metadatas.append(chunk_metadata)
-            
+                unique_metadatas.append(chunk_metadata)
+
+            if not unique_chunks:
+                logger.info("No unique chunks to store after deduplication")
+                return
+
             # Add to collection
             self.collection.add(
                 ids=ids,
-                embeddings=embeddings,
-                documents=chunks,
-                metadatas=metadatas
+                embeddings=unique_embeddings,
+                documents=unique_chunks,
+                metadatas=unique_metadatas
             )
-            
-            logger.info(f"Successfully stored {len(embeddings)} embeddings")
+
+            # If Whoosh index is present in the repo, update it for BM25
+            try:
+                from services.whoosh_index import WhooshIndex
+                whoosh_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', 'chroma_db', 'whoosh_index'))
+                wi = WhooshIndex(whoosh_dir)
+                wi.add_documents(ids, unique_chunks, unique_metadatas)
+            except Exception:
+                # Whoosh optional; ignore failures here
+                pass
+
+            logger.info(f"Successfully stored {len(unique_embeddings)} unique embeddings")
             logger.info(f"Total documents in collection: {self.collection.count()}")
-        
+
         except Exception as e:
             logger.error(f"Error storing embeddings: {e}", exc_info=True)
             raise

@@ -274,7 +274,30 @@ The application follows this workflow:
 6. **Format Answer** - Structure response with sources
 7. **Return Response** - Send formatted answer to client
 
-## 🔗 Twilio Integration
+## � Hybrid Retriever (BM25 + Dense) — NEW
+
+This project now includes a simple hybrid retrieval pipeline to improve recall and accuracy:
+
+- Sparse retrieval: Whoosh (BM25) — catches keyword matches that embeddings may miss.
+- Dense retrieval: ChromaDB (embeddings) — catches semantic matches.
+- Rerank: locally compute cosine similarity between query embedding and candidate document embeddings and sort by score.
+- Summarization: retrieved chunks are compressed using a small summarizer (transformers pipeline if installed) before being included in the LLM prompt. This lets the LLM see more signal with fewer tokens.
+
+Configuration (see `.env.example`):
+
+- `ENABLE_BM25` (true/false) — enable Whoosh-based BM25.
+- `BM25_TOP_K` — top-k for BM25 (default: 3).
+- `DENSE_TOP_K` — top-k for dense retrieval (default: 3).
+- `USE_SUMMARIZER` — if true and `transformers` is installed, the app will summarize retrieved chunks; otherwise it will safely truncate.
+
+Benefits:
+
+- Better recall: keyword matches + semantic matches.
+- Smaller prompts: summarization compresses the context.
+- Faster and more accurate answers with small top_k (3–5).
+
+
+## �🔗 Twilio Integration
 
 ### Setting Up Twilio
 
