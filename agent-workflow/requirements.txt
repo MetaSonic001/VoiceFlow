@@ -32,7 +32,6 @@ whoosh
 transformers  # optional but recommended for better summarization
 sentence-transformers  # ensure embedder compatibility
 pyngrok
-cross-encoder
  
 # Optional OCR / scraping helpers (recommended for full ingestion features)
 pdf2image
