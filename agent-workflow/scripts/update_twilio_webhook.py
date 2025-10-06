@@ -1,5 +1,6 @@
 from pyngrok import ngrok
 from twilio.rest import Client
+from twilio.base.exceptions import TwilioRestException
 import time
 import os
 import sys
@@ -93,6 +94,13 @@ def update_number_webhook(account_sid: str, auth_token: str, phone_sid: str, voi
         client.incoming_phone_numbers(phone_sid).update(**update_args)
         print(f"✓ Updated phone SID {phone_sid} with: {update_args}")
         return True
+    except TwilioRestException as e:
+        print("Failed to update Twilio phone number webhook:")
+        try:
+            print(f"Twilio error {e.status} code={e.code}: {e.msg}")
+        except Exception:
+            print(str(e))
+        return False
     except Exception as e:
         print(f"Failed to update Twilio phone number webhook: {e}")
         return False
@@ -120,8 +128,25 @@ def main():
 
     client = Client(account_sid, auth_token)
 
-    # Determine phone SID
+    # Determine phone SID. If an env-provided phone SID exists, validate
+    # that it's owned by the account; otherwise, prompt the user to choose.
     phone_sid = env_phone_sid
+    if phone_sid:
+        try:
+            client.incoming_phone_numbers(phone_sid).fetch()
+            print(f"Using TWILIO_PHONE_SID from environment: {phone_sid}")
+        except TwilioRestException as e:
+            print(f"TWILIO_PHONE_SID from env appears invalid or not owned by this account: {phone_sid}")
+            try:
+                print(f"Twilio error {e.status} code={e.code}: {e.msg}")
+            except Exception:
+                print(str(e))
+            print("Falling back to interactive phone selection...")
+            phone_sid = None
+        except Exception as e:
+            print(f"Failed to validate TWILIO_PHONE_SID: {e}")
+            phone_sid = None
+
     if not phone_sid:
         phone_sid = choose_phone_number(client)
         if not phone_sid:
