@@ -167,7 +167,8 @@ class Config:
     MAX_RERANK_CANDIDATES = int(os.getenv("MAX_RERANK_CANDIDATES", "10"))
     # Dense embedding model to use for fast retrieval
     # Default upgraded to all-mpnet-base-v2 for better semantic quality
-    DENSE_EMBEDDING_MODEL = os.getenv("DENSE_EMBEDDING_MODEL", "all-mpnet-base-v2")
+    # Default to a 384-dim MiniLM model to match existing Chroma collections
+    DENSE_EMBEDDING_MODEL = os.getenv("DENSE_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
     # Cross-encoder reranker model (optional - toggled via USE_CROSS_RERANK)
     CROSS_RERANK_MODEL = os.getenv("CROSS_RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
 
@@ -411,6 +412,47 @@ class RAGAgent:
                 for idx, txt in to_compute:
                     emb = await self._embed_text_async(txt)
                     results[idx] = emb
+
+        return results
+
+    def _embed_texts(self, texts: List[str]):
+        """Sync version of batch embedder that leverages the cache where possible.
+
+        Mirrors the behavior of _embed_texts_async but runs synchronously and is
+        used in non-async code paths (e.g., hybrid_retrieve_and_rerank).
+        """
+        results = [None] * len(texts)
+        to_compute = []  # (index, text)
+        for i, t in enumerate(texts):
+            key = f"t:{t}"
+            cached = self._cache_get(key)
+            if cached is not None:
+                results[i] = cached
+            else:
+                to_compute.append((i, t))
+
+        if to_compute and self.embedder and hasattr(self.embedder, 'model'):
+            batch_texts = [t for (_, t) in to_compute]
+            try:
+                emb_batch = self.embedder.model.encode(batch_texts, show_progress_bar=False, convert_to_numpy=True)
+                if hasattr(emb_batch, 'tolist'):
+                    emb_list_batch = emb_batch.tolist()
+                else:
+                    emb_list_batch = [list(e) for e in emb_batch]
+
+                for (idx, _), emb_vec in zip(to_compute, emb_list_batch):
+                    if isinstance(emb_vec, list) and len(emb_vec) > 0 and isinstance(emb_vec[0], list):
+                        emb_vec = emb_vec[0]
+                    results[idx] = emb_vec
+                    self._cache_set(f"t:{texts[idx]}", emb_vec)
+            except Exception:
+                logger.exception('Batch embedding failed; falling back to per-item compute (sync)')
+                for idx, txt in to_compute:
+                    try:
+                        emb = self._embed_text(txt)
+                        results[idx] = emb
+                    except Exception:
+                        logger.exception('Per-item embedding failed during fallback (sync)')
 
         return results
 

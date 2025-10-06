@@ -60,3 +60,10 @@ dist/
 
 # Ignore local VS Code settings folder
 .vscode/
+
+# Pending documents directory and all its contents
+/pending_documents/
+/pending_documents/**
+
+# legacy pattern
+./pending_documents*

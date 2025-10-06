@@ -95,7 +95,7 @@ ENABLE_OUTBOUND_TTS=false
 FFMPEG_REQUIRED=true
 
 # Retrieval / embedding / rerank
-DENSE_EMBEDDING_MODEL=all-mpnet-base-v2
+DENSE_EMBEDDING_MODEL=all-MiniLM-L6-v2
 USE_CROSS_RERANK=false
 CROSS_RERANK_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2
 CROSS_RERANK_TOP_K=5
@@ -121,7 +121,7 @@ Environment Variable Descriptions
 | `CHROMA_DB_PATH` | Yes | `./chroma_db` | Path to your ChromaDB persistent storage (must contain the collection). |
 | `COLLECTION_NAME` | No | `documents` | Name of the ChromaDB collection used by the agent. |
 | `GROQ_MODEL` | No | `llama-3.1-70b-versatile` | Groq model identifier used for generation. |
-| `DENSE_EMBEDDING_MODEL` | No | `all-mpnet-base-v2` | SentenceTransformers model for dense embeddings (recommended). |
+| `DENSE_EMBEDDING_MODEL` | No | `all-MiniLM-L6-v2` | SentenceTransformers model for dense embeddings (recommended, 384-dim). |
 | `EMBED_CACHE_SIZE` | No | `1024` | In-process LRU cache size for embedding vectors (reduces repeated-encode latency). |
 | `USE_CROSS_RERANK` | No | `false` | Toggle cross-encoder reranking (better accuracy, CPU cost). |
 | `CROSS_RERANK_MODEL` | No | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Cross-encoder model used when `USE_CROSS_RERANK=true`. |

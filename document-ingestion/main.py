@@ -20,6 +20,11 @@ from services.web_scraper import WebScraper
 from services.embedder import TextEmbedder
 from services.vector_store import VectorStore
 from services.database import DatabaseManager
+# Optional summarizer (precompute summaries at ingest)
+try:
+    from services.summarizer import Summarizer
+except Exception:
+    Summarizer = None
 
 import asyncio  # Add this import
 
@@ -63,9 +68,65 @@ async def lifespan(app: FastAPI):
     # running the sync in every process when uvicorn reload is enabled.
     # Use the /admin/sync endpoint or a CLI task to trigger sync manually.
 
+    # Attempt to flush any pending filesystem-stored documents into Postgres.
+    # This is safe to call at startup; the flush helper will no-op if Postgres
+    # is still unavailable. Controlled by FLUSH_PENDING_ON_STARTUP env var.
+    try:
+        flush_on_start = os.getenv('FLUSH_PENDING_ON_STARTUP', 'true').lower() in ('1', 'true', 'yes')
+        if flush_on_start:
+            batch = int(os.getenv('FLUSH_PENDING_BATCH_SIZE', '100'))
+            try:
+                # db_manager is initialized later in the module but will be available
+                # by the time the lifespan startup runs.
+                n = await db_manager.flush_pending_documents(batch_size=batch)
+                logger.info(f"Flushed {n} pending documents into Postgres on startup")
+            except Exception:
+                logger.exception("Failed to flush pending documents on startup")
+
+        # Optionally run a periodic background flush task which will attempt
+        # to flush pending documents every PERIODIC_FLUSH_INTERVAL seconds.
+        periodic = os.getenv('PERIODIC_FLUSH', 'false').lower() in ('1', 'true', 'yes')
+        flush_task = None
+        if periodic:
+            interval = int(os.getenv('PERIODIC_FLUSH_INTERVAL', '60'))
+            batch = int(os.getenv('FLUSH_PENDING_BATCH_SIZE', '100'))
+
+            async def _periodic_flush():
+                logger.info(f"Starting periodic pending-docs flush every {interval}s")
+                try:
+                    while True:
+                        await asyncio.sleep(interval)
+                        try:
+                            n = await db_manager.flush_pending_documents(batch_size=batch)
+                            if n:
+                                logger.info(f"Periodic flush inserted {n} pending documents")
+                        except Exception:
+                            logger.exception("Periodic flush failed")
+                except asyncio.CancelledError:
+                    logger.info("Periodic flush task cancelled")
+
+            flush_task = asyncio.create_task(_periodic_flush())
+            # Attach to app state so shutdown can cancel it
+            app.state._flush_task = flush_task
+
+    except Exception:
+        logger.exception("Exception during startup flush setup")
+
     yield  # Run app
     
     # Shutdown (optional)
+    # Cancel periodic flush task if present
+    try:
+        task = getattr(app.state, '_flush_task', None)
+        if task:
+            task.cancel()
+            try:
+                await task
+            except Exception:
+                pass
+    except Exception:
+        logger.exception("Failed to cancel periodic flush task on shutdown")
+
     logger.info("Shutting down app...")
 
 app = FastAPI(
@@ -91,6 +152,15 @@ web_scraper = WebScraper()
 embedder = TextEmbedder()
 vector_store = VectorStore()
 db_manager = DatabaseManager()
+if Summarizer and os.getenv('USE_SUMMARIZER', 'true').lower() in ('1', 'true', 'yes'):
+    try:
+        summarizer = Summarizer()
+        logger.info('Summarizer initialized for ingestion')
+    except Exception:
+        logger.exception('Failed to initialize Summarizer; document summaries will be truncated previews')
+        summarizer = None
+else:
+    summarizer = None
 
 
 # (Removed deprecated @app.on_event startup handler in favor of lifespan scheduling above.)
@@ -108,7 +178,7 @@ async def trigger_sync(background_tasks: BackgroundTasks):
     async def _sync_runner():
         try:
             logger.info("Manual sync triggered via /admin/sync")
-            await vector_store.sync_from_database(db_manager, ocr_processor, web_scraper, embedder, file_detector)
+            await vector_store.sync_from_database(db_manager, ocr_processor, web_scraper, embedder, file_detector, summarizer=summarizer)
             logger.info("Manual sync completed successfully")
         except Exception as e:
             logger.error(f"Manual sync failed: {e}", exc_info=True)
@@ -191,7 +261,22 @@ async def process_document(
         if not extracted_text or len(extracted_text.strip()) == 0:
             raise HTTPException(status_code=400, detail="No text could be extracted from the document")
         
-    # Step 2: Store original document in Postgres
+        # Precompute a document-level summary to speed up RAG prompt construction later
+        try:
+            if summarizer and extracted_text and len(extracted_text.strip()) > 0:
+                try:
+                    doc_summary = summarizer.summarize([extracted_text], max_length=200)[0]
+                except Exception:
+                    logger.exception('Summarizer failed; falling back to truncated preview')
+                    doc_summary = extracted_text.replace('\n', ' ')[:200]
+            else:
+                doc_summary = extracted_text.replace('\n', ' ')[:200]
+            metadata['document_summary'] = doc_summary
+        except Exception:
+            logger.exception('Failed to compute document summary')
+            metadata['document_summary'] = ''
+
+        # Step 2: Store original document in Postgres
         logger.info("Storing original document in database")
         document_id = await db_manager.store_document(
             filename=filename,

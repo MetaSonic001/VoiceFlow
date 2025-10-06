@@ -297,7 +297,8 @@ class VectorStore:
         ocr_processor: Any,
         web_scraper: Any,
         embedder: Any,
-        file_detector: Any
+        file_detector: Any,
+        summarizer: Any = None
     ) -> None:
         """
         Sync all documents from database to vector store on startup
@@ -339,6 +340,14 @@ class VectorStore:
                     file_type = doc.get("file_type", "unknown") if isinstance(doc, dict) else getattr(doc, "file_type", "unknown")
                     filename = doc.get("filename", "unknown") if isinstance(doc, dict) else getattr(doc, "filename", "unknown")
                     metadata = doc.get("metadata", {}) if isinstance(doc, dict) else {}
+                    # If no precomputed summary is present in metadata, compute one now
+                    if summarizer and not metadata.get('document_summary'):
+                        try:
+                            s = summarizer.summarize([extracted_text], max_length=200)
+                            metadata['document_summary'] = s[0] if isinstance(s, list) and s else s
+                        except Exception:
+                            logger.exception('Failed to compute summary during sync; using truncated preview')
+                            metadata['document_summary'] = extracted_text.replace('\n', ' ')[:200]
                     
                     extracted_text = ""
                     if file_type in ["image", "pdf"]:
