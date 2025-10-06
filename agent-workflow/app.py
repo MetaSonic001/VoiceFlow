@@ -868,25 +868,20 @@ class RAGAgent:
         t3 = time.time()
         timings['rerank_ms'] = int((t3 - t2) * 1000)
 
-        # 6) Lazy summarization: only summarize top SUMMARIZE_TOP_K results
+        # 6) Lightweight summaries: prefer precomputed summaries stored in
+        # each document's metadata to avoid expensive runtime summarization.
+        # This drastically reduces latency by skipping transformer-based
+        # summarization at query time.
         summaries = []
-        try:
-            top_texts = [f"{i+1}. {r['document']}" for i, r in enumerate(final[: Config.SUMMARIZE_TOP_K])]
-            if self.summarizer and top_texts:
-                summaries_top = self.summarizer.summarize(top_texts, max_length=120)
+        for r in final:
+            meta = r.get('metadata', {}) or {}
+            # Support common metadata keys used by the ingestion pipeline
+            doc_summary = meta.get('document_summary') or meta.get('summary')
+            if doc_summary:
+                summaries.append(doc_summary)
             else:
-                summaries_top = [t[:300] for t in top_texts]
-
-            # Fill summaries array aligning with final results: summarized top-N and raw previews for the rest
-            for i, r in enumerate(final):
-                if i < len(summaries_top):
-                    summaries.append(summaries_top[i])
-                else:
-                    txt = r['document']
-                    summaries.append(txt[:300])
-        except Exception:
-            logger.exception('Summarization failed; using raw texts')
-            summaries = [r['document'][:300] for r in final]
+                txt = r.get('document', '') or ''
+                summaries.append(txt[:300])
 
         return {
             'documents': [r['document'] for r in final],
@@ -1274,11 +1269,10 @@ Answer:"""
                     }
                 }
                 return
-            # Emit an immediate retrieval-preview chunk so clients receive
-            # useful context quickly while the LLM generates the full answer.
-            # Sending this before prompt build reduces time-to-first-byte.
+            # Emit an immediate retrieval-preview chunk using precomputed
+            # summaries from metadata so clients receive useful context
+            # quickly while the LLM generates the full answer.
             try:
-                # Send compressed summaries as preview if available
                 previews = search_results.get('summaries') or []
                 preview_text = "\n".join(previews[:3])
                 yield {"type": "content", "content": preview_text}
