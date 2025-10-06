@@ -1075,6 +1075,8 @@ Answer:"""
             # Step 3: Search embeddings
             logger.info("[STEP 3.1] Searching vector database...")
             t2 = datetime.now()
+            # Use lazy agent if called from module context
+            # (support external callers that call process as a function)
             search_results = self.hybrid_retrieve_and_rerank(processed_query, top_k_bm25=3, top_k_dense=3)
             t3 = datetime.now()
             timings['vector_search_ms'] = int((t3 - t2).total_seconds() * 1000)
@@ -1082,17 +1084,24 @@ Answer:"""
             # Check if we found relevant documents
             # hybrid_retrieve returns a dict with 'documents' list; treat empty as not found
             if not search_results or not search_results.get('documents'):
-                logger.warning("No relevant documents found")
+                # No documents found: ask a quick clarifying question to keep
+                # the conversation interactive rather than invoking the LLM.
+                logger.info("No relevant documents found; asking clarifying question")
+                clarifying = (
+                    "I couldn't find any documents related to your question. "
+                    "Could you provide more details or specify which document/area you mean?"
+                )
                 return QueryResponse(
                     success=True,
                     query=query,
-                    answer="I don't have enough information in my knowledge base to answer that question. Please ask something related to the documents I have access to.",
+                    answer=clarifying,
                     sources=[],
                     timestamp=datetime.now().isoformat(),
                     metadata={
                         "user_id": user_id,
                         "processing_time_ms": int((datetime.now() - start_time).total_seconds() * 1000),
-                        "documents_found": 0
+                        "documents_found": 0,
+                        "clarifying_question": True
                     }
                 )
             
@@ -1132,26 +1141,33 @@ Answer:"""
             except Exception:
                 pass
 
-            # If the top similarity meets or exceeds the configured threshold,
-            # add an explicit instruction in the prompt to prioritize using the
-            # provided context and to avoid replying with a canned refusal.
+            # If retrieval confidence is low, ask a clarifying question instead
+            # of invoking the LLM immediately. This keeps the agent conversational
+            # and avoids unnecessary LLM latency when user clarification can
+            # resolve the ambiguity.
             try:
-                if top_similarity is not None and top_similarity >= Config.RETRIEVAL_CONFIDENCE_THRESHOLD:
-                    # Strong, explicit instruction when retrieval confidence is high.
-                    # For a customer-facing assistant we want short, relevant answers
-                    # using the retrieved context. Do NOT mention or cite document
-                    # identifiers; respond in concise, customer-friendly language.
-                    prompt += (
-                        f"\n\n[RETRIEVAL_CONFIDENCE={top_similarity:.2f}] IMPORTANT: The context above is highly relevant. "
-                        "Answer the user's question directly and succinctly using ONLY the provided context. "
-                        "Do not mention or cite document names, numbers, or sources. "
-                        "If the information needed is present in the context, provide it in a short, customer-facing sentence or two. "
-                        "If the retrieved content is ambiguous or conflicting, give a concise summary of the key points without referencing which document said what. "
-                        "Only use a refusal like 'I don't have enough information' if the answer truly cannot be found in the provided context."
+                if top_similarity is None or top_similarity < Config.RETRIEVAL_CONFIDENCE_THRESHOLD:
+                    logger.info(f"Top similarity {top_similarity} below threshold; asking clarifying question instead of LLM to save time")
+                    clarifying = (
+                        "I found some related content but I'm not confident it's enough to answer accurately. "
+                        "Could you provide more specifics or rephrase your question?"
                     )
-                    logger.info(f"Top retrieval similarity {top_similarity:.3f} >= threshold; applying strong prompt instruction to use context (no citations)")
+                    return QueryResponse(
+                        success=True,
+                        query=query,
+                        answer=clarifying,
+                        sources=[],
+                        timestamp=datetime.now().isoformat(),
+                        metadata={
+                            "user_id": user_id,
+                            "processing_time_ms": int((datetime.now() - start_time).total_seconds() * 1000),
+                            "documents_found": len(search_results.get('documents', [])),
+                            "top_similarity": top_similarity,
+                            "clarifying_question": True
+                        }
+                    )
             except Exception:
-                logger.exception("Failed to adjust prompt for retrieval confidence")
+                logger.exception("Failed to decide on clarifying question path")
 
             t5 = datetime.now()
             timings['prompt_build_ms'] = int((t5 - t4).total_seconds() * 1000)
@@ -1250,24 +1266,16 @@ Answer:"""
 
             # Check if we found relevant documents
             if not search_results["found"]:
-                logger.warning("No relevant documents found")
-                yield {
-                    "type": "content",
-                    "content": "I don't have enough information in my knowledge base to answer that question. Please ask something related to the documents I have access to."
-                }
-                # Send an explicit empty sources event so clients expecting a sources event
-                # always receive a consistent event stream format.
-                yield {
-                    "type": "sources",
-                    "sources": []
-                }
-                yield {
-                    "type": "end",
-                    "metadata": {
-                        "processing_time_ms": int((datetime.now() - start_time).total_seconds() * 1000),
-                        "documents_found": 0
-                    }
-                }
+                logger.info("No relevant documents found (stream); asking clarifying question")
+                yield {"type": "content", "content": (
+                    "I couldn't find any documents related to your question. Could you provide more details or specify which document/area you mean?"
+                )}
+                yield {"type": "sources", "sources": []}
+                yield {"type": "end", "metadata": {
+                    "processing_time_ms": int((datetime.now() - start_time).total_seconds() * 1000),
+                    "documents_found": 0,
+                    "clarifying_question": True
+                }}
                 return
             # Emit an immediate retrieval-preview chunk using precomputed
             # summaries from metadata so clients receive useful context
@@ -1279,9 +1287,31 @@ Answer:"""
             except Exception:
                 yield {"type": "content", "content": ""}
 
+            # Compute top similarity; if low, ask clarifying question instead
+            t4 = datetime.now()
+            try:
+                dlist = search_results.get('distances')
+                top_similarity = None
+                if dlist and len(dlist) > 0 and dlist[0] is not None:
+                    top_similarity = 1.0 - float(dlist[0])
+            except Exception:
+                top_similarity = None
+
+            if top_similarity is None or top_similarity < Config.RETRIEVAL_CONFIDENCE_THRESHOLD:
+                logger.info("Top similarity below threshold (stream); sending clarifying question to client")
+                yield {"type": "content", "content": (
+                    "I found some content related to your question but I'm not confident it's sufficient to answer accurately. Can you provide more details or rephrase?"
+                )}
+                yield {"type": "end", "metadata": {
+                    "processing_time_ms": int((datetime.now() - start_time).total_seconds() * 1000),
+                    "documents_found": len(search_results.get('documents', [])),
+                    "top_similarity": top_similarity,
+                    "clarifying_question": True
+                }}
+                return
+
             # Step 3.2: Build RAG prompt
             logger.info("[STREAM] Building RAG prompt...")
-            t4 = datetime.now()
             prompt = self.build_rag_prompt(processed_query, search_results)
             t5 = datetime.now()
             timings['prompt_build_ms'] = int((t5 - t4).total_seconds() * 1000)
@@ -1334,14 +1364,27 @@ Answer:"""
             }
 
 # ========================
-# Initialize Agent
+# Lazy Agent initialization
+# Initialize the agent on first use to avoid heavy startup work during
+# module import (model downloads, Chroma open, etc.). Call get_agent()
+# to obtain a ready agent instance.
 # ========================
-try:
-    agent = RAGAgent()
-    logger.info("RAG Agent initialized successfully")
-except Exception as e:
-    logger.error(f"Failed to initialize RAG Agent: {e}")
-    agent = None
+agent = None
+_agent_init_lock = threading.Lock()
+
+def get_agent():
+    """Lazily initialize and return the global RAGAgent instance."""
+    global agent
+    if agent is None:
+        with _agent_init_lock:
+            if agent is None:
+                try:
+                    agent = RAGAgent()
+                    logger.info("RAG Agent initialized successfully (lazy)")
+                except Exception as e:
+                    logger.error(f"Failed to initialize RAG Agent: {e}")
+                    agent = None
+    return agent
 
 # ========================
 # API Endpoints
