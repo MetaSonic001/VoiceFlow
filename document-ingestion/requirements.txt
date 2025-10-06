@@ -36,3 +36,8 @@ numpy
 libmagic
 python-magic-bin
 whoosh
+ 
+# Optional helpers for OCR and scraping
+pdf2image
+opencv-python-headless
+beautifulsoup4

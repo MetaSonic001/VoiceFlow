@@ -71,33 +71,106 @@ set USE_MEDIA_STREAM=true
 ```
 
 
+
 ### 2. Set Up Environment Variables
 
-Create a `.env` file in the same directory as the application:
+Create a `.env` file in the same directory as the application. The project uses several environment variables to control retrieval, embedding, Twilio integration, and media streaming behavior. Below is a comprehensive list of supported environment variables and recommended defaults.
+
+Example `.env` (minimal):
 
 ```env
 # Required
 GROQ_API_KEY=your_groq_api_key_here
-CHROMA_DB_PATH=/path/to/your/chroma_db
+CHROMA_DB_PATH=./chroma_db
 
-# Optional (defaults provided)
-COLLECTION_NAME=documents
-GROQ_MODEL=llama-3.1-70b-versatile
-  MAX_RESULTS=3
-  SIMILARITY_THRESHOLD=0.3
+# Twilio (for webhook automation or REST updates)
+TWILIO_ACCOUNT_SID=your_twilio_account_sid
+TWILIO_AUTH_TOKEN=your_twilio_auth_token
+TWILIO_PHONE_SID=your_twilio_phone_resource_sid
+
+# Feature toggles and models
+USE_MEDIA_STREAM=false
+TWILIO_PUBLIC_WS=wss://your-ngrok-or-domain/ws/twilio-media   # Public wss URL used in TwiML Start/Stream
+ENABLE_OUTBOUND_TTS=false
+FFMPEG_REQUIRED=true
+
+# Retrieval / embedding / rerank
+DENSE_EMBEDDING_MODEL=all-mpnet-base-v2
+USE_CROSS_RERANK=false
+CROSS_RERANK_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2
+CROSS_RERANK_TOP_K=5
+EMBED_CACHE_SIZE=1024
+
+# Optional tuning
+MAX_RESULTS=3
+SIMILARITY_THRESHOLD=0.3
+RETRIEVAL_CONFIDENCE_THRESHOLD=0.5
+SUMMARIZE_TOP_K=3
+MAX_RERANK_CANDIDATES=10
+
+# Local model paths
+VOSK_MODEL_PATH=./models/vosk-model
+
 ```
 
-#### Environment Variable Descriptions:
+Environment Variable Descriptions
 
 | Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `GROQ_API_KEY` | ✅ Yes | - | Your Groq API key from [console.groq.com](https://console.groq.com) |
-| `CHROMA_DB_PATH` | ✅ Yes | `./chroma_db` | Path to your ChromaDB persistent storage |
-| `COLLECTION_NAME` | ❌ No | `documents` | Name of the ChromaDB collection to use |
-| `GROQ_MODEL` | ❌ No | `llama-3.1-70b-versatile` | Groq model to use for generation |
-| `MAX_RESULTS` | ❌ No | `3` | Maximum number of documents to retrieve |
-| `SIMILARITY_THRESHOLD` | ❌ No | `0.3` | Minimum similarity score (0-1) for results |
-| `USE_MEDIA_STREAM` | ❌ No | `false` | Toggle Media Streams behavior. When `true` and `TWILIO_PUBLIC_WS` is set, `/webhook/twilio/voice` will return a `<Start><Stream/>` TwiML to enable Twilio Media Streams. |
+|---|---:|---|---|
+| `GROQ_API_KEY` | Yes | - | Your Groq API key used for LLM inference. |
+| `CHROMA_DB_PATH` | Yes | `./chroma_db` | Path to your ChromaDB persistent storage (must contain the collection). |
+| `COLLECTION_NAME` | No | `documents` | Name of the ChromaDB collection used by the agent. |
+| `GROQ_MODEL` | No | `llama-3.1-70b-versatile` | Groq model identifier used for generation. |
+| `DENSE_EMBEDDING_MODEL` | No | `all-mpnet-base-v2` | SentenceTransformers model for dense embeddings (recommended). |
+| `EMBED_CACHE_SIZE` | No | `1024` | In-process LRU cache size for embedding vectors (reduces repeated-encode latency). |
+| `USE_CROSS_RERANK` | No | `false` | Toggle cross-encoder reranking (better accuracy, CPU cost). |
+| `CROSS_RERANK_MODEL` | No | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Cross-encoder model used when `USE_CROSS_RERANK=true`. |
+| `CROSS_RERANK_TOP_K` | No | `5` | How many candidates to rerank with the cross-encoder. |
+| `MAX_RESULTS` | No | `3` | How many results to ask ChromaDB for by default. |
+| `SIMILARITY_THRESHOLD` | No | `0.3` | Minimum similarity for a result to be considered relevant. |
+| `RETRIEVAL_CONFIDENCE_THRESHOLD` | No | `0.5` | Threshold used to nudge the LLM to prioritize retrieved context. |
+| `SUMMARIZE_TOP_K` | No | `3` | How many top documents to summarize (saves tokens). |
+| `MAX_RERANK_CANDIDATES` | No | `10` | Maximum candidate documents to consider for reranking. |
+| `USE_MEDIA_STREAM` | No | `false` | If `true`, `/webhook/twilio/voice` will return TwiML `<Start><Stream url="..."/>` to instruct Twilio to open a Media Stream. |
+| `TWILIO_PUBLIC_WS` or `MEDIA_STREAM_WS_URL` | Cond. | - | Public wss URL (for example from ngrok) that Twilio should connect to for Media Streams. Example: `wss://<ngrok-id>.ngrok.io/ws/twilio-media`. Either var name is accepted by the code; prefer `TWILIO_PUBLIC_WS` for backward-compat. |
+| `ENABLE_OUTBOUND_TTS` | No | `false` | If `true`, the agent will synthesize TTS locally (pyttsx3/ffmpeg) and stream audio back to Twilio via the media websocket when possible. |
+| `FFMPEG_REQUIRED` | No | `true` | If `true`, the code will prefer `ffmpeg` for audio conversion/resampling (recommended for quality and reliability). |
+| `VOSK_MODEL_PATH` | No | `./models/vosk-model` | Path to a local Vosk ASR model (used by the local ASR PoC). |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_SID` | No | - | Required if you want the webhook update automation script or REST call updates to the live call to work. |
+
+Notes:
+- `EMBED_CACHE_SIZE` controls the in-memory LRU cache capacity for embeddings. Increase if you have RAM and many repeated queries; decrease for memory-constrained environments.
+- `USE_CROSS_RERANK` enables a CrossEncoder (sentence-transformers) reranker which improves ranking quality but adds CPU cost and model download time.
+- `ENABLE_OUTBOUND_TTS` assumes `pyttsx3` (or another TTS) and `ffmpeg` are available; otherwise the agent falls back to updating the live call to play Twilio `<Say>`.
+- `TWILIO_PUBLIC_WS` should point to a publicly reachable wss endpoint that Twilio can open. When using ngrok, form the wss URL by replacing `https://` with `wss://` and appending `/ws/twilio-media` (or using the `scripts/update_twilio_webhook.py` helper described below).
+
+Installing system dependencies (Windows)
+-------------------------------------
+
+Two system tools are often required for the full ingestion and media pipeline:
+
+- poppler (used by `pdf2image` to convert PDF pages to images)
+- ffmpeg (used for audio decoding/resampling and TTS conversion)
+
+Windows installation steps (brief):
+
+1. Poppler for Windows
+  - Download a compiled poppler binary (e.g. from: https://github.com/oschwartz10612/poppler-windows/releases).
+  - Extract the archive and place the `bin` folder on your PATH, or add the extracted `bin` directory to your Windows PATH environment variable.
+  - Verify: open a command prompt and run `pdftoppm -h` (or `pdftoppm --version`).
+
+2. FFmpeg
+  - Download a static build for Windows from https://ffmpeg.org/download.html (links point to gyan.dev or BtbN builds) or from https://www.gyan.dev/ffmpeg/builds/.
+  - Extract the archive and add the extracted `bin` folder to your PATH.
+  - Verify: open a command prompt and run `ffmpeg -version`.
+
+Notes and tips:
+- After adding poppler/ffmpeg to PATH, restart your terminal/IDE so the PATH change is picked up.
+- If you prefer a portable setup, set the environment variable `POPPLER_PATH` to the poppler `bin` folder and point your `pdf2image` calls to it.
+- On Windows, you may also prefer `opencv-python-headless` (already added to requirements) to avoid GUI dependencies.
+
+If you want, I can add a small troubleshooting section with exact links and step-by-step screenshots for Windows.
+
 
 ### 3. Prepare Your ChromaDB
 
@@ -583,3 +656,19 @@ For issues or questions:
 - Monitor Groq API for model updates
 - Regularly backup your ChromaDB data
 - Review logs for performance optimization opportunities
+
+## OCR & Scraper Enhancements (added)
+
+This project now includes improved document ingestion features focused on OCR and web scraping. Highlights:
+
+- Page-level parallel OCR for PDFs (faster)
+- Image preprocessing (deskew, binarize, contrast, morphological ops)
+- Structured OCR outputs (text + bounding boxes)
+- Improved pagination detection and infinite-scroll support
+- Respect robots.txt by default, with rate-limiting and retry/backoff
+- Optional ingestion pipeline: chunk -> embed -> upsert to ChromaDB
+
+Environment variables controlling these features are documented in `.env.example`. Use them to tune chunk sizes, rate limits, and whether scraped content is automatically ingested.
+
+For large crawls, run dedicated workers for scraping and ingestion and use the ingestion manifest (generated per run) to track checksums and counts.
+
