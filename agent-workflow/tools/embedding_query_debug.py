@@ -1,4 +1,6 @@
 import os
+from dotenv import load_dotenv
+load_dotenv()
 import sys
 import numpy as np
 from chromadb.config import Settings

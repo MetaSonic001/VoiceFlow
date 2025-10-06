@@ -3,6 +3,10 @@ from twilio.rest import Client
 import time
 import os
 import sys
+from dotenv import load_dotenv
+
+# Load .env automatically so users don't need to export env vars manually
+load_dotenv()
 
 
 # Usage: set TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN env vars.

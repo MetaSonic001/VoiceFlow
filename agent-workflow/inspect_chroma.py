@@ -3,6 +3,8 @@ Quick script to inspect the Chroma DB used by the agent-workflow service.
 Run from the repository root: python .\agent-workflow\inspect_chroma.py
 """
 import os
+from dotenv import load_dotenv
+load_dotenv()
 import sys
 import json
 from pathlib import Path
