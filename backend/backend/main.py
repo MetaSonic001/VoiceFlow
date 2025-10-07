@@ -1,5 +1,6 @@
 from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, BackgroundTasks, Security, Request
 from fastapi.responses import JSONResponse
+from fastapi import Request
 from pydantic import BaseModel
 from .db import get_session
 from .models import Tenant, Agent, Document
@@ -40,6 +41,9 @@ load_dotenv()
 import logging
 logger = logging.getLogger('backend')
 logging.basicConfig(level=logging.INFO)
+
+import httpx
+AGENT_RUNNER_URL = os.getenv('AGENT_RUNNER_URL', 'http://localhost:8110')
 
 # Simple in-memory metrics
 metrics = {
@@ -369,6 +373,131 @@ async def trigger_ingest(document_id: str, background_tasks: BackgroundTasks):
             raise HTTPException(404, 'Document not found')
         schedule_ingestion(background_tasks, str(doc.id), doc.file_path, str(doc.agent_id), str(doc.tenant_id))
         return {'status': 'scheduled'}
+
+
+    ### Agent-runner proxy endpoints (backend as orchestrator)
+    async def _forward_to_runner(request: Request, method: str, path: str, json_body=None):
+        """Forward an incoming request to the configured agent-runner service.
+
+        Preserves Authorization header if present.
+        Returns parsed JSON or raises HTTPException on failure.
+        """
+        headers = {}
+        auth = request.headers.get('authorization')
+        if auth:
+            headers['Authorization'] = auth
+
+        url = AGENT_RUNNER_URL.rstrip('/') + path
+        async with httpx.AsyncClient() as client:
+            try:
+                resp = await client.request(method, url, json=json_body, headers=headers, timeout=30.0)
+            except Exception as e:
+                raise HTTPException(status_code=502, detail=f"Failed to contact agent-runner: {e}")
+
+        if resp.status_code >= 400:
+            # attempt to forward runner's error message
+            try:
+                data = resp.json()
+            except Exception:
+                data = {'detail': resp.text}
+            raise HTTPException(status_code=resp.status_code, detail=data)
+
+        try:
+            return resp.json()
+        except Exception:
+            return {'result': resp.text}
+
+
+    @app.get('/runner/agents')
+    async def runner_list_agents(request: Request):
+        return await _forward_to_runner(request, 'GET', '/agents')
+
+
+    @app.post('/runner/agents')
+    async def runner_create_agent(request: Request):
+        payload = await request.json()
+        return await _forward_to_runner(request, 'POST', '/agents', json_body=payload)
+
+
+    @app.get('/runner/pipelines')
+    async def runner_list_pipelines(request: Request):
+        return await _forward_to_runner(request, 'GET', '/pipelines')
+
+
+    @app.post('/runner/pipelines')
+    async def runner_create_pipeline(request: Request):
+        payload = await request.json()
+        return await _forward_to_runner(request, 'POST', '/pipelines', json_body=payload)
+
+
+    @app.post('/runner/pipelines/{pipeline_id}/trigger')
+    async def runner_trigger_pipeline(pipeline_id: int, request: Request):
+        payload = None
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        return await _forward_to_runner(request, 'POST', f'/pipelines/{pipeline_id}/trigger', json_body=payload)
+
+
+    @app.get('/runner/agents/{agent_id}')
+    async def runner_get_agent(agent_id: int, request: Request):
+        return await _forward_to_runner(request, 'GET', f'/agents/{agent_id}')
+
+
+    @app.put('/runner/agents/{agent_id}')
+    async def runner_update_agent(agent_id: int, request: Request):
+        payload = await request.json()
+        return await _forward_to_runner(request, 'PUT', f'/agents/{agent_id}', json_body=payload)
+
+
+    @app.delete('/runner/agents/{agent_id}')
+    async def runner_delete_agent(agent_id: int, request: Request):
+        return await _forward_to_runner(request, 'DELETE', f'/agents/{agent_id}')
+
+
+    @app.post('/runner/agents/{agent_id}/pause')
+    async def runner_pause_agent(agent_id: int, request: Request):
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        return await _forward_to_runner(request, 'POST', f'/agents/{agent_id}/pause', json_body=payload)
+
+
+    @app.post('/runner/agents/{agent_id}/activate')
+    async def runner_activate_agent(agent_id: int, request: Request):
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        return await _forward_to_runner(request, 'POST', f'/agents/{agent_id}/activate', json_body=payload)
+
+
+    @app.get('/runner/pipelines/{pipeline_id}')
+    async def runner_get_pipeline(pipeline_id: int, request: Request):
+        return await _forward_to_runner(request, 'GET', f'/pipelines/{pipeline_id}')
+
+
+    @app.put('/runner/pipelines/{pipeline_id}')
+    async def runner_update_pipeline(pipeline_id: int, request: Request):
+        payload = await request.json()
+        return await _forward_to_runner(request, 'PUT', f'/pipelines/{pipeline_id}', json_body=payload)
+
+
+    @app.delete('/runner/pipelines/{pipeline_id}')
+    async def runner_delete_pipeline(pipeline_id: int, request: Request):
+        return await _forward_to_runner(request, 'DELETE', f'/pipelines/{pipeline_id}')
+
+
+    @app.get('/runner/health')
+    async def runner_health(request: Request):
+        return await _forward_to_runner(request, 'GET', '/health')
+
+
+    @app.get('/runner/metrics')
+    async def runner_metrics(request: Request):
+        return await _forward_to_runner(request, 'GET', '/metrics')
 
 
 class PipelineAgentCreate(BaseModel):

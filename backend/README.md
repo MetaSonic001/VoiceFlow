@@ -150,3 +150,16 @@ Notes and caveats
 - The agent-runner now uses a `run_coro_sync` helper to safely call async ingestion functions from synchronous CrewAI tool code.
 
 For quick local development, check the `.env.example` files in each service folder (FastAPI, agent-runner, frontend, and document-ingestion) for the minimum env variables required to run that component.
+
+### Backend orchestration and agent-runner proxy
+
+- The backend now exposes a small set of proxy endpoints under `/runner/*` that forward requests to the configured `AGENT_RUNNER_URL` (set via env). This makes the backend the canonical orchestrator for triggering pipelines and creating/listing runner agents. Example endpoints:
+        - `GET /runner/agents` — list runner agents
+        - `POST /runner/agents` — create a runner agent
+        - `GET /runner/pipelines` — list pipelines
+        - `POST /runner/pipelines` — create pipeline
+        - `POST /runner/pipelines/{pipeline_id}/trigger` — trigger pipeline (body forwarded)
+
+- The frontend has been updated to call these `/runner/*` endpoints on the backend instead of contacting the agent-runner service directly. This centralizes auth (backend can validate tokens) and lets the backend control orchestration, retries and logging.
+
+Set `AGENT_RUNNER_URL` in your backend `.env` to point to the running agent-runner service (for example `http://localhost:8110`). The backend will forward requests and preserve the Authorization header when present.

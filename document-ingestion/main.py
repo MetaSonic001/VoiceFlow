@@ -717,4 +717,4 @@ if __name__ == "__main__":
     import uvicorn
     # Start uvicorn without auto-reload to avoid multi-process reload issues.
     logger.info("Starting uvicorn without reload (python main.py)")
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
+    uvicorn.run("main:app", host="0.0.0.0", port=8002, reload=False)

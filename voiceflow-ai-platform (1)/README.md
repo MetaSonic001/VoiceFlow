@@ -12,7 +12,6 @@ Environment (.env.example)
 
 # Frontend – copy to `.env.local`
 NEXT_PUBLIC_API_URL=http://localhost:8000
-NEXT_PUBLIC_AGENT_RUNNER_URL=http://localhost:8100
 NEXT_PUBLIC_PUBLIC_BASE_URL=http://localhost:3000
 
 Quick start (Windows cmd.exe)

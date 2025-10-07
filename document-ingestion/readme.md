@@ -116,7 +116,7 @@ Upload and process any file (image, PDF, or text file with URL).
 
 **Request:**
 ```bash
-curl -X POST "http://localhost:8000/ingest" \
+curl -X POST "http://localhost:8002/ingest" \
   -F "file=@document.pdf"
 ```
 
@@ -165,7 +165,7 @@ Webhook endpoint for external services (same functionality as `/ingest`).
 
 **Request:**
 ```bash
-curl -X POST "http://localhost:8000/webhook/upload" \
+curl -X POST "http://localhost:8002/webhook/upload" \
   -F "file=@image.jpg"
 ```
 

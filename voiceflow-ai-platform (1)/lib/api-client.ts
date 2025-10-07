@@ -1,6 +1,7 @@
 // API Client Configuration and Utilities
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-const AGENT_RUNNER_URL = process.env.NEXT_PUBLIC_AGENT_RUNNER_URL || "http://localhost:8110"
+// Runner requests are proxied through the backend orchestrator
+const AGENT_RUNNER_URL = undefined
 
 export class ApiError extends Error {
   constructor(
@@ -218,40 +219,29 @@ class ApiClient {
     })
   }
 
-  // Agent-runner service client (separate service)
-  private async runnerRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    const url = `${AGENT_RUNNER_URL}${endpoint}`
-    const cfg: RequestInit = { headers: { 'Content-Type': 'application/json', ...options.headers }, ...options }
-    // pass through auth token
-    const token = localStorage.getItem('auth_token')
-    if (token) cfg.headers = { ...cfg.headers, Authorization: `Bearer ${token}` }
-    const res = await fetch(url, cfg)
-    if (!res.ok) throw new ApiError('Runner error', res.status, await res.json().catch(() => ({})))
-    return await res.json()
-  }
-
+  // Agent-runner operations are proxied through backend endpoints under /runner/*
   async runnerCreateAgent(data: { name: string; agent_type: string; config?: any }) {
-    return this.runnerRequest<{ id: number; name: string }>(`/agents`, { method: 'POST', body: JSON.stringify(data) })
+    return this.request<{ id: number; name: string }>(`/runner/agents`, { method: 'POST', body: JSON.stringify(data) })
   }
 
   async runnerListAgents() {
-    return this.runnerRequest<any[]>(`/agents`)
+    return this.request<any[]>(`/runner/agents`)
   }
 
   async runnerCreatePipeline(data: { name: string; tenant_id?: string; stages: any[] }) {
-    return this.runnerRequest<{ id: number; name: string }>(`/pipelines`, { method: 'POST', body: JSON.stringify(data) })
+    return this.request<{ id: number; name: string }>(`/runner/pipelines`, { method: 'POST', body: JSON.stringify(data) })
   }
 
   async runnerListPipelines() {
-    return this.runnerRequest<any[]>(`/pipelines`)
+    return this.request<any[]>(`/runner/pipelines`)
   }
 
   async runnerTriggerPipeline(pipelineId: number) {
-    return this.runnerRequest<{ message: string }>(`/pipelines/${pipelineId}/trigger`, { method: 'POST', body: JSON.stringify({}) })
+    return this.request<{ message: string }>(`/runner/pipelines/${pipelineId}/trigger`, { method: 'POST', body: JSON.stringify({}) })
   }
 
   async runnerTriggerPipelineWithContext(pipelineId: number, context: any) {
-    return this.runnerRequest<{ message: string }>(`/pipelines/${pipelineId}/trigger`, { method: 'POST', body: JSON.stringify(context) })
+    return this.request<{ message: string }>(`/runner/pipelines/${pipelineId}/trigger`, { method: 'POST', body: JSON.stringify(context) })
   }
 
   async getAgent(agentId: string) {
