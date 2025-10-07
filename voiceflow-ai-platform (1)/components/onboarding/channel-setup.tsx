@@ -14,12 +14,14 @@ import { useToast } from '@/hooks/use-toast'
 
 interface ChannelSetupProps {
   onComplete: (data: any) => void
+  data?: Record<string, any>
+  initialData?: Record<string, any>
 }
 
-export function ChannelSetup({ onComplete }: ChannelSetupProps) {
+export function ChannelSetup({ onComplete, data, initialData }: ChannelSetupProps) {
   const { toast } = useToast()
 
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState(() => ({
     phoneNumber: "",
     chatWidget: {
       enabled: true,
@@ -34,7 +36,8 @@ export function ChannelSetup({ onComplete }: ChannelSetupProps) {
       enabled: false,
       forwardingAddress: "",
     },
-  })
+    ...(initialData?.channels || {}),
+  }))
 
   const [availableNumbers, setAvailableNumbers] = useState<Array<{ sid?: string; phone_number?: string; friendly_name?: string }>>([])
   const [loadingNumbers, setLoadingNumbers] = useState(false)
@@ -56,6 +59,16 @@ export function ChannelSetup({ onComplete }: ChannelSetupProps) {
     load()
     return () => { mounted = false }
   }, [])
+
+  // hydrate from server-provided data if parent passes it later
+  useEffect(() => {
+    if (data?.channels) {
+      setFormData((prev: any) => ({ ...prev, ...data.channels }))
+    }
+    if (data?.phone_number) {
+      setFormData((prev: any) => ({ ...prev, phoneNumber: data.phone_number }))
+    }
+  }, [data])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()

@@ -2,6 +2,9 @@
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import MotionWrapper, { itemVariants } from '@/components/ui/MotionWrapper'
+import { motion } from 'framer-motion'
+import Tilt3D from '@/components/ui/Tilt3D'
 import { Badge } from "@/components/ui/badge"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Phone, MessageSquare, Mail, MoreVertical, Play, Pause, Settings, Trash2 } from "lucide-react"
@@ -56,7 +59,13 @@ export function AgentCard({ agent, onSelect }: AgentCardProps) {
   }
 
   return (
-    <Card className="hover:shadow-md transition-shadow cursor-pointer" onClick={onSelect}>
+    <motion.div
+      variants={itemVariants}
+      whileHover={{ y: -6 }}
+      className="transition-shadow"
+    >
+    <Tilt3D>
+      <Card className="hover:shadow-lg hover:scale-105 transform transition-transform duration-200 cursor-pointer" onClick={onSelect}>
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between">
           <div className="flex-1">
@@ -135,6 +144,8 @@ export function AgentCard({ agent, onSelect }: AgentCardProps) {
         {/* Last Active */}
         <div className="text-xs text-muted-foreground">Last active: {agent.lastActive}</div>
       </CardContent>
-    </Card>
+      </Card>
+    </Tilt3D>
+    </motion.div>
   )
 }

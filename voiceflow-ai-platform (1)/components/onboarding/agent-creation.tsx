@@ -5,6 +5,7 @@ import type React from "react"
 import { useState, useEffect } from "react"
 import { useToast } from '@/hooks/use-toast'
 import { Button } from "@/components/ui/button"
+import MotionWrapper from '@/components/ui/MotionWrapper'
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -13,26 +14,26 @@ import { Bot, Phone, MessageSquare, Mail } from "lucide-react"
 
 interface AgentCreationProps {
   onComplete: (data: any) => void
+  data?: Record<string, any>
+  initialData?: Record<string, any>
 }
 
-export function AgentCreation({ onComplete }: AgentCreationProps) {
-  const [formData, setFormData] = useState({
+export function AgentCreation({ onComplete, data, initialData }: AgentCreationProps) {
+  const [formData, setFormData] = useState(() => ({
     agentName: "",
     role: "",
     description: "",
     channels: [] as string[],
-  })
+    ...(initialData?.agent || {}),
+  }))
   const { toast } = useToast()
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem('onboarding_data')
-      if (raw) {
-        const parsed = JSON.parse(raw)
-        if (parsed.agent) setFormData(parsed.agent)
-      }
-    } catch (e) {}
-  }, [])
+    // If parent provides server data after mount, hydrate form
+    if (data?.agent) {
+      setFormData((prev: any) => ({ ...prev, ...data.agent }))
+    }
+  }, [data])
 
   const channels = [
     { id: "phone", label: "Phone Calls", icon: Phone, description: "Handle inbound and outbound voice calls" },
@@ -45,23 +46,20 @@ export function AgentCreation({ onComplete }: AgentCreationProps) {
     if (checked) {
       setFormData({ ...formData, channels: [...formData.channels, channelId] })
     } else {
-      setFormData({ ...formData, channels: formData.channels.filter((c) => c !== channelId) })
+      setFormData({ ...formData, channels: formData.channels.filter((c: string) => c !== channelId) })
     }
   }
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    try {
-      const raw = localStorage.getItem('onboarding_data')
-      const base = raw ? JSON.parse(raw) : {}
-      localStorage.setItem('onboarding_data', JSON.stringify({ ...base, agent: formData }))
-    } catch (e) {}
+    // Parent wizard handles server persistence; just emit data upward
     toast({ title: 'Agent saved', description: 'Agent details saved locally' })
     onComplete({ agent: formData })
   }
 
   return (
-    <div className="space-y-6">
+    <MotionWrapper>
+      <div className="space-y-6">
       <div className="text-center">
         <Bot className="w-12 h-12 text-accent mx-auto mb-4" />
         <h2 className="text-2xl font-bold mb-2">Create your AI agent</h2>
@@ -139,6 +137,7 @@ export function AgentCreation({ onComplete }: AgentCreationProps) {
           Continue to Knowledge Upload
         </Button>
       </form>
-    </div>
+      </div>
+    </MotionWrapper>
   )
 }

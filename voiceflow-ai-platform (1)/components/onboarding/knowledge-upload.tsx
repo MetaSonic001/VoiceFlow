@@ -10,17 +10,22 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import MotionWrapper from '@/components/ui/MotionWrapper'
+import FeatureCard from '@/components/ui/FeatureCard'
 import { Upload, FileText, Link, Plus, X } from "lucide-react"
+const { useEffect: _useEffect } = require("react")
 
 interface KnowledgeUploadProps {
   onComplete: (data: any) => void
+  data?: Record<string, any>
+  initialData?: Record<string, any>
 }
 
-export function KnowledgeUpload({ onComplete }: KnowledgeUploadProps) {
-  const [uploadedFiles, setUploadedFiles] = useState<File[]>([])
-  const [websites, setWebsites] = useState<string[]>([])
+export function KnowledgeUpload({ onComplete, data, initialData }: KnowledgeUploadProps) {
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>(initialData?.knowledge?.files || [])
+  const [websites, setWebsites] = useState<string[]>(initialData?.knowledge?.websites || [])
   const [newWebsite, setNewWebsite] = useState("")
-  const [faqText, setFaqText] = useState("")
+  const [faqText, setFaqText] = useState(initialData?.knowledge?.faqText || "")
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
   const { toast } = useToast()
@@ -29,6 +34,15 @@ export function KnowledgeUpload({ onComplete }: KnowledgeUploadProps) {
     const files = Array.from(e.target.files || [])
     setUploadedFiles([...uploadedFiles, ...files])
   }
+
+  // hydrate from server-provided data if parent passes it later
+  useEffect(() => {
+    if (data?.knowledge) {
+      setUploadedFiles(data.knowledge.files || [])
+      setWebsites(data.knowledge.websites || [])
+      setFaqText(data.knowledge.faqText || "")
+    }
+  }, [data])
 
   const removeFile = (index: number) => {
     setUploadedFiles(uploadedFiles.filter((_, i) => i !== index))
@@ -66,7 +80,8 @@ export function KnowledgeUpload({ onComplete }: KnowledgeUploadProps) {
   }
 
   return (
-    <div className="space-y-6">
+    <MotionWrapper>
+      <div className="space-y-6">
       <div className="text-center">
         <Upload className="w-12 h-12 text-accent mx-auto mb-4" />
         <h2 className="text-2xl font-bold mb-2">Upload your knowledge base</h2>
@@ -159,24 +174,14 @@ export function KnowledgeUpload({ onComplete }: KnowledgeUploadProps) {
         </Card>
 
         {/* FAQ Text */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Frequently Asked Questions</CardTitle>
-            <CardDescription>Paste your FAQs or common questions and answers</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Textarea
-              placeholder="Q: What are your business hours?
-A: We're open Monday-Friday 9AM-5PM EST.
-
-Q: How do I return a product?
-A: You can return products within 30 days..."
-              value={faqText}
-              onChange={(e) => setFaqText(e.target.value)}
-              rows={8}
-            />
-          </CardContent>
-        </Card>
+        <FeatureCard title="Frequently Asked Questions" icon={<FileText className="w-5 h-5"/>}>
+          <Textarea
+            placeholder={"Q: What are your business hours?\nA: We're open Monday-Friday 9AM-5PM EST.\n\nQ: How do I return a product?\nA: You can return products within 30 days..."}
+            value={faqText}
+            onChange={(e) => setFaqText(e.target.value)}
+            rows={8}
+          />
+        </FeatureCard>
 
         <div>
           {uploadProgress !== null && (
@@ -187,6 +192,20 @@ A: You can return products within 30 days..."
           </Button>
         </div>
       </form>
-    </div>
+      </div>
+    </MotionWrapper>
   )
 }
+function useEffect(effect: () => void, deps: (Record<string, any> | undefined)[]) {
+  try {
+    // Dynamically get React's useEffect to delegate to the real hook
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    return _useEffect(effect, deps)
+  } catch {
+    // Fallback for environments where require isn't available (e.g., static analysis).
+    // Run the effect once as a best-effort fallback; no cleanup support here.
+    effect()
+    return undefined
+  }
+}
+

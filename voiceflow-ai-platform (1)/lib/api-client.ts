@@ -183,6 +183,22 @@ class ApiClient {
     return this.request<{ status: string; message: string }>(`/onboarding/status?agent_id=${agentId}`)
   }
 
+  // Onboarding progress persistence (server-side resume)
+  async saveOnboardingProgress(payload: { agent_id?: number | string; current_step?: number; data?: any }) {
+    return this.request<{ success: boolean; progress_id?: number; agent_id?: number; current_step?: number; data?: any }>(`/onboarding/progress`, {
+      method: 'POST',
+      body: JSON.stringify({ agent_id: payload.agent_id, current_step: payload.current_step, data: payload.data }),
+    })
+  }
+
+  async getOnboardingProgress() {
+    return this.request<{ exists: boolean; progress_id?: number; agent_id?: number; current_step?: number; data?: any }>(`/onboarding/progress`)
+  }
+
+  async deleteOnboardingProgress() {
+    return this.request<{ deleted: boolean }>(`/onboarding/progress`, { method: 'DELETE' })
+  }
+
   // Agent management endpoints
   async getAgents() {
     return this.request<Agent[]>("/agents")

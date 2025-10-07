@@ -12,15 +12,23 @@ import { Volume2, Play } from "lucide-react"
 
 interface VoicePersonalityProps {
   onComplete: (data: any) => void
+  data?: Record<string, any>
+  initialData?: Record<string, any>
 }
 
-export function VoicePersonality({ onComplete }: VoicePersonalityProps) {
-  const [formData, setFormData] = useState({
+export function VoicePersonality({ onComplete, data, initialData }: VoicePersonalityProps) {
+  const [formData, setFormData] = useState<Record<string, any>>(() => ({
     voice: "",
     tone: "",
     personality: "",
     language: "en-US",
-  })
+    ...(initialData?.voicePersonality || {}),
+  }))
+
+  // hydrate if parent provides server data later
+    useEffect(() => {
+      if (data?.voicePersonality) setFormData(prev => ({ ...prev, ...data.voicePersonality }))
+    }, [data])
 
   const voices = [
     { id: "sarah", name: "Sarah", description: "Professional female voice, clear and friendly" },
@@ -158,3 +166,62 @@ export function VoicePersonality({ onComplete }: VoicePersonalityProps) {
     </div>
   )
 }
+// Minimal, environment-safe shim for useEffect when the real React hook isn't imported.
+// It performs a simple shallow-dependency comparison and runs the effect when deps change.
+// This is a pragmatic fallback for the specific usage in this file (hydration on data change).
+// Note: In a real React app prefer importing useEffect from "react".
+function useEffect(
+  effect: () => void | (() => void),
+  deps?: (Record<string, any> | undefined)[]
+) {
+  const globalKey = "__shim_useEffect_store__"
+  if (!(globalKey in globalThis)) {
+    ;(globalThis as any)[globalKey] = {
+      depsMap: new Map<Function, any[]>(),
+      cleanupMap: new Map<Function, (() => void) | undefined>(),
+    }
+  }
+  const store = (globalThis as any)[globalKey] as {
+    depsMap: Map<Function, any[]>
+    cleanupMap: Map<Function, (() => void) | undefined>
+  }
+
+  const prevDeps = store.depsMap.get(effect)
+  const depsChanged = !areDepsEqual(prevDeps, deps)
+
+  if (!depsChanged) return
+
+  // run previous cleanup if present
+  const prevCleanup = store.cleanupMap.get(effect)
+  if (typeof prevCleanup === "function") {
+    try {
+      prevCleanup()
+    } catch {
+      /* ignore cleanup errors */
+    }
+    store.cleanupMap.delete(effect)
+  }
+
+  // run effect asynchronously to better mimic React's effect timing
+  Promise.resolve().then(() => {
+    const maybeCleanup = effect()
+    if (typeof maybeCleanup === "function") {
+      store.cleanupMap.set(effect, maybeCleanup)
+    } else {
+      store.cleanupMap.delete(effect)
+    }
+  })
+
+  store.depsMap.set(effect, deps ?? [])
+}
+
+function areDepsEqual(a?: any[], b?: any[]) {
+  if (a === b) return true
+  if (!a || !b) return false
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (!Object.is(a[i], b[i])) return false
+  }
+  return true
+}
+

@@ -23,6 +23,7 @@ const personalityOptions = [
 
 interface VoicePersonalityStepProps {
   data: Record<string, any>
+  initialData?: Record<string, any>
   onDataChange: (data: Record<string, any>) => void
   onNext: () => void
   onPrevious: () => void
@@ -30,10 +31,10 @@ interface VoicePersonalityStepProps {
   canGoPrevious: boolean
 }
 
-export function VoicePersonalityStep({ data, onDataChange }: VoicePersonalityStepProps) {
-  const [selectedVoice, setSelectedVoice] = useState(data.selectedVoice || '')
-  const [selectedPersonality, setSelectedPersonality] = useState(data.selectedPersonality || '')
-  const [customInstructions, setCustomInstructions] = useState(data.customInstructions || '')
+export function VoicePersonalityStep({ data, onDataChange, initialData }: VoicePersonalityStepProps) {
+  const [selectedVoice, setSelectedVoice] = useState(initialData?.selectedVoice ?? data.selectedVoice ?? '')
+  const [selectedPersonality, setSelectedPersonality] = useState(initialData?.selectedPersonality ?? data.selectedPersonality ?? '')
+  const [customInstructions, setCustomInstructions] = useState(initialData?.customInstructions ?? data.customInstructions ?? '')
   const [playingVoice, setPlayingVoice] = useState<string | null>(null)
 
   const handleVoicePlay = (voiceId: string) => {
@@ -62,13 +63,8 @@ export function VoicePersonalityStep({ data, onDataChange }: VoicePersonalitySte
   }
 
   const updateData = (newData: Record<string, any>) => {
-    onDataChange({
-      ...data,
-      selectedVoice,
-      selectedPersonality,
-      customInstructions,
-      ...newData
-    })
+    const merged = { ...data, ...(initialData || {}), selectedVoice, selectedPersonality, customInstructions, ...newData }
+    onDataChange(merged)
   }
 
   return (

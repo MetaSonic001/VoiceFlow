@@ -42,6 +42,7 @@ const channelOptions = [
 
 interface ChannelSetupStepProps {
   data: Record<string, any>
+  initialData?: Record<string, any>
   onDataChange: (data: Record<string, any>) => void
   onNext: () => void
   onPrevious: () => void
@@ -49,13 +50,14 @@ interface ChannelSetupStepProps {
   canGoPrevious: boolean
 }
 
-export function ChannelSetupStep({ data, onDataChange }: ChannelSetupStepProps) {
-  const [selectedChannels, setSelectedChannels] = useState<string[]>(data.selectedChannels || ['phone'])
-  const [phoneSetup, setPhoneSetup] = useState({
-    preferredArea: data.phoneSetup?.preferredArea || '',
-    businessHours: data.phoneSetup?.businessHours || 'business',
-    ...data.phoneSetup
-  })
+export function ChannelSetupStep({ data, onDataChange, initialData }: ChannelSetupStepProps) {
+  const [selectedChannels, setSelectedChannels] = useState<string[]>(initialData?.selectedChannels ?? data.selectedChannels ?? ['phone'])
+  const [phoneSetup, setPhoneSetup] = useState(() => ({
+    preferredArea: initialData?.phoneSetup?.preferredArea ?? data.phoneSetup?.preferredArea ?? '',
+    businessHours: initialData?.phoneSetup?.businessHours ?? data.phoneSetup?.businessHours ?? 'business',
+    ...data.phoneSetup,
+    ...(initialData?.phoneSetup || {})
+  }))
 
   const handleChannelToggle = (channelId: string) => {
     const newChannels = selectedChannels.includes(channelId)
@@ -73,12 +75,8 @@ export function ChannelSetupStep({ data, onDataChange }: ChannelSetupStepProps) 
   }
 
   const updateData = (newData: Record<string, any>) => {
-    onDataChange({
-      ...data,
-      selectedChannels,
-      phoneSetup,
-      ...newData
-    })
+    const merged = { ...data, ...(initialData || {}), selectedChannels, phoneSetup, ...newData }
+    onDataChange(merged)
   }
 
   return (

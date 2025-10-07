@@ -16,6 +16,8 @@ import { Brain, CheckCircle } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { apiClient } from "@/lib/api-client"
 import { useToast } from '@/hooks/use-toast'
+import { AnimatePresence, motion } from 'framer-motion'
+import MotionWrapper, { containerVariants, itemVariants, MOTION } from '@/components/ui/MotionWrapper'
 
 const STEPS = [
   { id: 1, title: "Company Profile", description: "Tell us about your business" },
@@ -34,60 +36,68 @@ export function OnboardingFlow() {
   const { toast } = useToast()
   const [isProcessing, setIsProcessing] = useState(false)
 
-  // hydrate from localStorage if present
+  // hydrate from server-side onboarding progress if present
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem('onboarding_data')
-      if (raw) setOnboardingData(JSON.parse(raw))
-    } catch (e) {
-      // ignore
-    }
+    ;(async () => {
+      try {
+        const prog = await apiClient.getOnboardingProgress()
+        if (prog?.exists && prog.data) {
+          setOnboardingData(prog.data)
+        }
+      } catch (e) {
+        // ignore
+      }
+    })()
   }, [])
   const router = useRouter()
 
   const progress = ((currentStep - 1) / (STEPS.length - 1)) * 100
 
   const handleStepComplete = (stepData: any) => {
-    // Persist step data locally
-    setOnboardingData((prev) => {
-      const merged = { ...prev, ...stepData }
-      try { localStorage.setItem('onboarding_data', JSON.stringify(merged)) } catch (e) {}
-      return merged
-    })
-    setCompletedSteps((prev) => [...prev, currentStep])
+    // compute merged data and persist in state
+    const merged = { ...onboardingData, ...stepData }
+    setOnboardingData(merged)
 
     // Call backend based on step
     ;(async () => {
       setIsProcessing(true)
       try {
+        let agentId = (merged as any).agent_id || ''
+
+        // Step 1: company profile
         if (currentStep === 1 && stepData.company) {
           await apiClient.saveCompanyProfile({ company_name: stepData.company.companyName, industry: stepData.company.industry, use_case: stepData.company.useCase })
+          try { await apiClient.saveOnboardingProgress({ current_step: currentStep, data: { company: stepData.company } }) } catch (e) {}
         }
 
+        // Step 2: create agent
         if (currentStep === 2 && stepData.agent) {
           const res = await apiClient.createAgent({ name: stepData.agent.agentName, role: stepData.agent.role, channels: stepData.agent.channels })
-          if (res && (res as any).agent_id) {
-            setOnboardingData((prev) => {
-              const merged = { ...prev, agent_id: (res as any).agent_id }
-              try { localStorage.setItem('onboarding_data', JSON.stringify(merged)) } catch (e) {}
-              return merged
-            })
+          const createdAgentId = (res as any)?.agent_id
+          if (createdAgentId) {
+            agentId = createdAgentId
+            const mergedWithAgent = { ...merged, agent_id: agentId }
+            setOnboardingData(mergedWithAgent)
             toast({ title: 'Agent created', description: 'Your agent was created successfully.' })
+            try { await apiClient.saveOnboardingProgress({ agent_id: agentId, current_step: currentStep, data: { agent: stepData.agent } }) } catch (e) {}
           }
         }
 
+        // Step 3: knowledge upload
         if (currentStep === 3 && stepData.knowledge) {
-          // uploadKnowledge expects form data; use apiClient.uploadKnowledge implementation
           await apiClient.uploadKnowledge({ files: stepData.knowledge.files, websites: stepData.knowledge.websites, faqText: stepData.knowledge.faqText })
+          try { await apiClient.saveOnboardingProgress({ current_step: currentStep, data: { knowledge: { websites: stepData.knowledge.websites } } }) } catch (e) {}
         }
 
+        // Step 4: voice configuration
         if (currentStep === 4 && stepData.voice) {
           await apiClient.configureVoice({ voice: stepData.voice.voice, tone: stepData.voice.tone, language: stepData.voice.language })
+          try { await apiClient.saveOnboardingProgress({ current_step: currentStep, data: { voice: stepData.voice } }) } catch (e) {}
         }
 
-  if (currentStep === 5 && stepData.channels) {
-          // include selected phone number if provided
-          const payload = {
+        // Step 5: channels
+        if (currentStep === 5 && stepData.channels) {
+          const channelPayload = {
             phone_number: stepData.phone_number || stepData.channels.phoneNumber || undefined,
             chat_widget: {
               enabled: stepData.channels.chatWidget?.enabled ?? true,
@@ -103,23 +113,26 @@ export function OnboardingFlow() {
               forwarding_address: stepData.channels.email?.forwardingAddress || undefined,
             },
           }
-          await apiClient.setupChannels(payload as any)
+          await apiClient.setupChannels(channelPayload as any)
           toast({ title: 'Channels configured', description: 'Communication channels saved.' })
+          try { await apiClient.saveOnboardingProgress({ current_step: currentStep, data: { channels: channelPayload } }) } catch (e) {}
         }
 
+        // Step 7: deploy
         if (currentStep === 7) {
-          const agentId = (onboardingData as any).agent_id || ''
+          const effectiveAgentId = (merged as any).agent_id || agentId || ''
           try {
-            const res = await apiClient.deployAgent(agentId)
+            const res = await apiClient.deployAgent(effectiveAgentId)
             toast({ title: 'Deployment started', description: 'Agent deployment is in progress.' })
-            // store phone_number if returned
             if (res?.phone_number) {
-              setOnboardingData((prev) => ({ ...prev, phone_number: res.phone_number }))
-              try { localStorage.setItem('onboarding_data', JSON.stringify({ ...onboardingData, phone_number: res.phone_number })) } catch (e) {}
+              const mergedWithPhone = { ...merged, phone_number: res.phone_number }
+              setOnboardingData(mergedWithPhone)
             }
           } catch (err: any) {
             toast({ title: 'Deployment failed', description: err?.message || 'Failed to deploy agent' })
           }
+          // Final step: clear server-side progress
+          try { await apiClient.deleteOnboardingProgress() } catch (e) {}
         }
       } catch (e) {
         console.warn('Onboarding step API error', e)
@@ -166,7 +179,8 @@ export function OnboardingFlow() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <MotionWrapper className="min-h-screen bg-background">
+      <motion.div variants={containerVariants} initial="hidden" animate="show" className="min-h-screen">
       {/* Header */}
       <header className="border-b border-border bg-background/95 backdrop-blur">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
@@ -180,7 +194,7 @@ export function OnboardingFlow() {
         </div>
       </header>
 
-      <div className="container mx-auto px-4 py-8">
+      <div className="container mx-auto px-4 py-8 max-w-7xl">
         {/* Progress Section */}
         <div className="mb-8">
           <div className="flex items-center justify-between mb-4">
@@ -202,7 +216,7 @@ export function OnboardingFlow() {
           {/* Steps Sidebar */}
           <div className="lg:col-span-1">
             <Card>
-              <CardHeader>
+              <CardHeader className="sticky top-24">
                 <CardTitle className="text-lg">Setup Steps</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
@@ -241,7 +255,19 @@ export function OnboardingFlow() {
           {/* Main Content */}
           <div className="lg:col-span-3">
             <Card>
-              <CardContent className="p-6">{renderStepContent()}</CardContent>
+              <CardContent className="p-6 h-[calc(100vh-220px)] overflow-auto">
+                <AnimatePresence mode="wait">
+                  <motion.div
+                    key={currentStep}
+                    variants={itemVariants}
+                    initial="hidden"
+                    animate="show"
+                    exit="exit"
+                  >
+                    {renderStepContent()}
+                  </motion.div>
+                </AnimatePresence>
+              </CardContent>
             </Card>
 
             {/* Navigation */}
@@ -259,6 +285,7 @@ export function OnboardingFlow() {
           </div>
         </div>
       </div>
-    </div>
+      </motion.div>
+    </MotionWrapper>
   )
 }

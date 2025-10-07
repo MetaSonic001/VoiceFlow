@@ -5,6 +5,7 @@ import type React from "react"
 import { useState, useEffect } from "react"
 import { useToast } from '@/hooks/use-toast'
 import { Button } from "@/components/ui/button"
+import MotionWrapper from '@/components/ui/MotionWrapper'
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -25,28 +26,33 @@ export function CompanySetup({ onComplete }: CompanySetupProps) {
   const { toast } = useToast()
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem('onboarding_data')
-      if (raw) {
-        const parsed = JSON.parse(raw)
-        if (parsed.company) setFormData(parsed.company)
+    ;(async () => {
+      try {
+        const prog = await (await import('@/lib/api-client')).apiClient.getOnboardingProgress()
+        if (prog?.exists && prog.data?.company) setFormData(prog.data.company)
+      } catch (e) {
+        // ignore
       }
-    } catch (e) {}
+    })()
   }, [])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    try {
-      const raw = localStorage.getItem('onboarding_data')
-      const base = raw ? JSON.parse(raw) : {}
-      localStorage.setItem('onboarding_data', JSON.stringify({ ...base, company: formData }))
-    } catch (e) {}
-    toast({ title: 'Saved', description: 'Company profile saved locally' })
-    onComplete({ company: formData })
+    ;(async () => {
+      try {
+        await (await import('@/lib/api-client')).apiClient.saveCompanyProfile({ company_name: formData.companyName, industry: formData.industry, use_case: formData.useCase })
+        try { await (await import('@/lib/api-client')).apiClient.saveOnboardingProgress({ current_step: 1, data: { company: formData } }) } catch (e) {}
+        toast({ title: 'Saved', description: 'Company profile saved' })
+      } catch (e) {
+        toast({ title: 'Save failed', description: 'Failed to persist company profile' })
+      }
+      onComplete({ company: formData })
+    })()
   }
 
   return (
-    <div className="space-y-6">
+    <MotionWrapper>
+      <div className="space-y-6">
       <div className="text-center">
         <Building2 className="w-12 h-12 text-accent mx-auto mb-4" />
         <h2 className="text-2xl font-bold mb-2">Tell us about your company</h2>
@@ -122,6 +128,7 @@ export function CompanySetup({ onComplete }: CompanySetupProps) {
           Continue to Agent Creation
         </Button>
       </form>
-    </div>
+      </div>
+    </MotionWrapper>
   )
 }

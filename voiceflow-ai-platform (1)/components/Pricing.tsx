@@ -1,6 +1,7 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { Button } from './ui/button';
+import FeatureCard from './ui/FeatureCard';
 import { Check, ArrowRight, Star, Zap } from 'lucide-react';
 
 const plans = [
@@ -121,85 +122,18 @@ export const Pricing: React.FC<PricingProps> = ({ onGetStarted }) => {
               initial={{ opacity: 0, y: 20 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
-              transition={{ duration: 0.6, delay: index * 0.1 }}
-              className={`relative bg-white rounded-2xl shadow-lg border-2 p-8 ${
-                plan.popular 
-                  ? 'border-blue-500 shadow-2xl transform scale-105' 
-                  : 'border-gray-200'
-              }`}
+              transition={{ duration: 0.6, delay: index * 0.08 }}
             >
-              {plan.popular && (
-                <div className="absolute -top-4 left-1/2 transform -translate-x-1/2">
-                  <span className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-4 py-1 rounded-full text-sm font-medium flex items-center">
-                    <Star className="w-4 h-4 mr-1" />
-                    Most Popular
-                  </span>
+              <FeatureCard title={plan.name} icon={<Star className="w-5 h-5 text-yellow-500" />}>
+                <div>
+                  <div className="text-2xl font-bold text-gray-900 mb-2">{typeof plan.price === 'number' ? (isIndianPricing ? plan.indianPrice : `$${plan.price}`) : (isIndianPricing ? plan.indianPrice : plan.price)}</div>
+                  <p className="text-sm text-gray-600 mb-3">{plan.description}</p>
+                  <div className="text-sm text-gray-600 mb-4">
+                    {plan.features.slice(0, 5).map((f, i) => <div key={i} className="flex items-center"><Check className="w-4 h-4 text-green-500 mr-2"/>{f}</div>)}
+                  </div>
+                  <Button onClick={onGetStarted} className="w-full mt-2 bg-blue-600 hover:bg-blue-700">{plan.cta || 'Start Free Trial'}</Button>
                 </div>
-              )}
-
-              <div className="space-y-6">
-                <div className="space-y-2">
-                  <h3 className="text-xl font-bold text-gray-900">{plan.name}</h3>
-                  <p className="text-gray-600">{plan.description}</p>
-                </div>
-
-                <div className="space-y-1">
-                  {typeof plan.price === 'number' ? (
-                    <>
-                      <div className="flex items-baseline space-x-2">
-                        <span className="text-4xl font-bold text-gray-900">
-                          {isIndianPricing ? plan.indianPrice : `$${plan.price}`}
-                        </span>
-                        {plan.originalPrice && (
-                          <span className="text-lg text-gray-500 line-through">
-                            {isIndianPricing ? plan.indianOriginalPrice : `$${plan.originalPrice}`}
-                          </span>
-                        )}
-                        <span className="text-gray-600">/month</span>
-                      </div>
-                      {plan.originalPrice && (
-                        <div className="flex items-center space-x-2">
-                          <span className="bg-green-100 text-green-700 px-2 py-1 rounded-full text-xs font-medium">
-                            Save {Math.round(((plan.originalPrice - plan.price) / plan.originalPrice) * 100)}%
-                          </span>
-                          <span className="text-xs text-gray-500">Limited time offer</span>
-                        </div>
-                      )}
-                      <p className="text-sm text-gray-500">Billed monthly, cancel anytime</p>
-                    </>
-                  ) : (
-                    <div className="flex items-baseline">
-                      <span className="text-4xl font-bold text-gray-900">
-                        {isIndianPricing ? plan.indianPrice : plan.price}
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                <Button 
-                  className={`w-full ${plan.popular ? 'bg-blue-600 hover:bg-blue-700' : ''}`}
-                  variant={plan.popular ? 'default' : 'outline'}
-                  onClick={onGetStarted}
-                >
-                  {plan.cta || (typeof plan.price === 'number' ? 'Start Free Trial' : 'Contact Sales')}
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </Button>
-
-                <div className="space-y-4 pt-4 border-t border-gray-200">
-                  <h4 className="font-medium text-gray-900 flex items-center">
-                    <Zap className="w-4 h-4 mr-2 text-blue-600" />
-                    What's included:
-                  </h4>
-                  <ul className="space-y-3">
-                    {plan.features.map((feature, featureIndex) => (
-                      <li key={featureIndex} className="flex items-center text-sm text-gray-600">
-                        <Check className="h-4 w-4 text-green-500 mr-3 flex-shrink-0" />
-                        {feature}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
+              </FeatureCard>
             </motion.div>
           ))}
         </div>
@@ -211,13 +145,9 @@ export const Pricing: React.FC<PricingProps> = ({ onGetStarted }) => {
           viewport={{ once: true }}
           transition={{ duration: 0.6 }}
         >
-          <div className="bg-white rounded-2xl p-8 shadow-lg border border-gray-200">
-            <h3 className="text-2xl font-bold text-gray-900 mb-4">
-              🇮🇳 Special Launch Offer for Indian Businesses
-            </h3>
-            <p className="text-gray-600 mb-6 max-w-2xl mx-auto">
-              Get started with our Professional plan at a special introductory price. 
-              Perfect for Indian startups and SMEs looking to automate customer support.
+          <FeatureCard title={"🇮🇳 Special Launch Offer for Indian Businesses"} icon={<Zap className="w-5 h-5 text-blue-500"/>}>
+            <p className="text-gray-600 mb-4">
+              Get started with our Professional plan at a special introductory price. Perfect for Indian startups and SMEs looking to automate customer support.
             </p>
             <div className="flex items-center justify-center space-x-4 text-sm text-gray-600">
               <span>✅ 14-day free trial</span>
@@ -225,8 +155,8 @@ export const Pricing: React.FC<PricingProps> = ({ onGetStarted }) => {
               <span>✅ Cancel anytime</span>
               <span>✅ Indian phone numbers</span>
             </div>
-          </div>
-          
+          </FeatureCard>
+
           <p className="text-gray-600">
             All plans include a 14-day free trial. No credit card required to get started.
           </p>

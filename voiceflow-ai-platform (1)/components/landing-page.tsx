@@ -2,8 +2,10 @@
 
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import FeatureCard from "@/components/ui/FeatureCard"
+import TestimonialCarousel from '@/components/ui/TestimonialCarousel'
 import { Badge } from "@/components/ui/badge"
+import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { AuthModal } from "@/components/auth-modal"
 import { HelpFlowModal } from "@/components/help-flow-modal"
 import {
@@ -25,6 +27,14 @@ import {
   ExternalLink,
 } from "lucide-react"
 import { useRouter } from "next/navigation"
+import { motion, AnimatePresence } from 'framer-motion'
+import MotionWrapper, { containerVariants, itemVariants, MOTION } from '@/components/ui/MotionWrapper'
+import BentoGrid from '@/components/ui/BentoGrid'
+import MorphingBlob from '@/components/ui/MorphingBlob'
+import useParallax from '@/components/hooks/useParallax'
+import ParallaxBlob from '@/components/ui/ParallaxBlob'
+import FloatingActionPanel from '@/components/ui/FloatingActionPanel'
+import MagneticButton from '@/components/ui/MagneticButton'
 
 export function LandingPage() {
   const [showAuth, setShowAuth] = useState(false)
@@ -91,8 +101,8 @@ export function LandingPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background overflow-hidden">
-      <header className="fixed top-0 w-full z-50 glass-effect border-b border-border/50">
+    <MotionWrapper className="min-h-screen bg-background overflow-hidden">
+  <header className="fixed top-0 w-full z-50 glass-effect border-b border-border/50">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center space-x-2">
             <div className="w-10 h-10 bg-gradient-to-r from-primary to-accent rounded-xl flex items-center justify-center animate-glow">
@@ -151,50 +161,53 @@ export function LandingPage() {
       <section className="pt-32 pb-20 px-4 relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-r from-primary/5 to-accent/5"></div>
         <div className="container mx-auto text-center max-w-6xl relative">
-          <div className="animate-float">
-            <Badge
-              variant="secondary"
-              className="mb-6 px-4 py-2 text-sm font-semibold bg-gradient-to-r from-primary/10 to-accent/10 border-primary/20"
-            >
-              <Sparkles className="w-4 h-4 mr-2" />
-              Next-Generation AI Platform • Trusted by 10,000+ Businesses
-            </Badge>
+          <motion.div variants={containerVariants} initial="hidden" animate="show" className="space-y-6">
+            <motion.div variants={itemVariants} className="animate-float">
+              <Badge
+                variant="secondary"
+                className="mb-6 px-4 py-2 text-sm font-semibold bg-gradient-to-r from-primary/10 to-accent/10 border-primary/20"
+              >
+                <Sparkles className="w-4 h-4 mr-2" />
+                Next-Generation AI Platform • Trusted by 10,000+ Businesses
+              </Badge>
+            </motion.div>
+
+            <motion.h1 variants={itemVariants} className="text-5xl md:text-7xl font-bold text-balance mb-8 leading-tight">
+              Create Intelligent
+              <span className="bg-gradient-to-r from-primary via-accent to-secondary bg-clip-text text-transparent animate-pulse">
+                {" "}
+                Voice & Chat Agents{" "}
+              </span>
+              in Minutes
+            </motion.h1>
+
+            <motion.p variants={itemVariants} className="text-xl md:text-2xl text-muted-foreground text-balance mb-12 max-w-4xl mx-auto leading-relaxed">
+              Transform your business with AI agents that handle customer support, sales calls, and internal workflows.
+              <strong className="text-foreground"> No coding required</strong> - just upload your knowledge and go live.
+            </motion.p>
+
+            <motion.div variants={itemVariants} className="flex flex-col sm:flex-row gap-6 justify-center mb-8">
+              <MagneticButton onClick={handleGetStarted} className="text-lg px-10 py-4 bg-gradient-to-r from-primary to-accent text-white shadow-2xl">
+                <Play className="w-5 h-5 mr-2" />
+                Start Free Trial
+              </MagneticButton>
+              <MagneticButton onClick={handleWatchDemo} className="text-lg px-10 py-4 border-2 bg-transparent">
+                <Play className="w-5 h-5 mr-2" />
+                Watch Demo
+                <ExternalLink className="w-4 h-4 ml-2" />
+              </MagneticButton>
+            </motion.div>
+          </motion.div>
+
+          {/* Testimonials */}
+          <div className="mt-12">
+            {/* lightweight testimonial carousel */}
+            <TestimonialCarousel
+              items={testimonials.map(t => ({ name: t.name, company: t.company, content: t.content }))}
+            />
           </div>
 
-          <h1 className="text-5xl md:text-7xl font-bold text-balance mb-8 leading-tight">
-            Create Intelligent
-            <span className="bg-gradient-to-r from-primary via-accent to-secondary bg-clip-text text-transparent animate-pulse">
-              {" "}
-              Voice & Chat Agents{" "}
-            </span>
-            in Minutes
-          </h1>
-
-          <p className="text-xl md:text-2xl text-muted-foreground text-balance mb-12 max-w-4xl mx-auto leading-relaxed">
-            Transform your business with AI agents that handle customer support, sales calls, and internal workflows.
-            <strong className="text-foreground"> No coding required</strong> - just upload your knowledge and go live.
-          </p>
-
-          <div className="flex flex-col sm:flex-row gap-6 justify-center mb-8">
-            <Button
-              size="lg"
-              onClick={handleGetStarted}
-              className="text-lg px-10 py-4 bg-gradient-to-r from-primary to-accent hover:scale-105 transition-all duration-300 shadow-2xl animate-glow"
-            >
-              <Play className="w-5 h-5 mr-2" />
-              Start Free Trial
-            </Button>
-            <Button
-              size="lg"
-              variant="outline"
-              onClick={handleWatchDemo}
-              className="text-lg px-10 py-4 hover:scale-105 transition-all duration-300 border-2 hover:bg-primary/5 bg-transparent"
-            >
-              <Play className="w-5 h-5 mr-2" />
-              Watch Demo
-              <ExternalLink className="w-4 h-4 ml-2" />
-            </Button>
-          </div>
+          <ParallaxBlob />
 
           <div className="flex flex-wrap justify-center gap-6 text-sm text-muted-foreground mb-16">
             <div className="flex items-center">
@@ -246,64 +259,51 @@ export function LandingPage() {
             </p>
           </div>
 
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {[
-              {
-                icon: Phone,
-                title: "Voice & Phone Integration",
-                description:
-                  "Get dedicated phone numbers with lifelike TTS voices. Handle inbound and outbound calls seamlessly.",
-                color: "blue",
-              },
-              {
-                icon: MessageSquare,
-                title: "Multi-Channel Support",
-                description: "Deploy across voice, chat widgets, WhatsApp, and more. One agent, multiple touchpoints.",
-                color: "green",
-              },
-              {
-                icon: Brain,
-                title: "Smart Knowledge Base",
-                description:
-                  "Upload PDFs, FAQs, and documents. Your agent learns from your content and stays up-to-date.",
-                color: "purple",
-              },
-              {
-                icon: Zap,
-                title: "5-Minute Setup",
-                description:
-                  "From signup to live agent in minutes. No technical expertise required with our guided wizard.",
-                color: "yellow",
-              },
-              {
-                icon: Shield,
-                title: "Enterprise Security",
-                description: "GDPR & HIPAA ready with end-to-end encryption. Your data stays private and secure.",
-                color: "red",
-              },
-              {
-                icon: BarChart3,
-                title: "Advanced Analytics",
-                description:
-                  "Track performance, monitor conversations, and optimize your agents with detailed insights.",
-                color: "indigo",
-              },
-            ].map((feature, index) => (
-              <Card
-                key={index}
-                className="border-border hover:shadow-2xl transition-all duration-500 hover:scale-105 hover:-translate-y-2 group"
-              >
-                <CardHeader className="text-center">
-                  <div
-                    className={`w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-${feature.color}-100 to-${feature.color}-200 flex items-center justify-center group-hover:animate-bounce`}
-                  >
-                    <feature.icon className={`w-8 h-8 text-${feature.color}-500`} />
-                  </div>
-                  <CardTitle className="text-xl mb-3">{feature.title}</CardTitle>
-                  <CardDescription className="text-base leading-relaxed">{feature.description}</CardDescription>
-                </CardHeader>
-              </Card>
-            ))}
+          <div className="">
+            <BentoGrid
+              items={[
+                {
+                  icon: Phone,
+                  title: "Voice & Phone Integration",
+                  description:
+                    "Get dedicated phone numbers with lifelike TTS voices. Handle inbound and outbound calls seamlessly.",
+                  color: "blue",
+                },
+                {
+                  icon: MessageSquare,
+                  title: "Multi-Channel Support",
+                  description: "Deploy across voice, chat widgets, WhatsApp, and more. One agent, multiple touchpoints.",
+                  color: "green",
+                },
+                {
+                  icon: Brain,
+                  title: "Smart Knowledge Base",
+                  description:
+                    "Upload PDFs, FAQs, and documents. Your agent learns from your content and stays up-to-date.",
+                  color: "purple",
+                },
+                {
+                  icon: Zap,
+                  title: "5-Minute Setup",
+                  description:
+                    "From signup to live agent in minutes. No technical expertise required with our guided wizard.",
+                  color: "yellow",
+                },
+                {
+                  icon: Shield,
+                  title: "Enterprise Security",
+                  description: "GDPR & HIPAA ready with end-to-end encryption. Your data stays private and secure.",
+                  color: "red",
+                },
+                {
+                  icon: BarChart3,
+                  title: "Advanced Analytics",
+                  description:
+                    "Track performance, monitor conversations, and optimize your agents with detailed insights.",
+                  color: "indigo",
+                },
+              ]}
+            />
           </div>
         </div>
       </section>
@@ -631,6 +631,11 @@ export function LandingPage() {
       {/* Modals */}
       <AuthModal open={showAuth} onOpenChange={setShowAuth} mode={authMode} onModeChange={setAuthMode} />
       <HelpFlowModal open={showHelpFlow} onOpenChange={setShowHelpFlow} />
-    </div>
+      <FloatingActionPanel>
+        <Button size="sm" onClick={() => scrollToSection('features')} className="bg-gradient-to-r from-primary to-accent text-white">
+          Explore Features
+        </Button>
+      </FloatingActionPanel>
+    </MotionWrapper>
   )
 }

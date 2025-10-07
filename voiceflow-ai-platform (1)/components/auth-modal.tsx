@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { Brain, Loader2 } from "lucide-react"
 import { useRouter } from "next/navigation"
+import { apiClient } from '@/lib/api-client'
 
 interface AuthModalProps {
   open: boolean
@@ -32,40 +33,63 @@ export function AuthModal({ open, onOpenChange, mode, onModeChange }: AuthModalP
     setError("")
 
     try {
-      // Mock authentication - no backend required
-      // Simulate API call delay
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      if (mode === 'login') {
+        // Try server-side login first, fallback to mock on failure
+        try {
+          const res = await apiClient.login(email, password)
+          // server persists token via apiClient
+        } catch (err) {
+          // fallback to guest/mock behavior if backend not available
+          console.warn('[auth] server login failed, falling back to mock login', err)
+          const mockResponse = {
+            token: 'mock_token_' + Date.now(),
+            session_id: 'mock_session_' + Date.now(),
+            user: { id: Date.now().toString(), email: email || 'demo@voiceflow.ai', name: companyName || 'Demo User', company: companyName || 'Demo Company' }
+          }
+          localStorage.setItem('auth_token', mockResponse.token)
+          localStorage.setItem('session_id', mockResponse.session_id)
+          localStorage.setItem('auth_user', JSON.stringify(mockResponse.user))
+        }
 
-      // Create mock user data
-      const mockUser = {
-        id: Date.now().toString(),
-        email: email || "demo@voiceflow.ai",
-        name: companyName || "Demo User",
-        company: companyName || "Demo Company"
-      }
+        // After login, query current user and onboarding status (server-side preferred)
+        try {
+          const user = await apiClient.getCurrentUser()
+          // if backend supplies onboarding status endpoint, it can be used here later
+          // Redirect to dashboard (dashboard will show resume CTA if needed)
+          onOpenChange(false)
+          router.push('/dashboard')
+          return
+        } catch (err) {
+          // If getCurrentUser fails, still go to dashboard (graceful fallback)
+          onOpenChange(false)
+          router.push('/dashboard')
+          return
+        }
 
-      const mockResponse = {
-        token: "mock_token_" + Date.now(),
-        session_id: "mock_session_" + Date.now(),
-        user: mockUser
-      }
-
-      // Store auth data in localStorage
-      localStorage.setItem("auth_token", mockResponse.token)
-      localStorage.setItem("session_id", mockResponse.session_id)
-      localStorage.setItem("user", JSON.stringify(mockResponse.user))
-
-      onOpenChange(false)
-
-      // Navigate to appropriate page
-      if (mode === "login") {
-        router.push("/dashboard")
       } else {
-        router.push("/onboarding")
+        // Signup: prefer server-side signup, but don't force immediate onboarding
+        try {
+          await apiClient.signup(email, password)
+        } catch (err) {
+          console.warn('[auth] server signup failed, falling back to mock signup', err)
+          const mockResponse = {
+            token: 'mock_token_' + Date.now(),
+            session_id: 'mock_session_' + Date.now(),
+            user: { id: Date.now().toString(), email: email || 'demo@voiceflow.ai', name: companyName || 'Demo User', company: companyName || 'Demo Company' }
+          }
+          localStorage.setItem('auth_token', mockResponse.token)
+          localStorage.setItem('session_id', mockResponse.session_id)
+          localStorage.setItem('auth_user', JSON.stringify(mockResponse.user))
+        }
+
+        // New UX: signups land on dashboard with a gentle prompt to continue onboarding
+        onOpenChange(false)
+        router.push('/dashboard')
+        return
       }
 
     } catch (err: any) {
-      setError("Something went wrong. Please try again.")
+      setError('Something went wrong. Please try again.')
     } finally {
       setLoading(false)
     }

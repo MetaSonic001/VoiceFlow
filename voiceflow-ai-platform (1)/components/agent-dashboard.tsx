@@ -8,6 +8,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge"
 import { DashboardSidebar } from "@/components/dashboard/sidebar"
 import { AgentCard } from "@/components/dashboard/agent-card"
+import MotionWrapper, { containerVariants } from '@/components/ui/MotionWrapper'
+import { motion } from 'framer-motion'
 import { AgentDetails } from "@/components/dashboard/agent-details"
 import { OnboardingWizard } from "@/components/dashboard/onboarding-wizard"
 import { LiveActivityFeed } from "@/components/dashboard/live-activity-feed"
@@ -15,6 +17,7 @@ import { RealtimeMetrics } from "@/components/dashboard/realtime-metrics"
 import { LiveConversations } from "@/components/dashboard/live-conversations"
 import { QuickActions } from "@/components/dashboard/quick-actions"
 import { Search, Plus, Filter, Activity, Phone, MessageCircle, Users, TrendingUp } from "lucide-react"
+import { apiClient } from '@/lib/api-client'
 
 const mockAgents = [
   {
@@ -92,6 +95,7 @@ export function AgentDashboard() {
 
   useEffect(() => {
     loadAgents()
+    checkOnboardingStatus()
   }, [])
 
   const loadAgents = async () => {
@@ -108,6 +112,43 @@ export function AgentDashboard() {
       setAgents(mockAgents)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const [showResumeBanner, setShowResumeBanner] = useState(false)
+  const [resumeAgentName, setResumeAgentName] = useState<string | null>(null)
+  const [resumeAgentId, setResumeAgentId] = useState<string | null>(null)
+  const [wizardStartStep, setWizardStartStep] = useState<number | undefined>(undefined)
+
+  const checkOnboardingStatus = async () => {
+    try {
+      // Query server-side onboarding progress for the current user
+      const prog = await apiClient.getOnboardingProgress()
+      if (prog?.exists) {
+        setShowResumeBanner(true)
+        setResumeAgentId(prog.agent_id ? String(prog.agent_id) : null)
+        setWizardStartStep(prog.current_step ? Number(prog.current_step) : undefined)
+        // If backend provided agent name in status endpoint earlier, try that first
+        try {
+          const statusRes = await apiClient.getDeploymentStatus(prog.agent_id ? String(prog.agent_id) : '')
+          const agentInfo = (statusRes as any)?.agent
+          if (agentInfo && agentInfo.name) setResumeAgentName(agentInfo.name)
+        } catch (e) {
+          // ignore
+        }
+        // show step if available
+        if (prog.current_step) {
+          setResumeAgentName((prev) => prev) // keep name as-is
+        }
+        return
+      }
+
+      // No server progress; don't show banner
+      setShowResumeBanner(false)
+      setResumeAgentName(null)
+      setResumeAgentId(null)
+    } catch (err) {
+      console.warn('[dashboard] onboarding status check failed', err)
     }
   }
 
@@ -135,6 +176,34 @@ export function AgentDashboard() {
         {/* Main Content */}
         <div className="flex-1 ml-64">
           <div className="p-6">
+            {/* Resume Onboarding Banner (persistent) */}
+            {showResumeBanner && (
+              <div aria-label="Resume onboarding banner" className="mb-4 p-4 rounded-lg bg-gradient-to-r from-primary/10 to-accent/5 border border-primary/10 flex items-center justify-between">
+                <div>
+                  <div className="font-semibold">Continue setting up your AI Agent</div>
+                  <div className="text-sm text-muted-foreground">We saved your progress — resume onboarding where you left off.</div>
+                  {resumeAgentName && (
+                    <div className="mt-2 text-sm">
+                      <span className="font-medium">Agent:</span> <span className="ml-2">{resumeAgentName}</span>
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button aria-label="Resume onboarding" variant="outline" onClick={() => {
+                    // Open the onboarding wizard modal and open at the saved step
+                    setShowCreateDialog(true)
+                  }}>
+                    Continue Onboarding
+                  </Button>
+                  <Button aria-label="Open full onboarding page" onClick={() => {
+                    // Also give a route option to the full onboarding flow page
+                    window.location.href = '/onboarding'
+                  }}>
+                    Open Onboarding Page
+                  </Button>
+                </div>
+              </div>
+            )}
             {!selectedAgent ? (
               <>
                 {/* Header with Real-time Status */}
@@ -160,7 +229,7 @@ export function AgentDashboard() {
 
                 {/* Real-time Metrics Row */}
                 <div className="grid md:grid-cols-6 gap-4 mb-6">
-                  <Card>
+                  <Card className="hover:shadow-md hover:scale-102 transition-transform duration-150">
                     <CardHeader className="pb-2">
                       <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
                         <Users className="w-4 h-4" />
@@ -173,7 +242,7 @@ export function AgentDashboard() {
                     </CardContent>
                   </Card>
 
-                  <Card>
+                  <Card className="hover:shadow-md hover:scale-102 transition-transform duration-150">
                     <CardHeader className="pb-2">
                       <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
                         <Phone className="w-4 h-4" />
@@ -186,7 +255,7 @@ export function AgentDashboard() {
                     </CardContent>
                   </Card>
 
-                  <Card>
+                  <Card className="hover:shadow-md hover:scale-102 transition-transform duration-150">
                     <CardHeader className="pb-2">
                       <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
                         <MessageCircle className="w-4 h-4" />
@@ -199,7 +268,7 @@ export function AgentDashboard() {
                     </CardContent>
                   </Card>
 
-                  <Card>
+                  <Card className="hover:shadow-md hover:scale-102 transition-transform duration-150">
                     <CardHeader className="pb-2">
                       <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
                         <TrendingUp className="w-4 h-4" />
@@ -212,7 +281,7 @@ export function AgentDashboard() {
                     </CardContent>
                   </Card>
 
-                  <Card>
+                  <Card className="hover:shadow-md hover:scale-102 transition-transform duration-150">
                     <CardHeader className="pb-2">
                       <CardTitle className="text-sm font-medium text-muted-foreground">Avg Success Rate</CardTitle>
                     </CardHeader>
@@ -224,7 +293,7 @@ export function AgentDashboard() {
                     </CardContent>
                   </Card>
 
-                  <Card>
+                  <Card className="hover:shadow-md hover:scale-102 transition-transform duration-150">
                     <CardHeader className="pb-2">
                       <CardTitle className="text-sm font-medium text-muted-foreground">Avg Response</CardTitle>
                     </CardHeader>
@@ -302,11 +371,11 @@ export function AgentDashboard() {
                     ))}
                   </div>
                 ) : (
-                  <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  <motion.div variants={containerVariants} initial="hidden" animate="show" exit="exit" className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {filteredAgents.map((agent) => (
                       <AgentCard key={agent.id} agent={agent} onSelect={() => setSelectedAgent(agent.id)} />
                     ))}
-                  </div>
+                  </motion.div>
                 )}
 
                 {filteredAgents.length === 0 && !loading && (
@@ -325,9 +394,17 @@ export function AgentDashboard() {
       <OnboardingWizard 
         open={showCreateDialog} 
         onOpenChange={setShowCreateDialog}
+        startStep={wizardStartStep}
         onComplete={() => {
           // Refresh agents list or add new agent to state
           console.log('Agent creation completed')
+            // Clear any saved onboarding progress server-side so the resume banner hides
+            ;(async () => {
+              try { await apiClient.deleteOnboardingProgress() } catch (e) {}
+              setShowResumeBanner(false)
+              setWizardStartStep(undefined)
+              loadAgents()
+            })()
         }}
       />
     </div>

@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
 interface KnowledgeUploadStepProps {
   data: Record<string, any>
+  initialData?: Record<string, any>
   onDataChange: (data: Record<string, any>) => void
   onNext: () => void
   onPrevious: () => void
@@ -16,9 +17,9 @@ interface KnowledgeUploadStepProps {
   canGoPrevious: boolean
 }
 
-export function KnowledgeUploadStep({ data, onDataChange }: KnowledgeUploadStepProps) {
-  const [uploadedFiles, setUploadedFiles] = useState<string[]>(data.uploadedFiles || [])
-  const [websiteUrls, setWebsiteUrls] = useState<string[]>(data.websiteUrls || [''])
+export function KnowledgeUploadStep({ data, onDataChange, initialData }: KnowledgeUploadStepProps) {
+  const [uploadedFiles, setUploadedFiles] = useState<string[]>(initialData?.uploadedFiles ?? data.uploadedFiles ?? [])
+  const [websiteUrls, setWebsiteUrls] = useState<string[]>(initialData?.websiteUrls ?? data.websiteUrls ?? [''])
   const [dragActive, setDragActive] = useState(false)
 
   const handleDrag = (e: React.DragEvent) => {
@@ -79,7 +80,8 @@ export function KnowledgeUploadStep({ data, onDataChange }: KnowledgeUploadStepP
   }
 
   const updateData = (newData: Record<string, any>) => {
-    onDataChange({ ...data, ...newData, uploadedFiles, websiteUrls, ...newData })
+    const merged = { ...data, ...initialData, uploadedFiles, websiteUrls, ...newData }
+    onDataChange(merged)
   }
 
   return (

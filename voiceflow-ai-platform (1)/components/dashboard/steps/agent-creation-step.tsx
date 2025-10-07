@@ -36,6 +36,7 @@ const agentRoles = [
 
 interface AgentCreationStepProps {
   data: Record<string, any>
+  initialData?: Record<string, any>
   onDataChange: (data: Record<string, any>) => void
   onNext: () => void
   onPrevious: () => void
@@ -43,13 +44,14 @@ interface AgentCreationStepProps {
   canGoPrevious: boolean
 }
 
-export function AgentCreationStep({ data, onDataChange }: AgentCreationStepProps) {
-  const [formData, setFormData] = useState({
-    agentName: data.agentName || '',
-    agentRole: data.agentRole || '',
-    agentDescription: data.agentDescription || '',
-    ...data
-  })
+export function AgentCreationStep({ data, onDataChange, initialData }: AgentCreationStepProps) {
+  const [formData, setFormData] = useState(() => ({
+    agentName: initialData?.agentName ?? data.agentName ?? '',
+    agentRole: initialData?.agentRole ?? data.agentRole ?? '',
+    agentDescription: initialData?.agentDescription ?? data.agentDescription ?? '',
+    ...data,
+    ...(initialData || {})
+  }))
 
   const handleInputChange = (field: string, value: string) => {
     const newData = { ...formData, [field]: value }

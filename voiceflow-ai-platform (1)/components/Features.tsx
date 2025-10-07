@@ -14,7 +14,7 @@ import {
   Users,
   Target
 } from 'lucide-react';
-import { GlowingCard } from './ui/GlowingCard';
+import FeatureCard from './ui/FeatureCard';
 
 const features = [
   {
@@ -135,19 +135,11 @@ export const Features: React.FC = () => {
               initial={{ opacity: 0, y: 20 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
-              transition={{ duration: 0.6, delay: index * 0.1 }}
+              transition={{ duration: 0.6, delay: index * 0.08 }}
             >
-              <GlowingCard glowColor={feature.color}>
-                <div className="flex items-start space-x-4">
-                  <div className={`flex-shrink-0 w-12 h-12 bg-${feature.color}-100 rounded-lg flex items-center justify-center text-${feature.color}-600`}>
-                    {feature.icon}
-                  </div>
-                  <div className="space-y-2">
-                    <h3 className="text-lg font-semibold text-gray-900">{feature.title}</h3>
-                    <p className="text-gray-600">{feature.description}</p>
-                  </div>
-                </div>
-              </GlowingCard>
+              <FeatureCard title={feature.title} icon={feature.icon}>
+                {feature.description}
+              </FeatureCard>
             </motion.div>
           ))}
         </div>

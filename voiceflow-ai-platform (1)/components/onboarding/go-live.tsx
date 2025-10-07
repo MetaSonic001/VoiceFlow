@@ -24,9 +24,14 @@ export function GoLive({ onComplete, phoneNumber }: GoLiveProps) {
   const handleDeploy = async () => {
     setIsDeploying(true)
     try {
-      // call backend deploy; assume onboarding-flow saved agent_id in localStorage
-      const stored = localStorage.getItem('onboarding_data')
-      const agentId = stored ? (JSON.parse(stored).agent_id as string) : undefined
+      // call backend deploy; fetch agent_id from server-side onboarding progress if needed
+      let agentId: string | undefined = undefined
+      try {
+        const prog = await (await import('@/lib/api-client')).apiClient.getOnboardingProgress()
+        if (prog?.exists && prog.agent_id) agentId = String(prog.agent_id)
+      } catch (e) {
+        // ignore
+      }
       if (!agentId) throw new Error('Missing agent id')
       const res = await apiClient.deployAgent(agentId)
       toast({ title: 'Deployment started', description: 'Agent deployment is in progress' })
