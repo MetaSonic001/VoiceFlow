@@ -51,7 +51,7 @@ class OCRProcessor:
         """Check if OCR service is available"""
         return self._available
     
-    async def process(self, content: bytes, file_type: str) -> str:
+    async def process(self, content, file_type: str) -> str:
         """
         Process image or PDF with OCR
         
@@ -68,12 +68,14 @@ class OCRProcessor:
         logger.info(f"Starting OCR processing for {file_type}")
         
         try:
+            # content may be bytes or a file path
+            is_path = isinstance(content, str)
             if file_type == "image":
-                # keep backward compatible: return plain text
-                structured = await self.process_structured_image(content)
+                # For file path defer to process_structured_image which supports reading via PIL
+                structured = await self.process_structured_image(content if is_path else content)
                 return structured.get('text', '')
             elif file_type == "pdf":
-                structured_pages = await self.process_structured_pdf(content)
+                structured_pages = await self.process_structured_pdf(content if is_path else content)
                 # concatenate page texts for compatibility
                 return "\n\n".join([p.get('text', '') for p in structured_pages])
             else:

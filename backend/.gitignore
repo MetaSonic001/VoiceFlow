@@ -1,0 +1,47 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# dotenv files
+.env
+.env.*
+
+# Test/run caches
+.pytest_cache/
+.mypy_cache/
+.coverage
+
+# IDE/editor
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.log
+*.sqlite3
+
+# Chroma DB often lives in document-ingestion; ignore local temporary chroma files if created here
+chroma_db/
+
+# Build/dist
+build/
+dist/
+*.egg-info/
+
+# Ignore docker compose overrides
+docker-compose.override.yml
+
+# Local data
+*.db
+

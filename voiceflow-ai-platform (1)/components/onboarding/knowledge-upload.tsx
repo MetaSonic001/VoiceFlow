@@ -3,6 +3,8 @@
 import type React from "react"
 
 import { useState } from "react"
+import { apiClient } from '@/lib/api-client'
+import { useToast } from '@/hooks/use-toast'
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -19,6 +21,9 @@ export function KnowledgeUpload({ onComplete }: KnowledgeUploadProps) {
   const [websites, setWebsites] = useState<string[]>([])
   const [newWebsite, setNewWebsite] = useState("")
   const [faqText, setFaqText] = useState("")
+  const [uploading, setUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null)
+  const { toast } = useToast()
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || [])
@@ -42,13 +47,22 @@ export function KnowledgeUpload({ onComplete }: KnowledgeUploadProps) {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    onComplete({
-      knowledge: {
-        files: uploadedFiles,
-        websites,
-        faqText,
-      },
-    })
+    ;(async () => {
+      onComplete({ knowledge: { files: uploadedFiles, websites, faqText } })
+      // attempt an immediate upload for better UX
+      setUploading(true)
+      setUploadProgress(0)
+      try {
+        await apiClient.uploadKnowledge({ files: uploadedFiles, websites, faqText })
+        setUploadProgress(100)
+        toast({ title: 'Upload complete', description: 'Knowledge uploaded successfully' })
+      } catch (e: any) {
+        toast({ title: 'Upload failed', description: e?.message || 'Failed to upload knowledge' })
+      } finally {
+        setUploading(false)
+        setTimeout(() => setUploadProgress(null), 800)
+      }
+    })()
   }
 
   return (
@@ -164,13 +178,14 @@ A: You can return products within 30 days..."
           </CardContent>
         </Card>
 
-        <Button
-          type="submit"
-          className="w-full"
-          disabled={uploadedFiles.length === 0 && websites.length === 0 && !faqText}
-        >
-          Continue to Voice Setup
-        </Button>
+        <div>
+          {uploadProgress !== null && (
+            <div className="mb-2 text-sm text-muted-foreground">Uploading... {uploadProgress}%</div>
+          )}
+          <Button type="submit" className="w-full" disabled={uploading || (uploadedFiles.length === 0 && websites.length === 0 && !faqText)}>
+            {uploading ? 'Uploading...' : 'Continue to Voice Setup'}
+          </Button>
+        </div>
       </form>
     </div>
   )

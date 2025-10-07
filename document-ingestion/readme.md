@@ -213,6 +213,27 @@ Search documents using vector similarity.
 }
 ```
 
+## Multi-tenant Chroma usage (important)
+
+This repository stores embeddings in ChromaDB using one collection per tenant and per agent (collection name = "{tenant_id}_{agent_id}" with hyphens replaced by underscores).
+
+- Why: keeps indexes small and focused, improves search relevance and performance.
+- Requirement: Every ingestion that creates embeddings MUST include `tenant_id` and `agent_id` in the document metadata passed to the ingestion endpoint or to the VectorStore APIs. The VectorStore will raise an error if tenant/agent are missing to prevent accidental global writes/queries.
+
+Example metadata for ingestion:
+
+```py
+metadata = {
+  'tenant_id': 'tenant-1234',
+  'agent_id': 'agent-5678',
+  'original_filename': 'report.pdf',
+  'category': 'reports'
+}
+```
+
+Batch insertions into the collection are used for performance. When querying, always provide tenant_id and agent_id (either as explicit parameters or inside your where/filter metadata) to scope the query and avoid global scans.
+
+
 ## Frontend Integration
 
 ### Next.js Example

@@ -2,19 +2,23 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Phone, MessageSquare, Mail, Copy, ExternalLink } from "lucide-react"
+import { apiClient } from '@/lib/api-client'
+import { useToast } from '@/hooks/use-toast'
 
 interface ChannelSetupProps {
   onComplete: (data: any) => void
 }
 
 export function ChannelSetup({ onComplete }: ChannelSetupProps) {
+  const { toast } = useToast()
+
   const [formData, setFormData] = useState({
     phoneNumber: "",
     chatWidget: {
@@ -32,14 +36,37 @@ export function ChannelSetup({ onComplete }: ChannelSetupProps) {
     },
   })
 
+  const [availableNumbers, setAvailableNumbers] = useState<Array<{ sid?: string; phone_number?: string; friendly_name?: string }>>([])
+  const [loadingNumbers, setLoadingNumbers] = useState(false)
+
+  useEffect(() => {
+    let mounted = true
+    async function load() {
+      setLoadingNumbers(true)
+      try {
+        const data = await apiClient.getTwilioNumbers()
+        if (mounted) setAvailableNumbers(data.numbers || [])
+      } catch (e: any) {
+        console.warn('Could not load Twilio numbers', e)
+        toast({ title: 'Twilio', description: e?.message || 'Could not load numbers' })
+      } finally {
+        if (mounted) setLoadingNumbers(false)
+      }
+    }
+    load()
+    return () => { mounted = false }
+  }, [])
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    onComplete({ channels: formData })
+    // return selected channels + phone number to parent; parent will call backend API
+    onComplete({ channels: formData, phone_number: formData.phoneNumber })
   }
 
   const copyWidgetCode = () => {
     const widgetCode = `<script src="https://voiceflow-ai.com/widget.js" data-agent-id="your-agent-id"></script>`
     navigator.clipboard.writeText(widgetCode)
+    toast({ title: 'Copied', description: 'Widget embed code copied to clipboard' })
   }
 
   return (
@@ -47,9 +74,7 @@ export function ChannelSetup({ onComplete }: ChannelSetupProps) {
       <div className="text-center">
         <MessageSquare className="w-12 h-12 text-accent mx-auto mb-4" />
         <h2 className="text-2xl font-bold mb-2">Configure communication channels</h2>
-        <p className="text-muted-foreground">
-          Set up how customers will reach your AI agent across different platforms.
-        </p>
+        <p className="text-muted-foreground">Set up how customers will reach your AI agent across different platforms.</p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
@@ -68,15 +93,40 @@ export function ChannelSetup({ onComplete }: ChannelSetupProps) {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="font-medium">Assigned Phone Number</p>
-                  <p className="text-sm text-muted-foreground">+1 (555) 123-4567</p>
+                  <p className="text-sm text-muted-foreground">{formData.phoneNumber || 'Not assigned'}</p>
                 </div>
                 <Badge variant="outline">Active</Badge>
               </div>
             </div>
-            <p className="text-sm text-muted-foreground">
-              This number is automatically provisioned for your agent. Customers can call this number to interact with
-              your AI agent.
-            </p>
+
+            <div className="mt-3">
+              <Label>Choose a Twilio Number</Label>
+              {loadingNumbers ? (
+                <p>Loading numbers...</p>
+              ) : (
+                <div className="space-y-2">
+                  {availableNumbers.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No Twilio numbers available. You can provision one in the Twilio console.</p>
+                  ) : (
+                    <div className="grid gap-2 grid-cols-1 md:grid-cols-2">
+                      {availableNumbers.map((n) => (
+                        <button
+                          key={n.sid || n.phone_number}
+                          type="button"
+                          onClick={() => setFormData({ ...formData, phoneNumber: n.phone_number || '' })}
+                          className={`p-3 border rounded text-left ${formData.phoneNumber === n.phone_number ? 'border-primary bg-muted' : 'border-border'}`}
+                        >
+                          <div className="font-medium">{n.phone_number}</div>
+                          <div className="text-sm text-muted-foreground">{n.friendly_name}</div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <p className="text-sm text-muted-foreground">This number is automatically provisioned for your agent. Customers can call this number to interact with your AI agent.</p>
           </CardContent>
         </Card>
 
@@ -96,12 +146,7 @@ export function ChannelSetup({ onComplete }: ChannelSetupProps) {
                 id="websiteUrl"
                 placeholder="https://yourwebsite.com"
                 value={formData.chatWidget.websiteUrl}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    chatWidget: { ...formData.chatWidget, websiteUrl: e.target.value },
-                  })
-                }
+                onChange={(e) => setFormData({ ...formData, chatWidget: { ...formData.chatWidget, websiteUrl: e.target.value } })}
               />
             </div>
 
@@ -111,24 +156,10 @@ export function ChannelSetup({ onComplete }: ChannelSetupProps) {
                 <Input
                   type="color"
                   value={formData.chatWidget.widgetColor}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      chatWidget: { ...formData.chatWidget, widgetColor: e.target.value },
-                    })
-                  }
+                  onChange={(e) => setFormData({ ...formData, chatWidget: { ...formData.chatWidget, widgetColor: e.target.value } })}
                   className="w-12 h-10"
                 />
-                <Input
-                  value={formData.chatWidget.widgetColor}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      chatWidget: { ...formData.chatWidget, widgetColor: e.target.value },
-                    })
-                  }
-                  className="flex-1"
-                />
+                <Input value={formData.chatWidget.widgetColor} onChange={(e) => setFormData({ ...formData, chatWidget: { ...formData.chatWidget, widgetColor: e.target.value } })} className="flex-1" />
               </div>
             </div>
 
@@ -140,9 +171,7 @@ export function ChannelSetup({ onComplete }: ChannelSetupProps) {
                   Copy
                 </Button>
               </div>
-              <code className="text-sm bg-background p-2 rounded block">
-                {`<script src="https://voiceflow-ai.com/widget.js" data-agent-id="your-agent-id"></script>`}
-              </code>
+              <code className="text-sm bg-background p-2 rounded block">{`<script src="https://voiceflow-ai.com/widget.js" data-agent-id="your-agent-id"></script>`}</code>
             </div>
           </CardContent>
         </Card>
@@ -181,17 +210,7 @@ export function ChannelSetup({ onComplete }: ChannelSetupProps) {
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="emailForwarding">Email Forwarding Address</Label>
-              <Input
-                id="emailForwarding"
-                placeholder="support@yourcompany.com"
-                value={formData.email.forwardingAddress}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    email: { ...formData.email, forwardingAddress: e.target.value },
-                  })
-                }
-              />
+              <Input id="emailForwarding" placeholder="support@yourcompany.com" value={formData.email.forwardingAddress} onChange={(e) => setFormData({ ...formData, email: { ...formData.email, forwardingAddress: e.target.value } })} />
               <p className="text-sm text-muted-foreground">Forward emails to: agent-12345@voiceflow-ai.com</p>
             </div>
           </CardContent>

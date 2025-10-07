@@ -19,7 +19,7 @@ torch
 chromadb
 
 # Database
-asyncpg
+# (Postgres access is provided by the backend; ingestion uses the backend adapter)
 
 # File type detection
 python-magic

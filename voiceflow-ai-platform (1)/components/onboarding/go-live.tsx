@@ -1,25 +1,55 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { CheckCircle, Rocket, Phone, MessageSquare, Copy, ExternalLink } from "lucide-react"
+import { apiClient } from '@/lib/api-client'
+import { useToast } from '@/hooks/use-toast'
 
 interface GoLiveProps {
   onComplete: (data: any) => void
+  phoneNumber?: string
 }
 
-export function GoLive({ onComplete }: GoLiveProps) {
+export function GoLive({ onComplete, phoneNumber }: GoLiveProps) {
   const [isDeploying, setIsDeploying] = useState(false)
   const [isDeployed, setIsDeployed] = useState(false)
+  const [deployedNumber, setDeployedNumber] = useState<string | undefined>(phoneNumber)
+  const { toast } = useToast()
+
+  useEffect(() => { setDeployedNumber(phoneNumber) }, [phoneNumber])
 
   const handleDeploy = async () => {
     setIsDeploying(true)
-    // Simulate deployment process
-    await new Promise((resolve) => setTimeout(resolve, 3000))
-    setIsDeploying(false)
-    setIsDeployed(true)
+    try {
+      // call backend deploy; assume onboarding-flow saved agent_id in localStorage
+      const stored = localStorage.getItem('onboarding_data')
+      const agentId = stored ? (JSON.parse(stored).agent_id as string) : undefined
+      if (!agentId) throw new Error('Missing agent id')
+      const res = await apiClient.deployAgent(agentId)
+      toast({ title: 'Deployment started', description: 'Agent deployment is in progress' })
+      setIsDeploying(false)
+      setIsDeployed(true)
+      if (res?.phone_number) setDeployedNumber(res.phone_number)
+
+      // start polling status briefly
+      const poll = async () => {
+        try {
+          const status = await apiClient.getDeploymentStatus(agentId)
+          if (status?.status === 'ready' && status.message) {
+            toast({ title: 'Deployment complete', description: status.message })
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+      setTimeout(poll, 2000)
+    } catch (e: any) {
+      setIsDeploying(false)
+      toast({ title: 'Deployment failed', description: e?.message || 'Failed to deploy' })
+    }
   }
 
   const handleComplete = () => {
@@ -27,7 +57,7 @@ export function GoLive({ onComplete }: GoLiveProps) {
   }
 
   const copyPhoneNumber = () => {
-    navigator.clipboard.writeText("+1 (555) 123-4567")
+    navigator.clipboard.writeText(deployedNumber || phoneNumber || "+1 (555) 123-4567")
   }
 
   const copyWidgetCode = () => {
@@ -70,7 +100,7 @@ export function GoLive({ onComplete }: GoLiveProps) {
               <div className="space-y-2">
                 <h4 className="font-medium">Channels</h4>
                 <div className="space-y-1">
-                  <Badge variant="secondary">Phone: +1 (555) 123-4567</Badge>
+                  <Badge variant="secondary">Phone: {deployedNumber || phoneNumber || "+1 (555) 123-4567"}</Badge>
                   <Badge variant="secondary">Website Chat Widget</Badge>
                 </div>
               </div>
@@ -125,8 +155,8 @@ export function GoLive({ onComplete }: GoLiveProps) {
             <CardDescription>Customers can call your agent</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
-              <span className="font-mono">+1 (555) 123-4567</span>
+              <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
+              <span className="font-mono">{phoneNumber || "+1 (555) 123-4567"}</span>
               <Button variant="ghost" size="sm" onClick={copyPhoneNumber}>
                 <Copy className="w-4 h-4" />
               </Button>

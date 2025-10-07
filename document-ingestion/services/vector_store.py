@@ -42,8 +42,10 @@ class VectorStore:
 
             # Ensure directory exists
             os.makedirs(persist_directory, exist_ok=True)
-            
-            # Initialize client with persistent storage
+
+            # Initialize client with persistent storage. We do not create a single
+            # global collection here because this service supports per-tenant-agent
+            # collections. Collections are created lazily when storing embeddings.
             self.client = chromadb.PersistentClient(
                 path=persist_directory,
                 settings=Settings(
@@ -51,16 +53,9 @@ class VectorStore:
                     allow_reset=True
                 )
             )
-            
-            # Get or create collection
-            self.collection = self.client.get_or_create_collection(
-                name="documents",
-                metadata={"hnsw:space": "cosine"}  # Use cosine similarity
-            )
-            
-            logger.info(f"ChromaDB initialized with collection: documents")
-            logger.info(f"Current collection count: {self.collection.count()}")
-            
+
+            logger.info("ChromaDB client initialized (collections are created per-tenant-agent on demand)")
+
         except Exception as e:
             logger.error(f"Failed to initialize ChromaDB: {e}", exc_info=True)
             raise
@@ -73,10 +68,25 @@ class VectorStore:
             True if accessible, False otherwise
         """
         try:
-            self.collection.count()
+            # Try a lightweight list_collections call as we may not have a default collection
+            self.client.list_collections()
             return True
-        except:
+        except Exception:
             return False
+
+
+def collection_name(tenant_id: str, agent_id: str) -> str:
+    """Stable collection naming: tenant_agent (hyphens -> underscores)"""
+    return f"{tenant_id}_{agent_id}".replace('-', '_')
+
+
+def _get_or_create_collection(client, tenant_id: str, agent_id: str, embedding_dim: int = None):
+    name = collection_name(tenant_id, agent_id)
+    metadata = {"hnsw:space": "cosine"}
+    if embedding_dim:
+        metadata["embedding_dim"] = embedding_dim
+    coll = client.get_or_create_collection(name=name, metadata=metadata)
+    return coll
     
     async def store_embeddings(
         self,
@@ -151,8 +161,17 @@ class VectorStore:
                 logger.info("No unique chunks to store after deduplication")
                 return
 
-            # Add to collection
-            self.collection.add(
+            # Determine tenant/agent (required) from provided metadata
+            tenant_id = metadata.get('tenant_id') or metadata.get('tenant')
+            agent_id = metadata.get('agent_id') or metadata.get('agent')
+            if not tenant_id or not agent_id:
+                raise ValueError('tenant_id and agent_id must be provided in metadata for multi-tenant collections')
+
+            # Create/get the target collection for this tenant+agent
+            coll = _get_or_create_collection(self.client, tenant_id, agent_id, embedding_dim=self.get_embedding_dimension())
+
+            # Batch insert (do not add one at a time)
+            coll.add(
                 ids=ids,
                 embeddings=unique_embeddings,
                 documents=unique_chunks,
@@ -169,8 +188,11 @@ class VectorStore:
                 # Whoosh optional; ignore failures here
                 pass
 
-            logger.info(f"Successfully stored {len(unique_embeddings)} unique embeddings")
-            logger.info(f"Total documents in collection: {self.collection.count()}")
+            logger.info(f"Successfully stored {len(unique_embeddings)} unique embeddings into collection {tenant_id}_{agent_id}")
+            try:
+                logger.info(f"Total documents in collection: {coll.count()}")
+            except Exception:
+                pass
 
         except Exception as e:
             logger.error(f"Error storing embeddings: {e}", exc_info=True)
@@ -180,7 +202,9 @@ class VectorStore:
         self,
         query_embedding: List[float],
         limit: int = 10,
-        filter_metadata: Dict[str, Any] = None
+        filter_metadata: Dict[str, Any] = None,
+        tenant_id: str = None,
+        agent_id: str = None
     ) -> List[Dict[str, Any]]:
         """
         Search for similar embeddings
@@ -196,11 +220,26 @@ class VectorStore:
         logger.info(f"Searching for {limit} similar documents")
         
         try:
+            # Enforce tenant/agent scoping to avoid global scans
+            if not filter_metadata:
+                filter_metadata = {}
+
+            if tenant_id:
+                filter_metadata['tenant_id'] = tenant_id
+            if agent_id:
+                filter_metadata['agent_id'] = agent_id
+
+            if 'tenant_id' not in filter_metadata or 'agent_id' not in filter_metadata:
+                raise ValueError('search requires tenant_id and agent_id either as args or inside filter_metadata')
+
+            coll_name = collection_name(filter_metadata['tenant_id'], filter_metadata['agent_id'])
+            coll = self.client.get_collection(coll_name)
+
             # Query collection
-            results = self.collection.query(
+            results = coll.query(
                 query_embeddings=[query_embedding],
                 n_results=limit,
-                where=filter_metadata if filter_metadata else None
+                where=filter_metadata
             )
             
             # Format results
@@ -236,9 +275,8 @@ class VectorStore:
         logger.info(f"Retrieving chunks for document {document_id}")
         
         try:
-            results = self.collection.get(
-                where={"document_id": document_id}
-            )
+            # Must specify tenant/agent in metadata filter to scope the get
+            raise NotImplementedError('get_by_document_id requires tenant_id and agent_id - call get_by_document_id_for(collection) instead')
             
             formatted_results = []
             
@@ -263,12 +301,7 @@ class VectorStore:
         Delete all embeddings and chunks associated with a document ID
         """
         try:
-            results = self.collection.get(where={"document_id": document_id})
-            if results["ids"]:  # If any embeddings found
-                self.collection.delete(ids=results["ids"])
-                logger.info(f"Deleted {len(results['ids'])} embeddings for document {document_id}")
-            else:
-                logger.warning(f"No embeddings found for document {document_id}")
+            raise NotImplementedError('delete_embeddings_by_document requires tenant_id and agent_id - use delete_embeddings_by_document_for(collection)')
         except Exception as e:
             logger.error(f"Failed to delete embeddings for document {document_id}: {str(e)}")
             raise
@@ -277,19 +310,8 @@ class VectorStore:
         """
         Reset the entire collection (use with caution)
         """
-        logger.warning("Resetting collection - all data will be lost!")
-        
-        try:
-            self.client.delete_collection("documents")
-            self.collection = self.client.get_or_create_collection(
-                name="documents",
-                metadata={"hnsw:space": "cosine"}
-            )
-            logger.info("Collection reset complete")
-        
-        except Exception as e:
-            logger.error(f"Error resetting collection: {e}", exc_info=True)
-            raise
+        logger.warning("Resetting a collection requires tenant_id and agent_id; use reset_collection_for(tenant_id, agent_id)")
+        raise NotImplementedError('Use reset_collection_for(tenant_id, agent_id)')
         
     async def sync_from_database(
         self,
@@ -376,7 +398,7 @@ class VectorStore:
                     
                     embeddings = await embedder.embed_chunks(chunks)
                     
-                    # Store
+                    # Store - metadata must include tenant_id and agent_id to route to the right collection
                     await self.store_embeddings(doc_id, chunks, embeddings, metadata)
                     # Update document status to completed
                     try:

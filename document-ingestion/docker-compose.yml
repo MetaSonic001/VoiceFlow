@@ -1,21 +1,10 @@
 version: '3.8'
 
-services:
-  postgres:
-    image: postgres:15
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-doc_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-doc_password}
-      POSTGRES_DB: ${POSTGRES_DB:-documents_db}
-      # Map host port to 5433 so local services expecting 5433 can connect
-      # Note: container still listens on 5432 internally
-      POSTGRES_PORT: ${POSTGRES_PORT:-5433}
-    ports:
-      - "5433:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
+# NOTE: This project delegates metadata storage to the backend/Postgres service.
+# Do not run a second Postgres here. Configure your environment to point at the
+# backend Postgres (host: localhost, port: 5433 by default) or set BACKEND_DATABASE_URL
+# in your environment to the backend's DATABASE_URL.
 
-volumes:
-  postgres_data:
-    name: document_ingestion_postgres_data
+services: {}
+  # backend Postgres at host port 5433 (container still listens on 5432 internally).
+

@@ -228,7 +228,7 @@ class BulkDeleteResponse(BaseModel):
 
 # Helper function for processing pipeline
 async def process_document(
-    content: bytes,
+    content,
     filename: str,
     file_type: str,
     metadata: Dict[str, Any]
@@ -241,15 +241,28 @@ async def process_document(
     
     try:
         extracted_text = ""
-        
+
+        # If content is a path string, read minimal info and let services open file as needed
+        is_path = isinstance(content, str)
+        data_bytes = None
+        if is_path:
+            # leave actual heavy reads to OCR or scraper which can operate on paths
+            data_bytes = None
+        else:
+            data_bytes = content
+
         # Step 1: Extract text based on file type
         if file_type in ["image", "pdf"]:
             logger.info(f"Processing {file_type} with OCR")
-            extracted_text = await ocr_processor.process(content, file_type)
+            # OCR processor supports either bytes or a file path
+            if is_path:
+                extracted_text = await ocr_processor.process(content, file_type)
+            else:
+                extracted_text = await ocr_processor.process(data_bytes, file_type)
             logger.info(f"OCR completed. Extracted {len(extracted_text)} characters")
         
         elif file_type == "url":
-            url = content.decode('utf-8')
+            url = content.decode('utf-8') if not is_path else open(content, 'rb').read().decode('utf-8')
             logger.info(f"Scraping URL: {url}")
             extracted_text = await web_scraper.scrape(url)
             logger.info(f"Scraping completed. Extracted {len(extracted_text)} characters")
@@ -278,9 +291,20 @@ async def process_document(
 
         # Step 2: Store original document in Postgres
         logger.info("Storing original document in database")
+        # For store_document we prefer to pass bytes when available; if caller provided a file path,
+        # read its bytes for storing the raw content. If file is too large this may be slow; consider
+        # letting the backend DB store a reference and filesystem storage handle the file contents.
+        store_content = data_bytes if data_bytes is not None else None
+        if store_content is None and is_path:
+            try:
+                with open(content, 'rb') as fh:
+                    store_content = fh.read()
+            except Exception:
+                store_content = b''
+
         document_id = await db_manager.store_document(
             filename=filename,
-            content=content,
+            content=store_content,
             file_type=file_type,
             metadata=metadata
         )

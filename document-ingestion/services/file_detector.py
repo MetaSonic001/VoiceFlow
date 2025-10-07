@@ -27,7 +27,7 @@ class FileDetector:
         
         logger.info("FileDetector initialized")
     
-    def detect_type(self, content: bytes, filename: Optional[str] = None) -> str:
+    def detect_type(self, content, filename: Optional[str] = None) -> str:
         """
         Detect file type from content and filename
         
@@ -39,20 +39,29 @@ class FileDetector:
             File type: 'image', 'pdf', 'text', 'document', 'url'
         """
         try:
-            # Try to detect MIME type
-            mime = magic.from_buffer(content, mime=True)
+            # If a file path was passed, read a small chunk for detection
+            if isinstance(content, str):
+                try:
+                    with open(content, 'rb') as fh:
+                        sample = fh.read(1024 * 1024)
+                except Exception:
+                    sample = b''
+                mime = magic.from_buffer(sample, mime=True)
+            else:
+                # Try to detect MIME type from bytes
+                mime = magic.from_buffer(content, mime=True)
             logger.info(f"MIME type detected: {mime}")
             
             # Check for images
-            if mime.startswith('image/'):
+            if mime and mime.startswith('image/'):
                 return 'image'
             
             # Check for PDF
-            if mime == 'application/pdf' or content.startswith(b'%PDF'):
+            if mime == 'application/pdf' or (not isinstance(content, str) and content.startswith(b'%PDF')):
                 return 'pdf'
             
             # Check for text
-            if mime.startswith('text/'):
+            if mime and mime.startswith('text/'):
                 return 'text'
             
             # Check for common document types
@@ -75,12 +84,18 @@ class FileDetector:
                     return 'document'
             
             # Default to text if small and mostly ASCII
-            if len(content) < 1_000_000:  # Less than 1MB
-                try:
-                    content.decode('utf-8')
-                    return 'text'
-                except:
-                    pass
+            try:
+                sample_len = len(sample) if 'sample' in locals() else len(content)
+                if sample_len < 1_000_000:  # Less than 1MB
+                    s = sample if 'sample' in locals() else content
+                    try:
+                        if not isinstance(s, str):
+                            s.decode('utf-8')
+                            return 'text'
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             
             logger.warning(f"Unknown file type for MIME: {mime}")
             return 'unknown'

@@ -19,16 +19,16 @@ class TextEmbedder:
     def __init__(
         self,
         model_name: str = "all-MiniLM-L6-v2",
-        chunk_size: int = 512,
-        chunk_overlap: int = 50
+        chunk_size: int = 800,
+        chunk_overlap: int = 200
     ):
         """
         Initialize embedder with model
         
         Args:
             model_name: Sentence transformer model name
-            chunk_size: Size of text chunks in characters
-            chunk_overlap: Overlap between chunks
+            chunk_size: Size of text chunks in characters (default tuned ~800 to target 300-1000 token sweet spot)
+            chunk_overlap: Overlap between chunks in characters (default tuned ~25% overlap)
         """
         try:
             logger.info(f"Loading embedding model: {model_name}")
@@ -38,13 +38,13 @@ class TextEmbedder:
                 self.chunk_size = int(chunk_size)
             except Exception:
                 logger.warning("Invalid chunk_size provided, falling back to 512")
-                self.chunk_size = 512
+                self.chunk_size = 800
 
             try:
                 self.chunk_overlap = int(chunk_overlap)
             except Exception:
                 logger.warning("Invalid chunk_overlap provided, falling back to 50")
-                self.chunk_overlap = 50
+                self.chunk_overlap = int(self.chunk_size * 0.25)
             logger.info("Embedding model loaded successfully")
         except Exception as e:
             logger.error(f"Failed to load embedding model: {e}", exc_info=True)

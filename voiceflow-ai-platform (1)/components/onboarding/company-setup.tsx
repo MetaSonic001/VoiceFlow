@@ -2,7 +2,8 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { useToast } from '@/hooks/use-toast'
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -21,9 +22,26 @@ export function CompanySetup({ onComplete }: CompanySetupProps) {
     useCase: "",
     description: "",
   })
+  const { toast } = useToast()
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('onboarding_data')
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (parsed.company) setFormData(parsed.company)
+      }
+    } catch (e) {}
+  }, [])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+    try {
+      const raw = localStorage.getItem('onboarding_data')
+      const base = raw ? JSON.parse(raw) : {}
+      localStorage.setItem('onboarding_data', JSON.stringify({ ...base, company: formData }))
+    } catch (e) {}
+    toast({ title: 'Saved', description: 'Company profile saved locally' })
     onComplete({ company: formData })
   }
 

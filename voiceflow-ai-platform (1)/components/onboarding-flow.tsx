@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
@@ -14,6 +14,8 @@ import { TestingSandbox } from "@/components/onboarding/testing-sandbox"
 import { GoLive } from "@/components/onboarding/go-live"
 import { Brain, CheckCircle } from "lucide-react"
 import { useRouter } from "next/navigation"
+import { apiClient } from "@/lib/api-client"
+import { useToast } from '@/hooks/use-toast'
 
 const STEPS = [
   { id: 1, title: "Company Profile", description: "Tell us about your business" },
@@ -29,14 +31,105 @@ export function OnboardingFlow() {
   const [currentStep, setCurrentStep] = useState(1)
   const [completedSteps, setCompletedSteps] = useState<number[]>([])
   const [onboardingData, setOnboardingData] = useState({})
+  const { toast } = useToast()
+  const [isProcessing, setIsProcessing] = useState(false)
+
+  // hydrate from localStorage if present
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('onboarding_data')
+      if (raw) setOnboardingData(JSON.parse(raw))
+    } catch (e) {
+      // ignore
+    }
+  }, [])
   const router = useRouter()
 
   const progress = ((currentStep - 1) / (STEPS.length - 1)) * 100
 
   const handleStepComplete = (stepData: any) => {
-    setOnboardingData((prev) => ({ ...prev, ...stepData }))
+    // Persist step data locally
+    setOnboardingData((prev) => {
+      const merged = { ...prev, ...stepData }
+      try { localStorage.setItem('onboarding_data', JSON.stringify(merged)) } catch (e) {}
+      return merged
+    })
     setCompletedSteps((prev) => [...prev, currentStep])
 
+    // Call backend based on step
+    ;(async () => {
+      setIsProcessing(true)
+      try {
+        if (currentStep === 1 && stepData.company) {
+          await apiClient.saveCompanyProfile({ company_name: stepData.company.companyName, industry: stepData.company.industry, use_case: stepData.company.useCase })
+        }
+
+        if (currentStep === 2 && stepData.agent) {
+          const res = await apiClient.createAgent({ name: stepData.agent.agentName, role: stepData.agent.role, channels: stepData.agent.channels })
+          if (res && (res as any).agent_id) {
+            setOnboardingData((prev) => {
+              const merged = { ...prev, agent_id: (res as any).agent_id }
+              try { localStorage.setItem('onboarding_data', JSON.stringify(merged)) } catch (e) {}
+              return merged
+            })
+            toast({ title: 'Agent created', description: 'Your agent was created successfully.' })
+          }
+        }
+
+        if (currentStep === 3 && stepData.knowledge) {
+          // uploadKnowledge expects form data; use apiClient.uploadKnowledge implementation
+          await apiClient.uploadKnowledge({ files: stepData.knowledge.files, websites: stepData.knowledge.websites, faqText: stepData.knowledge.faqText })
+        }
+
+        if (currentStep === 4 && stepData.voice) {
+          await apiClient.configureVoice({ voice: stepData.voice.voice, tone: stepData.voice.tone, language: stepData.voice.language })
+        }
+
+  if (currentStep === 5 && stepData.channels) {
+          // include selected phone number if provided
+          const payload = {
+            phone_number: stepData.phone_number || stepData.channels.phoneNumber || undefined,
+            chat_widget: {
+              enabled: stepData.channels.chatWidget?.enabled ?? true,
+              website_url: stepData.channels.chatWidget?.websiteUrl || undefined,
+              widget_color: stepData.channels.chatWidget?.widgetColor || undefined,
+            },
+            whatsapp: {
+              enabled: stepData.channels.whatsapp?.enabled ?? false,
+              business_number: stepData.channels.whatsapp?.businessNumber || undefined,
+            },
+            email: {
+              enabled: stepData.channels.email?.enabled ?? false,
+              forwarding_address: stepData.channels.email?.forwardingAddress || undefined,
+            },
+          }
+          await apiClient.setupChannels(payload as any)
+          toast({ title: 'Channels configured', description: 'Communication channels saved.' })
+        }
+
+        if (currentStep === 7) {
+          const agentId = (onboardingData as any).agent_id || ''
+          try {
+            const res = await apiClient.deployAgent(agentId)
+            toast({ title: 'Deployment started', description: 'Agent deployment is in progress.' })
+            // store phone_number if returned
+            if (res?.phone_number) {
+              setOnboardingData((prev) => ({ ...prev, phone_number: res.phone_number }))
+              try { localStorage.setItem('onboarding_data', JSON.stringify({ ...onboardingData, phone_number: res.phone_number })) } catch (e) {}
+            }
+          } catch (err: any) {
+            toast({ title: 'Deployment failed', description: err?.message || 'Failed to deploy agent' })
+          }
+        }
+      } catch (e) {
+        console.warn('Onboarding step API error', e)
+        toast({ title: 'Error', description: (e as any)?.message || 'API error' })
+      } finally {
+        setIsProcessing(false)
+      }
+    })()
+
+    // advance UI
     if (currentStep < STEPS.length) {
       setCurrentStep(currentStep + 1)
     } else {
@@ -66,7 +159,7 @@ export function OnboardingFlow() {
       case 6:
         return <TestingSandbox onComplete={handleStepComplete} />
       case 7:
-        return <GoLive onComplete={handleStepComplete} />
+        return <GoLive onComplete={handleStepComplete} phoneNumber={(onboardingData as any).phone_number} />
       default:
         return null
     }
@@ -153,7 +246,7 @@ export function OnboardingFlow() {
 
             {/* Navigation */}
             <div className="flex justify-between mt-6">
-              <Button variant="outline" onClick={handleBack} disabled={currentStep === 1}>
+              <Button variant="outline" onClick={handleBack} disabled={currentStep === 1 || isProcessing}>
                 Back
               </Button>
               <div className="text-sm text-muted-foreground">

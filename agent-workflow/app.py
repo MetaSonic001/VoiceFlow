@@ -151,7 +151,8 @@ processed_cache_lock = asyncio.Lock()
 # Configuration
 # ========================
 class Config:
-    CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", "./chroma_db")
+    # Default to the shared ingestion chroma path so all services use the same vector store
+    CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", os.path.join("..", "document-ingestion", "chroma_db"))
     GROQ_API_KEY = os.getenv("GROQ_API_KEY")
     COLLECTION_NAME = os.getenv("COLLECTION_NAME", "documents")
     GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-70b-versatile")

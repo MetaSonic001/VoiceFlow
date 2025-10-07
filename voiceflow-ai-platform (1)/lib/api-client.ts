@@ -1,5 +1,6 @@
 // API Client Configuration and Utilities
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+const AGENT_RUNNER_URL = process.env.NEXT_PUBLIC_AGENT_RUNNER_URL || "http://localhost:8110"
 
 export class ApiError extends Error {
   constructor(
@@ -56,29 +57,65 @@ class ApiClient {
     }
   }
 
+  // Helper to extract a friendly message from an error
+  safeParseError(err: any) {
+    if (!err) return 'Unknown error'
+    if (err instanceof ApiError) return err.response?.message || err.message || `HTTP ${err.status}`
+    if (err?.message) return err.message
+    return String(err)
+  }
+
   // Auth endpoints
+  // Auth helpers that persist token + user locally
+  private persistAuth(token: string, user: any) {
+    if (token) localStorage.setItem('auth_token', token)
+    if (user) localStorage.setItem('auth_user', JSON.stringify(user))
+  }
+
   async login(email: string, password: string) {
-    return this.request<{ token: string; user: User; session_id: string }>("/auth/login", {
-      method: "POST",
+    const res = await this.request<{ access_token: string; user: User }>('/auth/login', {
+      method: 'POST',
       body: JSON.stringify({ email, password }),
     })
+    this.persistAuth(res.access_token, res.user)
+    return res
   }
 
-  async signup(email: string, password: string, companyName: string) {
-    return this.request<{ token: string; user: User; session_id: string }>("/auth/signup", {
-      method: "POST",
-      body: JSON.stringify({ email, password, company_name: companyName }),
+  async signup(email: string, password: string) {
+    const res = await this.request<{ access_token: string; user: User }>('/auth/signup', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
     })
+    this.persistAuth(res.access_token, res.user)
+    return res
   }
 
-  async getCurrentUser() {
-    return this.request<User>("/auth/me")
+  async guestLogin() {
+    const res = await this.request<{ access_token: string; user: User }>('/auth/guest', {
+      method: 'POST',
+    })
+    this.persistAuth(res.access_token, res.user)
+    return res
   }
 
   async logout() {
-    return this.request<{ success: boolean }>("/auth/logout", {
-      method: "POST",
-    })
+    // remove local persisted token and call server for symmetry
+    localStorage.removeItem('auth_token')
+    localStorage.removeItem('auth_user')
+    try {
+      await this.request<{ success: boolean }>('/auth/logout', { method: 'POST' })
+    } catch (err) {
+      // ignore network errors on logout
+    }
+    return { success: true }
+  }
+
+  async getCurrentUser() {
+    // prefer token-derived user from localStorage
+    const raw = localStorage.getItem('auth_user')
+    if (raw) return JSON.parse(raw)
+    const res = await this.request<{ user: User }>('/auth/me')
+    return res.user
   }
 
   // Onboarding endpoints
@@ -129,6 +166,11 @@ class ApiClient {
     })
   }
 
+  // Fetch Twilio incoming phone numbers from backend
+  async getTwilioNumbers() {
+    return this.request<{ numbers: Array<{ sid?: string; phone_number?: string; friendly_name?: string }> }>("/twilio/numbers")
+  }
+
   async deployAgent(agentId: string) {
     return this.request<{ success: boolean; phone_number?: string }>("/onboarding/deploy", {
       method: "POST",
@@ -143,6 +185,73 @@ class ApiClient {
   // Agent management endpoints
   async getAgents() {
     return this.request<Agent[]>("/agents")
+  }
+
+  // Pipeline admin
+  async createPipelineAgent(data: { tenant_id: string; name: string; agent_type: string; agent_id?: string; config?: any }) {
+    return this.request<{ id: string; name: string }>("/admin/pipeline_agents", {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async listPipelineAgents() {
+    return this.request<{ pipeline_agents: any[] }>("/admin/pipeline_agents")
+  }
+
+  async createPipeline(data: { tenant_id: string; name: string; agent_id?: string; stages: any[] }) {
+    return this.request<{ id: string; name: string }>("/admin/pipelines", {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async listPipelines() {
+    return this.request<{ pipelines: any[] }>("/admin/pipelines")
+  }
+
+  async triggerPipeline(pipelineId: string, targetAgentId?: string) {
+    const body = { pipeline_id: pipelineId, target_agent_id: targetAgentId }
+    return this.request<{ status: string }>(`/admin/pipelines/trigger`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    })
+  }
+
+  // Agent-runner service client (separate service)
+  private async runnerRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+    const url = `${AGENT_RUNNER_URL}${endpoint}`
+    const cfg: RequestInit = { headers: { 'Content-Type': 'application/json', ...options.headers }, ...options }
+    // pass through auth token
+    const token = localStorage.getItem('auth_token')
+    if (token) cfg.headers = { ...cfg.headers, Authorization: `Bearer ${token}` }
+    const res = await fetch(url, cfg)
+    if (!res.ok) throw new ApiError('Runner error', res.status, await res.json().catch(() => ({})))
+    return await res.json()
+  }
+
+  async runnerCreateAgent(data: { name: string; agent_type: string; config?: any }) {
+    return this.runnerRequest<{ id: number; name: string }>(`/agents`, { method: 'POST', body: JSON.stringify(data) })
+  }
+
+  async runnerListAgents() {
+    return this.runnerRequest<any[]>(`/agents`)
+  }
+
+  async runnerCreatePipeline(data: { name: string; tenant_id?: string; stages: any[] }) {
+    return this.runnerRequest<{ id: number; name: string }>(`/pipelines`, { method: 'POST', body: JSON.stringify(data) })
+  }
+
+  async runnerListPipelines() {
+    return this.runnerRequest<any[]>(`/pipelines`)
+  }
+
+  async runnerTriggerPipeline(pipelineId: number) {
+    return this.runnerRequest<{ message: string }>(`/pipelines/${pipelineId}/trigger`, { method: 'POST', body: JSON.stringify({}) })
+  }
+
+  async runnerTriggerPipelineWithContext(pipelineId: number, context: any) {
+    return this.runnerRequest<{ message: string }>(`/pipelines/${pipelineId}/trigger`, { method: 'POST', body: JSON.stringify(context) })
   }
 
   async getAgent(agentId: string) {

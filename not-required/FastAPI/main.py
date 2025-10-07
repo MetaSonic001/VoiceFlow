@@ -25,6 +25,12 @@ from crewai import Agent, Task, Crew, Process
 from crewai.tools import BaseTool
 import uuid
 import uvicorn
+import pathlib
+import sys
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger('backend')
 
 
 # Database setup
@@ -178,6 +184,7 @@ class ChannelConfig(BaseModel):
     phone_enabled: bool
     chat_enabled: bool
     whatsapp_enabled: bool
+    phone_number: Optional[str] = None
 
 class MessageInput(BaseModel):
     content: str
@@ -555,6 +562,14 @@ async def logout(current_user: User = Depends(get_current_user), db: Session = D
     db.commit()
     return {"message": "Logged out successfully"}
 
+
+@app.post('/auth/guest')
+async def guest():
+    # Issue a short-lived guest token and return minimal user info
+    access_token = create_access_token({"sub": "guest@local"})
+    user = {"id": "guest", "email": "guest@local", "role": "guest"}
+    return {"access_token": access_token, "user": user}
+
 @app.get("/auth/me")
 async def get_current_user_info(current_user: User = Depends(get_current_user)):
     return {
@@ -575,6 +590,32 @@ async def save_company_profile(
     company.name = profile.name
     company.industry = profile.industry
     db.commit()
+    # Attempt to store onboarding context in Chroma via document-ingestion services
+    try:
+        repo_root = pathlib.Path(__file__).resolve().parents[1]
+        ingestion_path = repo_root / 'document-ingestion'
+        if ingestion_path.exists():
+            if str(ingestion_path) not in sys.path:
+                sys.path.insert(0, str(ingestion_path))
+            import importlib
+            try:
+                mod_embed = importlib.import_module('services.embedder')
+                mod_vs = importlib.import_module('services.vector_store')
+                TextEmbedder = getattr(mod_embed, 'TextEmbedder', None)
+                VectorStore = getattr(mod_vs, 'VectorStore', None)
+                if TextEmbedder and VectorStore:
+                    ed = TextEmbedder()
+                    vs = VectorStore()
+                    context_text = f"Company profile for {company.name}. Industry: {company.industry}."
+                    chunks = ed.chunk_text(context_text)
+                    if chunks:
+                        embeddings = await ed.embed_chunks(chunks)
+                        metadata = {'tenant_id': str(company.id), 'agent_id': 'company_profile', 'type': 'onboarding_context'}
+                        await vs.store_embeddings(document_id=f"onboard_company_{company.id}", chunks=chunks, embeddings=embeddings, metadata=metadata)
+            except Exception:
+                logger.exception('Failed to store onboarding company context in Chroma')
+    except Exception:
+        logger.exception('Error while attempting to add onboarding context to ingestion')
     return {"message": "Company profile updated", "company_id": company.id}
 
 @app.post("/onboarding/agent")
@@ -715,11 +756,78 @@ async def setup_channels(
             channels.append("chat")
         if channel_config.whatsapp_enabled:
             channels.append("whatsapp")
+        # If a phone number was provided from the frontend, map it to the agent
+        if channel_config.phone_number:
+            agent.phone_number = channel_config.phone_number
+        else:
+            # ensure agent has a phone number if phone channel enabled
+            if channel_config.phone_enabled and not agent.phone_number:
+                agent.phone_number = f"+1555{uuid.uuid4().hex[:7]}"
         
+    # Attempt to store agent persona/context in Chroma via document-ingestion services
+    try:
+        repo_root = pathlib.Path(__file__).resolve().parents[1]
+        ingestion_path = repo_root / 'document-ingestion'
+        if ingestion_path.exists():
+            if str(ingestion_path) not in sys.path:
+                sys.path.insert(0, str(ingestion_path))
+            import importlib
+            try:
+                mod_embed = importlib.import_module('services.embedder')
+                mod_vs = importlib.import_module('services.vector_store')
+                TextEmbedder = getattr(mod_embed, 'TextEmbedder', None)
+                VectorStore = getattr(mod_vs, 'VectorStore', None)
+                if TextEmbedder and VectorStore:
+                    ed = TextEmbedder()
+                    vs = VectorStore()
+                    persona_parts = []
+                    if agent.personality_config:
+                        persona_parts.append(str(agent.personality_config))
+                    if agent.voice_config:
+                        persona_parts.append(str(agent.voice_config))
+                    persona_text = f"Agent persona for {agent.name}: " + " \n ".join(persona_parts)
+                    chunks = ed.chunk_text(persona_text)
+                    if chunks:
+                        embeddings = await ed.embed_chunks(chunks)
+                        metadata = {'tenant_id': str(agent.company_id), 'agent_id': str(agent.id), 'type': 'onboarding_context'}
+                        await vs.store_embeddings(document_id=f"onboard_agent_{agent.id}", chunks=chunks, embeddings=embeddings, metadata=metadata)
+            except Exception:
+                logger.exception('Failed to store onboarding agent context in Chroma')
+    except Exception:
+        logger.exception('Error while attempting to add onboarding agent context to ingestion')
         agent.channels = channels
         db.commit()
     
-    return {"message": "Channels configured", "channels": channels}
+    db.commit()
+    return {"message": "Channels configured", "channels": channels, "phone_number": agent.phone_number}
+
+
+@app.get("/twilio/numbers")
+async def list_twilio_numbers(current_user: User = Depends(get_current_user)):
+    """Return list of Twilio incoming phone numbers for the configured account.
+
+    If TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN are not set, return 503 with empty list.
+    """
+    account_sid = os.getenv('TWILIO_ACCOUNT_SID')
+    auth_token = os.getenv('TWILIO_AUTH_TOKEN')
+    if not account_sid or not auth_token:
+        return JSONResponse(status_code=503, content={"numbers": [], "error": "Twilio not configured"})
+
+    try:
+        from twilio.rest import Client as TwilioClient
+        client = TwilioClient(account_sid, auth_token)
+        numbers = client.incoming_phone_numbers.list()
+        out = []
+        for n in numbers:
+            out.append({
+                "sid": getattr(n, 'sid', None),
+                "phone_number": getattr(n, 'phone_number', None),
+                "friendly_name": getattr(n, 'friendly_name', "")
+            })
+        return {"numbers": out}
+    except Exception as e:
+        logger.exception("Failed to fetch Twilio numbers")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/onboarding/deploy")
 async def deploy_agent(
@@ -730,7 +838,25 @@ async def deploy_agent(
     if agent:
         agent.is_active = True
         db.commit()
-    
+
+        # If Twilio configured, attempt to map phone number to our webhook
+        account_sid = os.getenv('TWILIO_ACCOUNT_SID')
+        auth_token = os.getenv('TWILIO_AUTH_TOKEN')
+        if account_sid and auth_token and agent.phone_number:
+            try:
+                from twilio.rest import Client as TwilioClient
+                client = TwilioClient(account_sid, auth_token)
+                # find incoming number resource matching the phone number
+                numbers = client.incoming_phone_numbers.list(phone_number=agent.phone_number)
+                if numbers:
+                    num = numbers[0]
+                    base_url = os.getenv('PUBLIC_BASE_URL') or f"http://{os.getenv('HOST', 'localhost')}:8000"
+                    voice_url = f"{base_url}/webhook/twilio/voice"
+                    # update webhook URLs for voice
+                    num.update(voice_url=voice_url)
+            except Exception:
+                logger.exception("Failed to configure Twilio incoming number for agent")
+
     return {"message": "Agent deployed successfully", "agent_id": agent.id if agent else None}
 
 @app.get("/onboarding/status")
