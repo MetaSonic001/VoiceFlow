@@ -54,6 +54,22 @@ metrics = {
 }
 app = FastAPI(title='VoiceFlow Backend')
 
+# Allow cross-origin requests from localhost frontends (development)
+from fastapi.middleware.cors import CORSMiddleware
+origins = [
+    "http://localhost",
+    "http://localhost:3000",
+    "http://127.0.0.1",
+    "http://127.0.0.1:3000",
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 @app.on_event('startup')
 async def ensure_minio_bucket_on_startup():
@@ -74,6 +90,49 @@ async def ensure_minio_bucket_on_startup():
 
     # Run in thread to avoid blocking startup
     asyncio.get_event_loop().run_in_executor(None, _ensure)
+
+
+@app.on_event('startup')
+async def ensure_db_tables_on_startup():
+    """Best-effort: create DB tables for SQLAlchemy models on startup.
+
+    This mirrors the behavior of `python -m backend.init_db` but runs
+    automatically so a fresh clone will have tables created when the
+    backend starts (if the DB is reachable). Failures are logged and
+    won't prevent the server from starting.
+    """
+    from . import db as _db
+
+    async def _create():
+        try:
+            logger.info('Starting DB table creation (background)')
+            _db._ensure_engine_and_maker()
+            engine = _db._engine
+            if engine is None:
+                logger.warning('DB engine not available; skipping table creation')
+                return
+            async with engine.begin() as conn:
+                await conn.run_sync(_db.Base.metadata.create_all)
+            logger.info('Ensured database tables exist')
+        except Exception as e:
+            logger.warning(f'Failed to ensure DB tables on startup: {e}')
+
+    # schedule in background so startup isn't blocked for slow DBs
+    # Make table creation synchronous during startup by default to avoid
+    # requests racing ahead of schema creation. Set DB_INIT_SYNC to 'false'
+    # to allow non-blocking background creation instead.
+    sync_init = os.getenv('DB_INIT_SYNC', 'true').lower() in ('1', 'true', 'yes')
+    if sync_init:
+        try:
+            # await creation so startup waits for tables to be present
+            await _create()
+        except Exception as e:
+            logger.warning(f'DB table creation failed during startup: {e}')
+    else:
+        try:
+            asyncio.create_task(_create())
+        except Exception:
+            asyncio.get_event_loop().run_in_executor(None, lambda: None)
 
 
 @app.middleware('http')
@@ -443,24 +502,35 @@ async def clerk_sync(payload: dict, api_key=Depends(require_api_key)):
 
     Expected payload: { email: string, full_name?: string }
     """
-    email = payload.get('email') if isinstance(payload, dict) else None
-    if not email:
-        raise HTTPException(status_code=400, detail='Missing email')
+    try:
+        email = payload.get('email') if isinstance(payload, dict) else None
+        if not email:
+            raise HTTPException(status_code=400, detail='Missing email')
 
-    # ensure user exists in DB (this endpoint requires a valid API key for server-to-server trust)
-    async with get_session() as session:
-        res = await session.execute(text('SELECT id, email FROM users WHERE email = :email'), {'email': email})
-        row = res.fetchone()
-        if not row:
-            # create a new user record (no password; Clerk handles auth)
-            from .models import User as UserModel
-            u = UserModel(email=email, password_hash=None, role=UserRole.user)
-            session.add(u)
-            await session.commit()
-            await session.refresh(u)
+        logger.info(f"/auth/clerk_sync called for email={email}")
+
+        # ensure user exists in DB (this endpoint requires a valid API key for server-to-server trust)
+        async with get_session() as session:
+            res = await session.execute(text('SELECT id, email FROM users WHERE email = :email'), {'email': email})
+            row = res.fetchone()
+            if not row:
+                # create a new user record (no password; Clerk handles auth)
+                from .models import User as UserModel
+                u = UserModel(email=email, password_hash=None, role=UserRole.user)
+                session.add(u)
+                await session.commit()
+                await session.refresh(u)
         # Issue backend JWT
         token = create_access_token(email, role=UserRole.user.value)
         return {'access_token': token, 'user': {'email': email}}
+    except HTTPException:
+        # Re-raise HTTPException so FastAPI can handle proper status codes
+        raise
+    except Exception as e:
+        # Log full exception and return a 500 with a short message (avoid leaking secrets)
+        logger.exception('Unhandled error in /auth/clerk_sync')
+        # Also surface a concise error message for the caller in dev
+        raise HTTPException(status_code=500, detail=f'Internal error during clerk_sync: {str(e)}')
 
 
 async def ingest_via_worker(document_id, s3_path, agent_id, tenant_id):
