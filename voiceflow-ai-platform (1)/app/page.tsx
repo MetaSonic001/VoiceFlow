@@ -1,17 +1,15 @@
 "use client"
 
-import { useState } from "react"
+import React from "react"
 import { Header } from "@/components/Header"
 import { Hero } from "@/components/Hero"
 import { Features } from "@/components/Features"
 import { Pricing } from "@/components/Pricing"
-import { AuthModal } from "@/components/auth-modal"
 import { useRouter } from "next/navigation"
 import { useClerk } from '@clerk/nextjs'
 
 export default function HomePage() {
-  const [showAuth, setShowAuth] = useState(false)
-  const [authMode, setAuthMode] = useState<"login" | "signup">("signup")
+  // Clerk handles sign-in / sign-up UI. No local fallback modal is used.
   const router = useRouter()
   const clerk = useClerk() as any
 
@@ -21,9 +19,8 @@ export default function HomePage() {
       clerk.openSignUp()
       return
     }
-
-    setAuthMode("signup")
-    setShowAuth(true)
+    console.warn('Clerk not available: cannot open sign-up. Redirecting to onboarding as fallback.')
+    router.push('/onboarding')
   }
 
   const handleSignIn = () => {
@@ -32,9 +29,8 @@ export default function HomePage() {
       clerk.openSignIn()
       return
     }
-
-    setAuthMode("login")
-    setShowAuth(true)
+    console.warn('Clerk not available: cannot open sign-in. Redirecting to dashboard as fallback.')
+    router.push('/dashboard')
   }
 
   return (
@@ -65,12 +61,7 @@ export default function HomePage() {
         </div>
       </footer>
 
-      <AuthModal
-        open={showAuth}
-        onOpenChange={setShowAuth}
-        mode={authMode}
-        onModeChange={setAuthMode}
-      />
+      {/* AuthModal removed: Clerk manages sign-in/sign-up UI */}
     </div>
   )
 }

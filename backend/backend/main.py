@@ -17,6 +17,7 @@ from fastapi.security.api_key import APIKeyHeader
 import sys
 import asyncio
 import io
+from sqlalchemy import text
 from .auth import create_access_token, get_current_user, require_role
 from .models import User, UserRole
 from passlib.context import CryptContext
@@ -152,7 +153,7 @@ class AgentCreate(BaseModel):
 
 @app.post('/tenants')
 async def create_tenant(payload: TenantCreate):
-    async for session in get_session():
+    async with get_session() as session:
         t = Tenant(name=payload.name)
         session.add(t)
         await session.commit()
@@ -162,7 +163,7 @@ async def create_tenant(payload: TenantCreate):
 
 @app.post('/agents')
 async def create_agent(payload: AgentCreate):
-    async for session in get_session():
+    async with get_session() as session:
         a = Agent(name=payload.name, tenant_id=payload.tenant_id)
         session.add(a)
         await session.commit()
@@ -178,18 +179,18 @@ async def list_agents(user=Depends(get_current_user)):
     Otherwise return all agents (limited to 200 rows).
     """
     email = user.get('email') if isinstance(user, dict) else None
-    async for session in get_session():
+    async with get_session() as session:
         tenant_id = None
         if email:
-            res = await session.execute('SELECT tenant_id FROM onboarding_progress WHERE user_email = :email', {'email': email})
+            res = await session.execute(text('SELECT tenant_id FROM onboarding_progress WHERE user_email = :email'), {'email': email})
             row = res.fetchone()
             if row and row[0]:
                 tenant_id = row[0]
 
         if tenant_id:
-            q = await session.execute('SELECT id, tenant_id, name, chroma_collection, config_path, created_at FROM agents WHERE tenant_id = :tenant ORDER BY created_at DESC', {'tenant': tenant_id})
+            q = await session.execute(text('SELECT id, tenant_id, name, chroma_collection, config_path, created_at FROM agents WHERE tenant_id = :tenant ORDER BY created_at DESC'), {'tenant': tenant_id})
         else:
-            q = await session.execute('SELECT id, tenant_id, name, chroma_collection, config_path, created_at FROM agents ORDER BY created_at DESC LIMIT 200')
+            q = await session.execute(text('SELECT id, tenant_id, name, chroma_collection, config_path, created_at FROM agents ORDER BY created_at DESC LIMIT 200'))
 
         rows = q.fetchall()
         agents = []
@@ -216,7 +217,7 @@ async def list_agents(user=Depends(get_current_user)):
 
 @app.get('/agents/{agent_id}')
 async def get_agent(agent_id: str, api_key=Depends(require_api_key)):
-    async for session in get_session():
+    async with get_session() as session:
         a = await session.get(Agent, agent_id)
         if not a:
             raise HTTPException(status_code=404, detail='Agent not found')
@@ -240,7 +241,7 @@ async def get_agent(agent_id: str, api_key=Depends(require_api_key)):
 
 @app.put('/agents/{agent_id}')
 async def update_agent(agent_id: str, payload: dict, api_key=Depends(require_api_key)):
-    async for session in get_session():
+    async with get_session() as session:
         a = await session.get(Agent, agent_id)
         if not a:
             raise HTTPException(status_code=404, detail='Agent not found')
@@ -256,7 +257,7 @@ async def update_agent(agent_id: str, payload: dict, api_key=Depends(require_api
 
 @app.delete('/agents/{agent_id}')
 async def delete_agent(agent_id: str, api_key=Depends(require_api_key)):
-    async for session in get_session():
+    async with get_session() as session:
         a = await session.get(Agent, agent_id)
         if not a:
             raise HTTPException(status_code=404, detail='Agent not found')
@@ -267,7 +268,7 @@ async def delete_agent(agent_id: str, api_key=Depends(require_api_key)):
 
 @app.post('/agents/{agent_id}/pause')
 async def pause_agent(agent_id: str, api_key=Depends(require_api_key)):
-    async for session in get_session():
+    async with get_session() as session:
         a = await session.get(Agent, agent_id)
         if not a:
             raise HTTPException(status_code=404, detail='Agent not found')
@@ -279,7 +280,7 @@ async def pause_agent(agent_id: str, api_key=Depends(require_api_key)):
 
 @app.post('/agents/{agent_id}/activate')
 async def activate_agent(agent_id: str, api_key=Depends(require_api_key)):
-    async for session in get_session():
+    async with get_session() as session:
         a = await session.get(Agent, agent_id)
         if not a:
             raise HTTPException(status_code=404, detail='Agent not found')
@@ -337,7 +338,7 @@ async def upload_document(tenant_id: str, agent_id: str, file: UploadFile = File
         print(f"Warning: failed to store via ingestion DatabaseManager: {e}")
 
     # Insert metadata row into backend DB, referencing ingestion document_id when available
-    async for session in get_session():
+    async with get_session() as session:
         doc = Document(id=document_id or uuid.uuid4(), agent_id=agent_id, tenant_id=tenant_id, filename=filename, file_path=dest_path, file_type=file.content_type)
         session.add(doc)
         await session.commit()
@@ -360,9 +361,9 @@ async def upload_document(tenant_id: str, agent_id: str, file: UploadFile = File
 
     @app.post('/auth/signup')
     async def signup(payload: SignupPayload):
-        async for session in get_session():
+        async with get_session() as session:
             # Check existing
-            res = await session.execute("SELECT id FROM users WHERE email = :email", {'email': payload.email})
+            res = await session.execute(text('SELECT id FROM users WHERE email = :email'), {'email': payload.email})
             if res.fetchone():
                 raise HTTPException(status_code=400, detail='User already exists')
             hashed = pwd_ctx.hash(payload.password)
@@ -382,8 +383,8 @@ async def upload_document(tenant_id: str, agent_id: str, file: UploadFile = File
 
     @app.post('/auth/login')
     async def login(payload: LoginPayload):
-        async for session in get_session():
-            res = await session.execute("SELECT id, email, password_hash, role FROM users WHERE email = :email", {'email': payload.email})
+        async with get_session() as session:
+            res = await session.execute(text('SELECT id, email, password_hash, role FROM users WHERE email = :email'), {'email': payload.email})
             row = res.fetchone()
             if not row:
                 raise HTTPException(status_code=401, detail='Invalid credentials')
@@ -426,8 +427,8 @@ async def clerk_sync(payload: dict, api_key=Depends(require_api_key)):
         raise HTTPException(status_code=400, detail='Missing email')
 
     # ensure user exists in DB (this endpoint requires a valid API key for server-to-server trust)
-    async for session in get_session():
-        res = await session.execute('SELECT id, email FROM users WHERE email = :email', {'email': email})
+    async with get_session() as session:
+        res = await session.execute(text('SELECT id, email FROM users WHERE email = :email'), {'email': email})
         row = res.fetchone()
         if not row:
             # create a new user record (no password; Clerk handles auth)
@@ -449,14 +450,14 @@ async def ingest_via_worker(document_id, s3_path, agent_id, tenant_id):
 
 @app.get('/documents/{agent_id}')
 async def list_documents(agent_id: str):
-    async for session in get_session():
+    async with get_session() as session:
         q = await session.execute(
-            "SELECT id, filename, file_path, embedding_status, uploaded_at FROM documents WHERE agent_id = :agent",
+            text('SELECT id, filename, file_path, embedding_status, uploaded_at FROM documents WHERE agent_id = :agent'),
             {'agent': agent_id}
         )
         # Use ORM mapping via the Document model
         rows = await session.execute(
-            "SELECT id FROM documents WHERE agent_id = :agent ORDER BY uploaded_at DESC",
+            text('SELECT id FROM documents WHERE agent_id = :agent ORDER BY uploaded_at DESC'),
             {'agent': agent_id}
         )
         ids = [r[0] for r in rows.fetchall()]
@@ -470,33 +471,44 @@ async def list_documents(agent_id: str):
 @app.get('/health')
 async def health():
     checks = {'db': False, 'minio': False, 'chroma': False}
-    # DB check
+
+    async def _db_check():
+        try:
+            async with get_session() as session:
+                await session.execute(text('SELECT 1'))
+                return True
+        except Exception:
+            return False
+
+    async def _minio_check():
+        try:
+            client = get_minio_client()
+            # run blocking bucket_exists in a thread to avoid blocking the event loop
+            return await asyncio.to_thread(lambda: client.bucket_exists(os.getenv('MINIO_BUCKET', 'voiceflow')))
+        except Exception:
+            return False
+
+    async def _chroma_check():
+        try:
+            from .chroma_helper import _get_client
+            # list_collections may be blocking; run in thread
+            return await asyncio.to_thread(lambda: bool(_get_client().list_collections()))
+        except Exception:
+            return False
+
+    # Run each check with a short timeout so /health responds quickly even when services are slow
     try:
-        async for session in get_session():
-            await session.execute('SELECT 1')
-            checks['db'] = True
+        checks['db'] = await asyncio.wait_for(_db_check(), timeout=2.0)
     except Exception:
         checks['db'] = False
 
-    # MinIO check
     try:
-        client = get_minio_client()
-        # ensure bucket check doesn't raise
-        from botocore.exceptions import BotoCoreError  # type: ignore
-        try:
-            exists = client.bucket_exists(os.getenv('MINIO_BUCKET', 'voiceflow'))
-            checks['minio'] = True
-        except Exception:
-            checks['minio'] = False
+        checks['minio'] = await asyncio.wait_for(_minio_check(), timeout=2.0)
     except Exception:
         checks['minio'] = False
 
-    # Chroma check
     try:
-        from .chroma_helper import _get_client
-        c = _get_client()
-        _ = c.list_collections()
-        checks['chroma'] = True
+        checks['chroma'] = await asyncio.wait_for(_chroma_check(), timeout=2.0)
     except Exception:
         checks['chroma'] = False
 
@@ -512,7 +524,7 @@ async def get_metrics():
 @app.post('/ingest/trigger/{document_id}')
 async def trigger_ingest(document_id: str, background_tasks: BackgroundTasks):
     # Fetch document metadata from DB and schedule ingestion
-    async for session in get_session():
+    async with get_session() as session:
         doc = await session.get(Document, document_id)
         if not doc:
             raise HTTPException(404, 'Document not found')
@@ -572,27 +584,27 @@ async def trigger_ingest(document_id: str, background_tasks: BackgroundTasks):
         if not email:
             raise HTTPException(status_code=401, detail='Unauthorized')
 
-        async for session in get_session():
-            # upsert onboarding_progress by user_email
-            res = await session.execute('SELECT id FROM onboarding_progress WHERE user_email = :email', {'email': email})
-            row = res.fetchone()
-            if row:
-                # update
-                await session.execute('UPDATE onboarding_progress SET current_step = :step, data = :data, updated_at = now() WHERE user_email = :email', {'step': payload.get('current_step'), 'data': payload.get('data'), 'email': email})
-                await session.commit()
-                return {'success': True}
-            else:
-                await session.execute('INSERT INTO onboarding_progress (user_email, current_step, data, created_at, updated_at) VALUES (:email, :step, :data, now(), now())', {'email': email, 'step': payload.get('current_step'), 'data': payload.get('data')})
-                await session.commit()
-                return {'success': True}
+        async with get_session() as session:
+                # upsert onboarding_progress by user_email
+                res = await session.execute(text('SELECT id FROM onboarding_progress WHERE user_email = :email'), {'email': email})
+                row = res.fetchone()
+                if row:
+                    # update
+                    await session.execute(text('UPDATE onboarding_progress SET current_step = :step, data = :data, updated_at = now() WHERE user_email = :email'), {'step': payload.get('current_step'), 'data': payload.get('data'), 'email': email})
+                    await session.commit()
+                    return {'success': True}
+                else:
+                    await session.execute(text('INSERT INTO onboarding_progress (user_email, current_step, data, created_at, updated_at) VALUES (:email, :step, :data, now(), now())'), {'email': email, 'step': payload.get('current_step'), 'data': payload.get('data')})
+                    await session.commit()
+                    return {'success': True}
 
     @app.get('/onboarding/progress')
     async def get_onboarding_progress(user=Depends(get_current_user)):
         email = user.get('email') if isinstance(user, dict) else None
         if not email:
             return {'exists': False}
-        async for session in get_session():
-            res = await session.execute('SELECT id, tenant_id, agent_id, current_step, data FROM onboarding_progress WHERE user_email = :email', {'email': email})
+        async with get_session() as session:
+            res = await session.execute(text('SELECT id, tenant_id, agent_id, current_step, data FROM onboarding_progress WHERE user_email = :email'), {'email': email})
             row = res.fetchone()
             if not row:
                 return {'exists': False}
@@ -604,8 +616,8 @@ async def trigger_ingest(document_id: str, background_tasks: BackgroundTasks):
         email = user.get('email') if isinstance(user, dict) else None
         if not email:
             raise HTTPException(status_code=401, detail='Unauthorized')
-        async for session in get_session():
-            await session.execute('DELETE FROM onboarding_progress WHERE user_email = :email', {'email': email})
+        async with get_session() as session:
+            await session.execute(text('DELETE FROM onboarding_progress WHERE user_email = :email'), {'email': email})
             await session.commit()
             return {'deleted': True}
 
@@ -615,7 +627,7 @@ async def trigger_ingest(document_id: str, background_tasks: BackgroundTasks):
         company_name = payload.get('company_name')
         if not company_name:
             raise HTTPException(400, 'Missing company_name')
-        async for session in get_session():
+        async with get_session() as session:
             from .models import Tenant
             t = Tenant(name=company_name)
             session.add(t)
@@ -623,11 +635,11 @@ async def trigger_ingest(document_id: str, background_tasks: BackgroundTasks):
             await session.refresh(t)
             # Persist tenant_id into onboarding_progress for this user
             try:
-                await session.execute('UPDATE onboarding_progress SET tenant_id = :tenant WHERE user_email = :email', {'tenant': t.id, 'email': user.get('email')})
+                await session.execute(text('UPDATE onboarding_progress SET tenant_id = :tenant WHERE user_email = :email'), {'tenant': t.id, 'email': user.get('email')})
                 await session.commit()
             except Exception:
                 # if no onboarding row exists, create one
-                await session.execute('INSERT INTO onboarding_progress (user_email, tenant_id, current_step, data, created_at, updated_at) VALUES (:email, :tenant, :step, :data, now(), now())', {'email': user.get('email'), 'tenant': t.id, 'step': 1, 'data': {}})
+                await session.execute(text('INSERT INTO onboarding_progress (user_email, tenant_id, current_step, data, created_at, updated_at) VALUES (:email, :tenant, :step, :data, now(), now())'), {'email': user.get('email'), 'tenant': t.id, 'step': 1, 'data': {}})
                 await session.commit()
             return {'tenant_id': str(t.id)}
 
@@ -637,13 +649,13 @@ async def trigger_ingest(document_id: str, background_tasks: BackgroundTasks):
         tenant_id = payload.get('tenant_id')
         if not name:
             raise HTTPException(400, 'Missing agent name')
-        async for session in get_session():
+        async with get_session() as session:
             from .models import Agent
             # If tenant_id not provided, try to find from onboarding progress
             if not tenant_id:
                 # look up onboarding_progress
                 u = user.get('email')
-                res = await session.execute('SELECT tenant_id FROM onboarding_progress WHERE user_email = :email', {'email': u})
+                res = await session.execute(text('SELECT tenant_id FROM onboarding_progress WHERE user_email = :email'), {'email': u})
                 r = res.fetchone()
                 tenant_id = r[0] if r else None
             if not tenant_id:
@@ -653,7 +665,7 @@ async def trigger_ingest(document_id: str, background_tasks: BackgroundTasks):
             await session.commit()
             await session.refresh(a)
             # persist agent id into onboarding_progress
-            await session.execute('UPDATE onboarding_progress SET agent_id = :agent WHERE user_email = :email', {'agent': a.id, 'email': user.get('email')})
+            await session.execute(text('UPDATE onboarding_progress SET agent_id = :agent WHERE user_email = :email'), {'agent': a.id, 'email': user.get('email')})
             await session.commit()
             return {'agent_id': str(a.id)}
 
@@ -665,10 +677,10 @@ async def trigger_ingest(document_id: str, background_tasks: BackgroundTasks):
         websites = form.get('websites')
         faq_text = form.get('faq_text')
         # For dev: simply store uploaded files to MinIO and create Document rows
-        async for session in get_session():
+        async with get_session() as session:
             from .models import Document
             # find agent_id from onboarding_progress
-            res = await session.execute('SELECT agent_id, tenant_id FROM onboarding_progress WHERE user_email = :email', {'email': user.get('email')})
+            res = await session.execute(text('SELECT agent_id, tenant_id FROM onboarding_progress WHERE user_email = :email'), {'email': user.get('email')})
             row = res.fetchone()
             if not row:
                 raise HTTPException(400, 'No onboarding progress / agent found')
@@ -697,25 +709,25 @@ async def trigger_ingest(document_id: str, background_tasks: BackgroundTasks):
     @app.post('/onboarding/voice')
     async def configure_voice(payload: dict, user=Depends(get_current_user)):
         # Persist voice preferences into onboarding_progress.data.voice
-        async for session in get_session():
-            res = await session.execute('SELECT data FROM onboarding_progress WHERE user_email = :email', {'email': user.get('email')})
+        async with get_session() as session:
+            res = await session.execute(text('SELECT data FROM onboarding_progress WHERE user_email = :email'), {'email': user.get('email')})
             row = res.fetchone()
             current = row[0] if row and row[0] else {}
             current = dict(current or {})
             current['voice'] = payload
-            await session.execute('UPDATE onboarding_progress SET data = :data WHERE user_email = :email', {'data': current, 'email': user.get('email')})
+            await session.execute(text('UPDATE onboarding_progress SET data = :data WHERE user_email = :email'), {'data': current, 'email': user.get('email')})
             await session.commit()
             return {'success': True}
 
     @app.post('/onboarding/channels')
     async def setup_channels(payload: dict, user=Depends(get_current_user)):
-        async for session in get_session():
-            res = await session.execute('SELECT data FROM onboarding_progress WHERE user_email = :email', {'email': user.get('email')})
+        async with get_session() as session:
+            res = await session.execute(text('SELECT data FROM onboarding_progress WHERE user_email = :email'), {'email': user.get('email')})
             row = res.fetchone()
             current = row[0] if row and row[0] else {}
             current = dict(current or {})
             current['channels'] = payload
-            await session.execute('UPDATE onboarding_progress SET data = :data WHERE user_email = :email', {'data': current, 'email': user.get('email')})
+            await session.execute(text('UPDATE onboarding_progress SET data = :data WHERE user_email = :email'), {'data': current, 'email': user.get('email')})
             await session.commit()
             return {'success': True}
 
@@ -820,7 +832,7 @@ class PipelineAgentCreate(BaseModel):
 
 @app.post('/admin/pipeline_agents')
 async def create_pipeline_agent(payload: PipelineAgentCreate, api_key=Depends(require_api_key), user=Depends(require_role('admin'))):
-    async for session in get_session():
+    async with get_session() as session:
         pa = PipelineAgent(tenant_id=payload.tenant_id, name=payload.name, agent_type=payload.agent_type, agent_id=payload.agent_id, config=payload.config)
         session.add(pa)
         await session.commit()
@@ -830,8 +842,8 @@ async def create_pipeline_agent(payload: PipelineAgentCreate, api_key=Depends(re
 
 @app.get('/admin/pipeline_agents')
 async def list_pipeline_agents(api_key=Depends(require_api_key), user=Depends(require_role('admin'))):
-    async for session in get_session():
-        res = await session.execute("SELECT id, tenant_id, agent_id, name, agent_type, config FROM pipeline_agents")
+    async with get_session() as session:
+        res = await session.execute(text('SELECT id, tenant_id, agent_id, name, agent_type, config FROM pipeline_agents'))
         rows = res.fetchall()
         out = []
         for r in rows:
@@ -848,7 +860,7 @@ class PipelineCreate(BaseModel):
 
 @app.post('/admin/pipelines')
 async def create_pipeline(payload: PipelineCreate, api_key=Depends(require_api_key), user=Depends(require_role('admin'))):
-    async for session in get_session():
+    async with get_session() as session:
         p = Pipeline(tenant_id=payload.tenant_id, name=payload.name, agent_id=payload.agent_id, stages=payload.stages)
         session.add(p)
         await session.commit()
@@ -858,8 +870,8 @@ async def create_pipeline(payload: PipelineCreate, api_key=Depends(require_api_k
 
 @app.get('/admin/pipelines')
 async def list_pipelines(api_key=Depends(require_api_key), user=Depends(require_role('admin'))):
-    async for session in get_session():
-        res = await session.execute("SELECT id, tenant_id, agent_id, name, stages FROM pipelines")
+    async with get_session() as session:
+        res = await session.execute(text('SELECT id, tenant_id, agent_id, name, stages FROM pipelines'))
         rows = res.fetchall()
         out = []
         for r in rows:
@@ -871,7 +883,7 @@ async def list_pipelines(api_key=Depends(require_api_key), user=Depends(require_
 async def trigger_pipeline(pipeline_id: str, target_agent_id: Optional[str] = None, background_tasks: BackgroundTasks = None, api_key=Depends(require_api_key), user=Depends(require_role('admin'))):
     """Trigger a pipeline run asynchronously. For pre-call pipelines, target_agent_id may be provided to prime that agent."""
     # Fetch pipeline definition
-    async for session in get_session():
+    async with get_session() as session:
         p = await session.get(Pipeline, pipeline_id)
         if not p:
             raise HTTPException(status_code=404, detail='Pipeline not found')

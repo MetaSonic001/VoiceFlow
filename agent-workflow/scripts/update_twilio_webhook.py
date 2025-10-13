@@ -1,4 +1,6 @@
-from pyngrok import ngrok
+import json
+import urllib.request
+import subprocess
 from twilio.rest import Client
 from twilio.base.exceptions import TwilioRestException
 import time
@@ -16,16 +18,65 @@ load_dotenv()
 
 
 def start_ngrok_port(port: int):
-    """Start an ngrok tunnel and return the public URL."""
+    """Start or discover an ngrok tunnel and return the public URL.
+
+    This function intentionally avoids requesting reserved/dev domains and
+    prefers the temporary public URL provided by the local ngrok agent or the
+    system ngrok binary (which by default issues a free random domain).
+    """
+
+    def _query_local_api():
+        try:
+            with urllib.request.urlopen('http://127.0.0.1:4040/api/tunnels', timeout=1.0) as resp:
+                data = json.load(resp)
+                return data.get('tunnels', [])
+        except Exception:
+            return None
+
+    # 1) If a local ngrok agent is already running, prefer its tunnel for our port
+    tunnels = _query_local_api()
+    if tunnels is not None:
+        for t in tunnels:
+            cfg = t.get('config', {})
+            addr = cfg.get('addr') or ''
+            if addr.endswith(f":{port}") or addr in (f"localhost:{port}", f"127.0.0.1:{port}"):
+                public_url = t.get('public_url')
+                if public_url:
+                    print(f"Found existing ngrok tunnel '{public_url}' -> '{addr}'")
+                    return public_url
+
+    # 2) Start the system ngrok binary to ensure a free temporary domain is created.
     try:
-        http_tunnel = ngrok.connect(port, bind_tls=True)
-        public_url = http_tunnel.public_url
-        print(f'Ngrok tunnel "{public_url}" -> "http://localhost:{port}"')
-        # give ngrok a moment
-        time.sleep(1)
-        return public_url
+        print(f"Starting system ngrok for port {port} (will create a temporary public URL)...")
+        proc = subprocess.Popen(["ngrok", "http", str(port)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except FileNotFoundError:
+        print("ngrok binary not found on PATH. Install ngrok (https://ngrok.com/download) or run ngrok manually and re-run this script.")
+        return None
     except Exception as e:
-        print(f"Failed to start ngrok tunnel: {e}")
+        print(f"Failed to start ngrok binary: {e}")
+        return None
+
+    # Poll the local ngrok agent API for the created tunnel
+    public_url = None
+    for _ in range(20):
+        time.sleep(0.5)
+        tunnels = _query_local_api()
+        if not tunnels:
+            continue
+        for t in tunnels:
+            cfg = t.get('config', {})
+            addr = cfg.get('addr') or ''
+            if addr.endswith(f":{port}") or addr in (f"localhost:{port}", f"127.0.0.1:{port}"):
+                public_url = t.get('public_url')
+                break
+        if public_url:
+            break
+
+    if public_url:
+        print(f"Ngrok tunnel '{public_url}' -> 'http://localhost:{port}'")
+        return public_url
+    else:
+        print("Timed out waiting for ngrok to register the tunnel. Check 'http://127.0.0.1:4040' for more info.")
         return None
 
 
