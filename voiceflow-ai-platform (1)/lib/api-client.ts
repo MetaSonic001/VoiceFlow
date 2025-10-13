@@ -200,8 +200,14 @@ class ApiClient {
   }
 
   // Agent management endpoints
-  async getAgents() {
-    return this.request<Agent[]>("/agents")
+  async getAgents(params: { page?: number; limit?: number; search?: string; status?: string } = {}) {
+    const qs = new URLSearchParams()
+    if (params.page) qs.append('page', String(params.page))
+    if (params.limit) qs.append('limit', String(params.limit))
+    if (params.search) qs.append('search', params.search)
+    if (params.status) qs.append('status', params.status)
+    // Call Next.js server route under /api which will proxy to Prisma/backend as needed
+    return this.request<{ agents: Agent[]; total: number; page: number; limit: number }>(`/api/agents?${qs.toString()}`)
   }
 
   // Pipeline admin
@@ -261,30 +267,30 @@ class ApiClient {
   }
 
   async getAgent(agentId: string) {
-    return this.request<AgentDetails>(`/agents/${agentId}`)
+    return this.request<AgentDetails>(`/api/agents/${agentId}`)
   }
 
   async updateAgent(agentId: string, data: Partial<AgentUpdateData>) {
-    return this.request<{ success: boolean }>(`/agents/${agentId}`, {
+    return this.request<{ success: boolean }>(`/api/agents/${agentId}`, {
       method: "PUT",
       body: JSON.stringify(data),
     })
   }
 
   async deleteAgent(agentId: string) {
-    return this.request<{ success: boolean }>(`/agents/${agentId}`, {
+    return this.request<{ success: boolean }>(`/api/agents/${agentId}`, {
       method: "DELETE",
     })
   }
 
   async pauseAgent(agentId: string) {
-    return this.request<{ success: boolean }>(`/agents/${agentId}/pause`, {
+    return this.request<{ success: boolean }>(`/api/agents/${agentId}/pause`, {
       method: "POST",
     })
   }
 
   async activateAgent(agentId: string) {
-    return this.request<{ success: boolean }>(`/agents/${agentId}/activate`, {
+    return this.request<{ success: boolean }>(`/api/agents/${agentId}/activate`, {
       method: "POST",
     })
   }
@@ -421,6 +427,16 @@ class ApiClient {
 
   async healthCheck() {
     return this.request<{ status: string; timestamp: string }>("/health")
+  }
+
+  // Generic helper for POSTing raw payloads from components
+  async postRaw<T = any>(endpoint: string, body: any, headers: Record<string, string> = {}) {
+    const options: RequestInit = {
+      method: 'POST',
+      body: typeof body === 'string' ? body : JSON.stringify(body),
+      headers: { 'Content-Type': 'application/json', ...headers },
+    }
+    return this.request<T>(endpoint, options)
   }
 }
 

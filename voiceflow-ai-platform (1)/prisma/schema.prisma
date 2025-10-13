@@ -1,0 +1,57 @@
+// Prisma schema for VoiceFlow auth and minimal models
+// This mirrors the main SQL models for users, tenants, agents, onboarding progress
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String   @id @default(uuid())
+  email       String   @unique
+  role        String   @default("user")
+  createdAt   DateTime @default(now())
+  onboarding  OnboardingProgress?
+}
+
+model Tenant {
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now())
+  agents    Agent[]
+}
+
+model Agent {
+  id               String   @id @default(uuid())
+  tenantId         String
+  name             String
+  status           String?  @default("active")
+  description      String?
+  channels         Json?
+  phoneNumber      String?
+  totalCalls       Int?     @default(0)
+  totalChats       Int?     @default(0)
+  successRate      Int?     @default(0)
+  avgResponseTime  String?
+  chromaCollection String?
+  configPath       String?
+  createdAt        DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+}
+
+model OnboardingProgress {
+  id         Int      @id @default(autoincrement())
+  userEmail  String   @unique
+  tenantId   String?  
+  agentId    String?
+  currentStep Int?
+  data       Json?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User?    @relation(fields: [userEmail], references: [email])
+}

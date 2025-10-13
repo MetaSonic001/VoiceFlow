@@ -6,19 +6,19 @@ using the SQLAlchemy engine configured in backend.db.
 """
 import asyncio
 import os
-from .db import _ensure_engine_and_maker, Base, _engine
+from . import db
 from .models import Tenant, Agent, Document, User, PipelineAgent, Pipeline
 
 
 def create_tables():
     # ensure engine is created
-    _ensure_engine_and_maker()
-    if _engine is None:
+    db._ensure_engine_and_maker()
+    if db._engine is None:
         raise RuntimeError('Engine not initialized')
 
     async def _create():
-        async with _engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+        async with db._engine.begin() as conn:
+            await conn.run_sync(db.Base.metadata.create_all)
 
     asyncio.run(_create())
 

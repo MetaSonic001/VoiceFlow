@@ -18,6 +18,14 @@ class Agent(Base):
     id = sa.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id = sa.Column(UUID(as_uuid=True), sa.ForeignKey('tenants.id'), nullable=False)
     name = sa.Column(sa.Text, nullable=False)
+    status = sa.Column(sa.Text, nullable=True, default='active')
+    description = sa.Column(sa.Text, nullable=True)
+    channels = sa.Column(sa.JSON, nullable=True)
+    phone_number = sa.Column(sa.Text, nullable=True)
+    total_calls = sa.Column(sa.Integer, nullable=True, default=0)
+    total_chats = sa.Column(sa.Integer, nullable=True, default=0)
+    success_rate = sa.Column(sa.Integer, nullable=True, default=0)
+    avg_response_time = sa.Column(sa.Text, nullable=True)
     chroma_collection = sa.Column(sa.Text, nullable=True)
     config_path = sa.Column(sa.Text, nullable=True)
     created_at = sa.Column(sa.DateTime, default=datetime.utcnow)
@@ -89,3 +97,15 @@ class Pipeline(Base):
     name = sa.Column(sa.Text, nullable=False)
     stages = sa.Column(sa.JSON, nullable=False, default=list)
     created_at = sa.Column(sa.DateTime, default=datetime.utcnow)
+
+
+class OnboardingProgress(Base):
+    __tablename__ = 'onboarding_progress'
+    id = sa.Column(sa.Integer, primary_key=True, autoincrement=True)
+    user_email = sa.Column(sa.Text, nullable=False, unique=True)
+    tenant_id = sa.Column(UUID(as_uuid=True), nullable=True)
+    agent_id = sa.Column(UUID(as_uuid=True), nullable=True)
+    current_step = sa.Column(sa.Integer, nullable=True)
+    data = sa.Column(sa.JSON, nullable=True)
+    created_at = sa.Column(sa.DateTime, default=datetime.utcnow)
+    updated_at = sa.Column(sa.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

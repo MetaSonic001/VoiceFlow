@@ -170,6 +170,125 @@ async def create_agent(payload: AgentCreate):
         return JSONResponse({'id': str(a.id), 'name': a.name})
 
 
+@app.get('/agents')
+async def list_agents(user=Depends(get_current_user)):
+    """Return a list of agents visible to the current user.
+
+    If the user has onboarding progress with a tenant_id, filter agents to that tenant.
+    Otherwise return all agents (limited to 200 rows).
+    """
+    email = user.get('email') if isinstance(user, dict) else None
+    async for session in get_session():
+        tenant_id = None
+        if email:
+            res = await session.execute('SELECT tenant_id FROM onboarding_progress WHERE user_email = :email', {'email': email})
+            row = res.fetchone()
+            if row and row[0]:
+                tenant_id = row[0]
+
+        if tenant_id:
+            q = await session.execute('SELECT id, tenant_id, name, chroma_collection, config_path, created_at FROM agents WHERE tenant_id = :tenant ORDER BY created_at DESC', {'tenant': tenant_id})
+        else:
+            q = await session.execute('SELECT id, tenant_id, name, chroma_collection, config_path, created_at FROM agents ORDER BY created_at DESC LIMIT 200')
+
+        rows = q.fetchall()
+        agents = []
+        for r in rows:
+            aid, tid, name, chroma_collection, config_path, created_at = r
+            agents.append({
+                'id': str(aid),
+                'name': name,
+                'role': 'AI Agent',
+                'status': 'active',
+                'description': None,
+                'channels': [],
+                'phoneNumber': None,
+                'totalCalls': 0,
+                'totalChats': 0,
+                'successRate': 0,
+                'avgResponseTime': '0s',
+                'lastActive': None,
+                'createdAt': created_at.isoformat() if created_at else None,
+            })
+
+        return {'agents': agents}
+
+
+@app.get('/agents/{agent_id}')
+async def get_agent(agent_id: str, api_key=Depends(require_api_key)):
+    async for session in get_session():
+        a = await session.get(Agent, agent_id)
+        if not a:
+            raise HTTPException(status_code=404, detail='Agent not found')
+        return {
+            'agent': {
+                'id': str(a.id),
+                'name': a.name,
+                'tenant_id': str(a.tenant_id),
+                'status': a.status,
+                'description': a.description,
+                'channels': a.channels,
+                'phoneNumber': a.phone_number,
+                'totalCalls': a.total_calls or 0,
+                'totalChats': a.total_chats or 0,
+                'successRate': a.success_rate or 0,
+                'avgResponseTime': a.avg_response_time,
+                'createdAt': a.created_at.isoformat() if a.created_at else None,
+            }
+        }
+
+
+@app.put('/agents/{agent_id}')
+async def update_agent(agent_id: str, payload: dict, api_key=Depends(require_api_key)):
+    async for session in get_session():
+        a = await session.get(Agent, agent_id)
+        if not a:
+            raise HTTPException(status_code=404, detail='Agent not found')
+        # Apply allowed updates
+        for k in ['name', 'status', 'description', 'channels', 'phone_number', 'total_calls', 'total_chats', 'success_rate', 'avg_response_time']:
+            if k in payload:
+                setattr(a, k, payload[k])
+        session.add(a)
+        await session.commit()
+        await session.refresh(a)
+        return {'success': True}
+
+
+@app.delete('/agents/{agent_id}')
+async def delete_agent(agent_id: str, api_key=Depends(require_api_key)):
+    async for session in get_session():
+        a = await session.get(Agent, agent_id)
+        if not a:
+            raise HTTPException(status_code=404, detail='Agent not found')
+        await session.delete(a)
+        await session.commit()
+        return {'success': True}
+
+
+@app.post('/agents/{agent_id}/pause')
+async def pause_agent(agent_id: str, api_key=Depends(require_api_key)):
+    async for session in get_session():
+        a = await session.get(Agent, agent_id)
+        if not a:
+            raise HTTPException(status_code=404, detail='Agent not found')
+        a.status = 'paused'
+        session.add(a)
+        await session.commit()
+        return {'success': True}
+
+
+@app.post('/agents/{agent_id}/activate')
+async def activate_agent(agent_id: str, api_key=Depends(require_api_key)):
+    async for session in get_session():
+        a = await session.get(Agent, agent_id)
+        if not a:
+            raise HTTPException(status_code=404, detail='Agent not found')
+        a.status = 'active'
+        session.add(a)
+        await session.commit()
+        return {'success': True}
+
+
 @app.post('/admin/collections/ensure')
 async def api_ensure_collection(tenant_id: str, agent_id: str, api_key=Depends(require_api_key), user=Depends(require_role('admin'))):
     coll = ensure_collection(tenant_id, agent_id)
@@ -296,6 +415,32 @@ async def upload_document(tenant_id: str, agent_id: str, file: UploadFile = File
         return {'user': user}
 
 
+@app.post('/auth/clerk_sync')
+async def clerk_sync(payload: dict, api_key=Depends(require_api_key)):
+    """Exchange Clerk user info (email) for backend JWT and create DB user/tenant if needed.
+
+    Expected payload: { email: string, full_name?: string }
+    """
+    email = payload.get('email') if isinstance(payload, dict) else None
+    if not email:
+        raise HTTPException(status_code=400, detail='Missing email')
+
+    # ensure user exists in DB (this endpoint requires a valid API key for server-to-server trust)
+    async for session in get_session():
+        res = await session.execute('SELECT id, email FROM users WHERE email = :email', {'email': email})
+        row = res.fetchone()
+        if not row:
+            # create a new user record (no password; Clerk handles auth)
+            from .models import User as UserModel
+            u = UserModel(email=email, password_hash=None, role=UserRole.user)
+            session.add(u)
+            await session.commit()
+            await session.refresh(u)
+        # Issue backend JWT
+        token = create_access_token(email, role=UserRole.user.value)
+        return {'access_token': token, 'user': {'email': email}}
+
+
 async def ingest_via_worker(document_id, s3_path, agent_id, tenant_id):
     # Helper to call the same worker logic when BackgroundTasks isn't wired by FastAPI
     from .worker import ingest_document_task
@@ -417,6 +562,171 @@ async def trigger_ingest(document_id: str, background_tasks: BackgroundTasks):
     async def runner_create_agent(request: Request):
         payload = await request.json()
         return await _forward_to_runner(request, 'POST', '/agents', json_body=payload)
+
+
+    # Onboarding endpoints
+    @app.post('/onboarding/progress')
+    async def save_onboarding_progress(request: Request, user=Depends(get_current_user)):
+        payload = await request.json()
+        email = user.get('email') if isinstance(user, dict) else None
+        if not email:
+            raise HTTPException(status_code=401, detail='Unauthorized')
+
+        async for session in get_session():
+            # upsert onboarding_progress by user_email
+            res = await session.execute('SELECT id FROM onboarding_progress WHERE user_email = :email', {'email': email})
+            row = res.fetchone()
+            if row:
+                # update
+                await session.execute('UPDATE onboarding_progress SET current_step = :step, data = :data, updated_at = now() WHERE user_email = :email', {'step': payload.get('current_step'), 'data': payload.get('data'), 'email': email})
+                await session.commit()
+                return {'success': True}
+            else:
+                await session.execute('INSERT INTO onboarding_progress (user_email, current_step, data, created_at, updated_at) VALUES (:email, :step, :data, now(), now())', {'email': email, 'step': payload.get('current_step'), 'data': payload.get('data')})
+                await session.commit()
+                return {'success': True}
+
+    @app.get('/onboarding/progress')
+    async def get_onboarding_progress(user=Depends(get_current_user)):
+        email = user.get('email') if isinstance(user, dict) else None
+        if not email:
+            return {'exists': False}
+        async for session in get_session():
+            res = await session.execute('SELECT id, tenant_id, agent_id, current_step, data FROM onboarding_progress WHERE user_email = :email', {'email': email})
+            row = res.fetchone()
+            if not row:
+                return {'exists': False}
+            pid, tenant_id, agent_id, current_step, data = row
+            return {'exists': True, 'progress_id': pid, 'tenant_id': str(tenant_id) if tenant_id else None, 'agent_id': str(agent_id) if agent_id else None, 'current_step': current_step, 'data': data}
+
+    @app.delete('/onboarding/progress')
+    async def delete_onboarding_progress(user=Depends(get_current_user)):
+        email = user.get('email') if isinstance(user, dict) else None
+        if not email:
+            raise HTTPException(status_code=401, detail='Unauthorized')
+        async for session in get_session():
+            await session.execute('DELETE FROM onboarding_progress WHERE user_email = :email', {'email': email})
+            await session.commit()
+            return {'deleted': True}
+
+    @app.post('/onboarding/company')
+    async def save_company_profile(payload: dict, user=Depends(get_current_user)):
+        # Minimal: create tenant and return id
+        company_name = payload.get('company_name')
+        if not company_name:
+            raise HTTPException(400, 'Missing company_name')
+        async for session in get_session():
+            from .models import Tenant
+            t = Tenant(name=company_name)
+            session.add(t)
+            await session.commit()
+            await session.refresh(t)
+            # Persist tenant_id into onboarding_progress for this user
+            try:
+                await session.execute('UPDATE onboarding_progress SET tenant_id = :tenant WHERE user_email = :email', {'tenant': t.id, 'email': user.get('email')})
+                await session.commit()
+            except Exception:
+                # if no onboarding row exists, create one
+                await session.execute('INSERT INTO onboarding_progress (user_email, tenant_id, current_step, data, created_at, updated_at) VALUES (:email, :tenant, :step, :data, now(), now())', {'email': user.get('email'), 'tenant': t.id, 'step': 1, 'data': {}})
+                await session.commit()
+            return {'tenant_id': str(t.id)}
+
+    @app.post('/onboarding/agent')
+    async def create_onboarding_agent(payload: dict, user=Depends(get_current_user)):
+        name = payload.get('name')
+        tenant_id = payload.get('tenant_id')
+        if not name:
+            raise HTTPException(400, 'Missing agent name')
+        async for session in get_session():
+            from .models import Agent
+            # If tenant_id not provided, try to find from onboarding progress
+            if not tenant_id:
+                # look up onboarding_progress
+                u = user.get('email')
+                res = await session.execute('SELECT tenant_id FROM onboarding_progress WHERE user_email = :email', {'email': u})
+                r = res.fetchone()
+                tenant_id = r[0] if r else None
+            if not tenant_id:
+                raise HTTPException(400, 'Missing tenant_id - complete company profile first')
+            a = Agent(name=name, tenant_id=tenant_id)
+            session.add(a)
+            await session.commit()
+            await session.refresh(a)
+            # persist agent id into onboarding_progress
+            await session.execute('UPDATE onboarding_progress SET agent_id = :agent WHERE user_email = :email', {'agent': a.id, 'email': user.get('email')})
+            await session.commit()
+            return {'agent_id': str(a.id)}
+
+    @app.post('/onboarding/knowledge')
+    async def upload_knowledge(request: Request, user=Depends(get_current_user)):
+        # Accept multipart/form-data with files and websites
+        form = await request.form()
+        files = form.getlist('files') if hasattr(form, 'getlist') else []
+        websites = form.get('websites')
+        faq_text = form.get('faq_text')
+        # For dev: simply store uploaded files to MinIO and create Document rows
+        async for session in get_session():
+            from .models import Document
+            # find agent_id from onboarding_progress
+            res = await session.execute('SELECT agent_id, tenant_id FROM onboarding_progress WHERE user_email = :email', {'email': user.get('email')})
+            row = res.fetchone()
+            if not row:
+                raise HTTPException(400, 'No onboarding progress / agent found')
+            agent_id, tenant_id = row
+            uploaded = []
+            for f in files:
+                # file may be UploadFile-like
+                try:
+                    content = await f.read()
+                except Exception:
+                    content = None
+                # store to minio
+                from .minio_helper import upload_file
+                import io as _io
+                if content is not None:
+                    fileobj = _io.BytesIO(content)
+                    dest = f"onboarding/{user.get('email')}/{f.name}"
+                    s3path = upload_file(fileobj, dest)
+                    doc = Document(agent_id=agent_id, tenant_id=tenant_id, filename=f.name, file_path=s3path, file_type=None, content=None)
+                    session.add(doc)
+                    await session.commit()
+                    await session.refresh(doc)
+                    uploaded.append(str(doc.id))
+            return {'success': True, 'uploaded': uploaded}
+
+    @app.post('/onboarding/voice')
+    async def configure_voice(payload: dict, user=Depends(get_current_user)):
+        # Persist voice preferences into onboarding_progress.data.voice
+        async for session in get_session():
+            res = await session.execute('SELECT data FROM onboarding_progress WHERE user_email = :email', {'email': user.get('email')})
+            row = res.fetchone()
+            current = row[0] if row and row[0] else {}
+            current = dict(current or {})
+            current['voice'] = payload
+            await session.execute('UPDATE onboarding_progress SET data = :data WHERE user_email = :email', {'data': current, 'email': user.get('email')})
+            await session.commit()
+            return {'success': True}
+
+    @app.post('/onboarding/channels')
+    async def setup_channels(payload: dict, user=Depends(get_current_user)):
+        async for session in get_session():
+            res = await session.execute('SELECT data FROM onboarding_progress WHERE user_email = :email', {'email': user.get('email')})
+            row = res.fetchone()
+            current = row[0] if row and row[0] else {}
+            current = dict(current or {})
+            current['channels'] = payload
+            await session.execute('UPDATE onboarding_progress SET data = :data WHERE user_email = :email', {'data': current, 'email': user.get('email')})
+            await session.commit()
+            return {'success': True}
+
+    @app.post('/onboarding/deploy')
+    async def deploy_agent(payload: dict, user=Depends(get_current_user)):
+        agent_id = payload.get('agent_id')
+        # For dev: pretend to deploy and return a phone number
+        if not agent_id:
+            raise HTTPException(400, 'Missing agent_id')
+        # In real flow, call runner or twilio; return fake phone
+        return {'success': True, 'phone_number': '+15551234567'}
 
 
     @app.get('/runner/pipelines')

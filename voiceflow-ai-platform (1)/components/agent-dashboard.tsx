@@ -81,6 +81,9 @@ export function AgentDashboard() {
   const [agents, setAgents] = useState(mockAgents)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
+  const [limit, setLimit] = useState(12)
+  const [total, setTotal] = useState<number | null>(null)
 
   // Mock realtime metrics since we removed the backend dependency
   const realtimeMetrics = {
@@ -102,9 +105,15 @@ export function AgentDashboard() {
     try {
       setLoading(true)
       setError(null)
-      // Simulate API call delay and use mock data
-      await new Promise(resolve => setTimeout(resolve, 500))
-      setAgents(mockAgents)
+      const res = await apiClient.getAgents({ page, limit, search: searchQuery, status: statusFilter === 'all' ? '' : statusFilter })
+      if (res && Array.isArray((res as any).agents)) {
+        setAgents((res as any).agents)
+        setTotal((res as any).total ?? null)
+      } else {
+        // fallback to demo if unexpected response
+        setAgents(mockAgents)
+        setTotal(null)
+      }
     } catch (err) {
       console.error("[v0] Failed to load agents:", err)
       setError("Failed to load agents. Using demo data.")
@@ -114,6 +123,9 @@ export function AgentDashboard() {
       setLoading(false)
     }
   }
+
+  // reload when pagination or filters change
+  useEffect(() => { loadAgents() }, [page, limit, searchQuery, statusFilter])
 
   const [showResumeBanner, setShowResumeBanner] = useState(false)
   const [resumeAgentName, setResumeAgentName] = useState<string | null>(null)
@@ -381,6 +393,16 @@ export function AgentDashboard() {
                 {filteredAgents.length === 0 && !loading && (
                   <div className="text-center py-12">
                     <p className="text-muted-foreground">No agents found matching your criteria.</p>
+                  </div>
+                )}
+                {/* Pagination Controls */}
+                {total !== null && (
+                  <div className="mt-6 flex items-center justify-between">
+                    <div className="text-sm text-muted-foreground">Showing page {page} • {total} agents</div>
+                    <div className="flex items-center space-x-2">
+                      <Button disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Prev</Button>
+                      <Button disabled={page * limit >= (total || 0)} onClick={() => setPage((p) => p + 1)}>Next</Button>
+                    </div>
                   </div>
                 )}
               </>
