@@ -1,0 +1,376 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DB Visualizer</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+      :root{--header-h:72px}
+      html,body{height:100%}
+      body{font-family:Inter,system-ui,Segoe UI,Roboto,Arial;margin:0;background:#f5f7fb}
+      .container-fluid{padding:18px}
+      .topbar{height:var(--header-h);display:flex;align-items:center;justify-content:space-between;padding:8px 0}
+      .left-panel{background:#fff;border-radius:10px;padding:16px;box-shadow:0 6px 18px rgba(20,30,60,0.06);height:calc(100vh - var(--header-h) - 36px);overflow:auto}
+      .panel-btn{width:100%;text-align:left}
+      #graph{background:#ffffff;border-radius:8px;box-shadow:inset 0 -1px 0 rgba(0,0,0,0.02);height:calc(100vh - var(--header-h) - 80px);min-height:360px}
+      .small-muted{font-size:0.9rem;color:#6b7280}
+      pre{background:#0f1724;color:#e6eef8;padding:12px;border-radius:6px}
+      .legend-item{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+      .status-badges .badge{margin-left:8px}
+      /* Responsive: stack panels on small screens */
+      @media (max-width: 900px){
+        .col-3{flex:0 0 100%;max-width:100%}
+        .col-9{flex:0 0 100%;max-width:100%}
+        .left-panel{height:auto}
+        #graph{height:60vh}
+        .container-fluid{padding:12px}
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container-fluid">
+      <div class="row g-3">
+        <div class="col-12 d-flex justify-content-between align-items-center topbar">
+          <div>
+            <h3 class="mb-0">DB Visualizer <small class="text-muted ms-2">Inspect MinIO • Postgres • Chroma</small></h3>
+            <div class="small-muted">Interactive explorer for object -> metadata -> embeddings relationships</div>
+          </div>
+          <div class="d-flex align-items-center">
+            <div class="status-badges small-muted me-3" id="statusBadges">Checking services...</div>
+            <button class="btn btn-outline-secondary me-2" onclick="showTutorial(true)"><i class="fa fa-circle-info"></i> Help</button>
+            <button class="btn btn-primary" onclick="buildGraph()"><i class="fa fa-network-wired"></i> Build Graph</button>
+          </div>
+        </div>
+
+        <div class="col-3">
+          <aside class="left-panel">
+            <h6 class="mb-2">Controls</h6>
+            <div class="d-grid gap-2 mb-2">
+              <button class="btn btn-sm btn-outline-primary panel-btn" onclick="call('/api/chroma')">Inspect Chroma</button>
+              <button class="btn btn-sm btn-outline-primary panel-btn" onclick="call('/api/minio')">Inspect MinIO</button>
+              <button class="btn btn-sm btn-outline-primary panel-btn" onclick="call('/api/postgres')">Inspect Postgres</button>
+            </div>
+            <hr />
+            <div class="mb-2">
+              <label class="form-label small-muted">Search nodes</label>
+              <input id="searchBox" class="form-control form-control-sm" placeholder="search labels/ids" oninput="applyFilters()" />
+            </div>
+            <div class="mb-2">
+              <label class="form-label small-muted">Filter by type</label>
+              <select id="typeFilter" class="form-select form-select-sm" onchange="applyFilters()"><option value="">(all)</option></select>
+            </div>
+            <div class="d-flex gap-2 mb-2">
+              <button class="btn btn-sm btn-outline-secondary" onclick="resetView()">Reset</button>
+              <button class="btn btn-sm btn-outline-secondary" onclick="saveLayout()">Save</button>
+              <button class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('loadLayoutFile').click()">Load</button>
+              <button class="btn btn-sm btn-outline-secondary" onclick="toggleGrouping()">Group</button>
+            </div>
+            <hr />
+            <h6 class="mb-1">Legend</h6>
+            <div id="legend" class="mb-2"></div>
+            <div class="small-muted">Tip: click a node to focus, drag to reposition, double-click to pin.</div>
+          </aside>
+        </div>
+
+        <div class="col-9">
+          <div id="graph" class="p-2"></div>
+          <div class="mt-3 d-flex justify-content-between align-items-center">
+            <div class="small-muted">Tip: Use search and filter to explore large graphs.</div>
+            <div>
+              <button class="btn btn-sm btn-outline-secondary me-2" onclick="exportCSV()">Export CSV</button>
+              <input id="loadLayoutFile" type="file" style="display:none" onchange="loadLayoutFile(this)" />
+            </div>
+          </div>
+          <div id="out" class="mt-3"><pre class="small-muted">Click an action to inspect.</pre></div>
+        </div>
+      </div>
+    </div>
+    
+
+    <script>
+      // Global state
+      window.__dbviz = window.__dbviz || {nodes:[], edges:[]}
+      let savedLayout = null
+      let groupingEnabled = false
+
+      // Tutorial overlay (DOM)
+      const tutHtml = `
+        <div id="__dbviz_tutorial" style="position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);background:#fff;border:1px solid #ccc;padding:18px;z-index:20000;box-shadow:0 8px 30px rgba(0,0,0,0.15);max-width:760px">
+          <h2>Welcome to DB Visualizer</h2>
+          <p>This tool helps you inspect three areas of the project:</p>
+          <ul>
+            <li><strong>MinIO</strong> — object storage buckets and objects (S3-compatible).</li>
+            <li><strong>Postgres</strong> — metadata and rows from configured database.</li>
+            <li><strong>Chroma</strong> — local embeddings SQLite used by the project.</li>
+          </ul>
+          <p>Use <em>Build Graph</em> to create a best-effort graph linking buckets → objects → Postgres rows → Chroma entries. The graph uses heuristics (filename contains PK, matching doc ids) to connect items. Results are exploratory and may need schema knowledge for precise linking.</p>
+          <p>Controls on the left let you search, filter by type, save/load layouts, and toggle grouping to cluster by type.</p>
+          <p style="font-size:0.95em;color:#555">Tip: Run the visualizer from the repository root or with <code>python run_db_visualizer.py</code>. Do not expose this without authentication.</p>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+            <button id="__dbviz_tut_dontshow">Don't show again</button>
+            <button id="__dbviz_tut_close">Close</button>
+          </div>
+        </div>
+      `
+      document.body.insertAdjacentHTML('beforeend', tutHtml)
+      document.getElementById('__dbviz_tut_close').onclick = ()=> hideTutorial()
+      document.getElementById('__dbviz_tut_dontshow').onclick = ()=> { localStorage.setItem('dbviz_show_tutorial','0'); hideTutorial() }
+      // Only show tutorial automatically if not dismissed
+      if(localStorage.getItem('dbviz_show_tutorial') !== '0'){
+        showTutorial(false)
+      } else {
+        hideTutorial()
+      }
+
+      function showTutorial(focus=true){ const t = document.getElementById('__dbviz_tutorial'); if(t) t.style.display='block'; if(focus) window.scrollTo({top:0,behavior:'smooth'}) }
+      function hideTutorial(){ const t = document.getElementById('__dbviz_tutorial'); if(t) t.style.display='none' }
+
+      function togglePanel(){ const p = document.getElementById('leftPanel'); const btn = document.getElementById('togglePanel'); if(!p) return; if(p.dataset.collapsed==='1'){ p.style.width='300px'; p.dataset.collapsed='0'; btn.innerText='Collapse' } else { p.style.width='36px'; p.dataset.collapsed='1'; btn.innerText='Expand' } }
+
+      // Check backend connections and show status badges
+      async function initStatus(){
+        const container = document.getElementById('statusBadges')
+        if(!container) return
+        container.innerHTML = 'Checking services...'
+        try{
+          const checks = await Promise.allSettled([fetch('/api/minio'), fetch('/api/postgres'), fetch('/api/chroma')])
+          const parts = []
+
+          // MinIO
+          const m = checks[0]
+          if(m.status==='fulfilled' && m.value.ok){
+            const jm = await m.value.json()
+            const cls = jm.buckets && jm.buckets.length ? 'success' : (jm.error ? 'danger' : 'warning')
+            parts.push(`<span class="badge bg-${cls}">MinIO</span>`)
+          } else { parts.push(`<span class="badge bg-danger">MinIO</span>`) }
+
+          // Postgres
+          const p = checks[1]
+          if(p.status==='fulfilled' && p.value.ok){
+            const jp = await p.value.json()
+            const cls = jp.tables && jp.tables.length ? 'success' : (jp.error ? 'danger' : 'warning')
+            parts.push(`<span class="badge bg-${cls}">Postgres</span>`)
+          } else { parts.push(`<span class="badge bg-danger">Postgres</span>`) }
+
+          // Chroma
+          const c = checks[2]
+          if(c.status==='fulfilled' && c.value.ok){
+            const jc = await c.value.json()
+            const cls = jc.found && jc.found.length ? 'success' : (jc.details && jc.details.length ? 'warning' : 'danger')
+            parts.push(`<span class="badge bg-${cls}">Chroma</span>`)
+          } else { parts.push(`<span class="badge bg-danger">Chroma</span>`) }
+
+          container.innerHTML = parts.join(' ')
+        }catch(e){ container.innerHTML = '<span class="badge bg-danger">Services: error</span>' }
+      }
+
+      // call initStatus after a short delay to avoid blocking
+      setTimeout(()=>{ try{ initStatus() }catch(e){} }, 400)
+
+      async function call(path){
+        document.getElementById('out').innerHTML = '<pre>Loading...</pre>'
+        try{
+          const r = await fetch(path)
+          const j = await r.json()
+          document.getElementById('out').innerHTML = renderResult(j)
+        }catch(e){
+          document.getElementById('out').innerHTML = '<pre>Error: '+e.toString()+"\n\nMake sure to run this from the repository root so environment variables and files are detected correctly.</pre>"
+        }
+      }
+
+      async function buildGraph(){
+        document.getElementById('out').innerHTML = '<pre>Building graph...</pre>'
+        try{
+          const r = await fetch('/api/graph')
+          const j = await r.json()
+          // store for export
+          window.__dbviz = j
+          document.getElementById('out').innerHTML = '<div id="graph" style="width:100%;height:600px"></div>'
+          renderGraph(j.nodes || [], j.edges || [])
+        }catch(e){
+          document.getElementById('out').innerHTML = '<pre>Error building graph: '+e.toString()+'</pre>'
+        }
+      }
+
+      async function loadTable(doSearch=false){
+        const table = document.getElementById('tableSelect').value.trim()
+        if(!table){ alert('Enter a table name'); return }
+        const q = doSearch ? document.getElementById('tableSearch').value.trim() : ''
+        document.getElementById('out').innerHTML = '<pre>Loading table...</pre>'
+        try{
+          const r = await fetch(`/api/postgres/table/${encodeURIComponent(table)}?limit=25&offset=0${q?('&q='+encodeURIComponent(q)) : ''}`)
+          const j = await r.json()
+          document.getElementById('out').innerHTML = renderResult(j)
+        }catch(e){ document.getElementById('out').innerHTML = '<pre>Error: '+e.toString()+'</pre>' }
+      }
+
+      async function loadObjects(){
+        const bucket = document.getElementById('bucketSelect').value.trim()
+        const prefix = document.getElementById('bucketPrefix').value.trim()
+        document.getElementById('out').innerHTML = '<pre>Loading objects...</pre>'
+        try{
+          const url = bucket ? `/api/minio/objects?bucket=${encodeURIComponent(bucket)}&prefix=${encodeURIComponent(prefix)}` : '/api/minio'
+          const r = await fetch(url)
+          const j = await r.json()
+          document.getElementById('out').innerHTML = renderResult(j)
+        }catch(e){ document.getElementById('out').innerHTML = '<pre>Error: '+e.toString()+'</pre>' }
+      }
+
+      function exportCSV(){
+        const j = window.__dbviz || {nodes:[], edges:[]}
+        let csv = 'type,id,label,meta\n'
+        for(const n of j.nodes||[]){
+          csv += ['node', escapeCsv(n.id), escapeCsv(n.label||''), escapeCsv(JSON.stringify(n))].join(',') + '\n'
+        }
+        csv += '\n'
+        csv += 'type,source,target,label,meta\n'
+        for(const e of j.edges||[]){
+          csv += ['edge', escapeCsv(e.source), escapeCsv(e.target), escapeCsv(e.label||''), escapeCsv(JSON.stringify(e))].join(',') + '\n'
+        }
+        const blob = new Blob([csv], {type:'text/csv'})
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url; a.download = 'db_visualizer_export.csv'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url)
+      }
+
+      function escapeCsv(s){
+        if(s===null||s===undefined) return ''
+        const t = String(s).replace(/"/g,'""')
+        return '"'+t+'"'
+      }
+
+      // D3 force graph rendering with enhanced UX
+      function renderGraph(nodes, edges){
+        const s = document.createElement('script')
+        s.src = 'https://d3js.org/d3.v7.min.js'
+        s.onload = ()=>{ _renderGraph(nodes, edges) }
+        document.head.appendChild(s)
+      }
+
+      function _renderGraph(nodesData, edgesData){
+        const d3 = window.d3
+        // normalize nodes into objects with id
+        nodes = nodesData.map(n=>Object.assign({}, n))
+        links = edgesData.map(e=>Object.assign({}, e))
+        // expose nodes for other functions
+        window.__dbviz.nodes = nodes; window.__dbviz.edges = links
+
+        const container = document.getElementById('graph')
+        container.innerHTML = ''
+        const width = container.clientWidth || 1000
+        const height = container.clientHeight || 600
+
+        const svg = d3.select(container).append('svg').attr('width', width).attr('height', height).style('border','1px solid #ddd').style('background','#fff')
+
+        // zoom/pan
+        const zoomG = svg.append('g')
+        svg.call(d3.zoom().scaleExtent([0.2,4]).on('zoom',(event)=>{ zoomG.attr('transform', event.transform) }))
+
+        const linkGroup = zoomG.append('g').attr('class','links')
+        const nodeGroup = zoomG.append('g').attr('class','nodes')
+        const labelGroup = zoomG.append('g').attr('class','labels')
+
+        const color = d3.scaleOrdinal(d3.schemeCategory10)
+
+        // simulation
+        const simulation = d3.forceSimulation(nodes)
+          .force('link', d3.forceLink(links).id(d=>d.id).distance(80).strength(0.7))
+          .force('charge', d3.forceManyBody().strength(-200))
+          .force('center', d3.forceCenter(width/2, height/2))
+          .force('collision', d3.forceCollide().radius(d => (d.size||8)+6))
+          .on('tick', ticked)
+
+        const link = linkGroup.selectAll('line').data(links).join('line').attr('stroke','#999').attr('stroke-opacity',0.6).attr('stroke-width',1)
+
+        const node = nodeGroup.selectAll('g').data(nodes, d=>d.id).join('g').call(d3.drag().on('start', dragstarted).on('drag', dragged).on('end', dragended))
+        node.append('circle').attr('r', d=>Math.max(6, d.size||8)).attr('fill', d=>colorForType(d.type)).attr('stroke','#fff').attr('stroke-width',1.2)
+        node.append('title').text(d=>d.label||d.id)
+
+        const label = labelGroup.selectAll('text').data(nodes, d=>d.id).join('text').text(d=>d.label||d.id).attr('font-size',11).attr('dx',10).attr('dy',3).style('pointer-events','none')
+
+        node.on('click', (event,d)=>{ focusNode(d, svg) })
+        node.on('dblclick', (event,d)=>{ togglePin(d) })
+        node.on('mouseover', (event,d)=>{ showTip(event, d) }).on('mouseout', hideTip)
+
+        populateLegend()
+
+        function ticked(){
+          link.attr('x1', d=>d.source.x).attr('y1', d=>d.source.y).attr('x2', d=>d.target.x).attr('y2', d=>d.target.y)
+          node.attr('transform', d=>`translate(${d.x},${d.y})`)
+          label.attr('x', d=>d.x).attr('y', d=>d.y)
+        }
+
+        function dragstarted(event,d){ if(!event.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y }
+        function dragged(event,d){ d.fx = event.x; d.fy = event.y }
+        function dragended(event,d){ if(!event.active) simulation.alphaTarget(0); if(!d.pinned){ d.fx = null; d.fy = null } }
+
+        function focusNode(d, svgRef){
+          const k = 1.6
+          const tx = width/2 - d.x * k
+          const ty = height/2 - d.y * k
+          svg.transition().duration(600).call(d3.zoom().transform, d3.zoomIdentity.translate(tx,ty).scale(k))
+          nodeGroup.selectAll('circle').attr('stroke-width', n=> n.id===d.id?3:1.2)
+        }
+
+        function togglePin(d){ d.pinned = !d.pinned; if(d.pinned){ d.fx = d.x; d.fy = d.y } else { d.fx = null; d.fy = null } }
+
+        function showTip(event,d){ hideTip(); const info = JSON.stringify(d.meta||d, null, 2); const tip = document.createElement('pre'); tip.id='__dbviz_tip'; tip.style.position='absolute'; tip.style.left=(event.pageX+10)+'px'; tip.style.top=(event.pageY+10)+'px'; tip.style.background='#fff'; tip.style.border='1px solid #ccc'; tip.style.padding='8px'; tip.style.zIndex=10000; tip.style.maxWidth='480px'; tip.innerText = info; document.body.appendChild(tip) }
+        function hideTip(){ const t = document.getElementById('__dbviz_tip'); if(t) t.remove() }
+
+        // expose helpers
+        window.__dbviz.applyLoadedLayout = applyLoadedLayout
+        window.__dbviz.simulation = simulation
+
+        // apply saved layout if present
+        if(savedLayout) applyLoadedLayout(savedLayout)
+
+        // helper to populate filter dropdown and legend
+        function populateLegend(){
+          const types = Array.from(new Set(nodes.map(n=>n.type).filter(Boolean)))
+          const sel = document.getElementById('typeFilter')
+          if(sel){ sel.innerHTML = '<option value="">(all)</option>' + types.map(t=>`<option value="${t}">${t}</option>`).join('') }
+          const legend = document.getElementById('legend')
+          if(legend){ legend.innerHTML = types.map(t=>`<span style="display:inline-flex;align-items:center;margin-right:8px"><span style="width:14px;height:14px;border-radius:3px;background:${colorForType(t)};display:inline-block;margin-right:6px"></span>${t}</span>`).join('') }
+        }
+
+        // filtering - simple opacity adjustments
+        window.applyFilters = function(){
+          const q = document.getElementById('searchBox').value.trim().toLowerCase()
+          const type = document.getElementById('typeFilter').value
+          nodeGroup.selectAll('g').style('opacity', d=>{ if(type && d.type !== type) return 0.08; if(q && !((d.label||'').toLowerCase().includes(q) || (d.id||'').toLowerCase().includes(q))) return 0.08; return 1 })
+          labelGroup.selectAll('text').style('opacity', d=>{ if(type && d.type !== type) return 0.08; if(q && !((d.label||'').toLowerCase().includes(q) || (d.id||'').toLowerCase().includes(q))) return 0.08; return 1 })
+          linkGroup.selectAll('line').style('opacity', l=>{ if(type && l.source.type !== type && l.target.type !== type) return 0.06; if(q){ const s = (l.source.label||'')+''+(l.source.id||''); const t = (l.target.label||'')+''+(l.target.id||''); if(!s.toLowerCase().includes(q) && !t.toLowerCase().includes(q)) return 0.06 } return 0.6 })
+        }
+
+        window.resetView = function(){ svg.transition().duration(400).call(d3.zoom().transform, d3.zoomIdentity); document.getElementById('searchBox').value=''; document.getElementById('typeFilter').value=''; applyFilters(); nodeGroup.selectAll('circle').attr('stroke-width',1.2) }
+
+        window.saveLayout = function(){
+          const layout = {nodes: nodes.map(n=>({id:n.id,x:n.x,y:n.y,fx:n.fx,fy:n.fy})), links: links}
+          const blob = new Blob([JSON.stringify(layout,null,2)], {type:'application/json'})
+          const url = URL.createObjectURL(blob)
+          const a = document.createElement('a'); a.href = url; a.download = 'graph_layout.json'; a.click(); URL.revokeObjectURL(url)
+        }
+
+        window.loadLayoutFile = function(input){ const f = input.files && input.files[0]; if(!f) return; const reader = new FileReader(); reader.onload = (ev)=>{ try{ const obj = JSON.parse(ev.target.result); savedLayout = obj; applyLoadedLayout(obj) }catch(e){ alert('Invalid layout file') } }; reader.readAsText(f) }
+
+        function applyLoadedLayout(obj){ if(!obj || !obj.nodes) return; const posById = {}; obj.nodes.forEach(n=>posById[n.id]=n); nodes.forEach(n=>{ const p = posById[n.id]; if(p){ n.x = p.x; n.y = p.y; n.fx = p.fx; n.fy = p.fy } }); simulation.alpha(0.3).restart() }
+
+        window.toggleGrouping = function(){ groupingEnabled = !groupingEnabled; if(groupingEnabled){ const types = Array.from(new Set(nodes.map(n=>n.type).filter(Boolean))); const anchors = {}; types.forEach((t,i)=>anchors[t] = {x: 150 + (i%5)*160, y: 100 + Math.floor(i/5)*160}); simulation.force('x', d3.forceX().x(d=> anchors[d.type]? anchors[d.type].x : width/2).strength(0.12)); simulation.force('y', d3.forceY().y(d=> anchors[d.type]? anchors[d.type].y : height/2).strength(0.12)); } else { simulation.force('x', null); simulation.force('y', null) } simulation.alpha(0.7).restart() }
+      }
+
+      function colorForType(t){ if(!t) return '#888'; if(t.startsWith('minio')) return '#1f77b4'; if(t.startsWith('postgres')) return '#2ca02c'; if(t.startsWith('chroma')) return '#d62728'; if(t.startsWith('agent')) return '#9467bd'; if(t.startsWith('doc')) return '#8c564b'; return '#7f7f7f' }
+
+      function renderResult(obj){
+        if(!obj) return '<pre>(no data)</pre>'
+        let html = ''
+        for(const k of Object.keys(obj)){
+          html += `<details open><summary><strong>${k}</strong></summary><pre>`+JSON.stringify(obj[k],null,2)+`</pre></details>`
+        }
+        return html
+      }
+    </script>
+  </body>
+</html>

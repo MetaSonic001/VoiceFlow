@@ -81,6 +81,13 @@ def choose_phone_number(client: Client):
 def update_number_webhook(account_sid: str, auth_token: str, phone_sid: str, voice_url: str = None, sms_url: str = None):
     client = Client(account_sid, auth_token)
     try:
+        # Fetch the phone number resource to include the E.164 number in output
+        try:
+            number_res = client.incoming_phone_numbers(phone_sid).fetch()
+            phone_number = getattr(number_res, 'phone_number', None)
+        except Exception:
+            phone_number = None
+
         update_args = {}
         if voice_url:
             update_args['voice_url'] = voice_url
@@ -92,7 +99,19 @@ def update_number_webhook(account_sid: str, auth_token: str, phone_sid: str, voi
             return False
 
         client.incoming_phone_numbers(phone_sid).update(**update_args)
-        print(f"✓ Updated phone SID {phone_sid} with: {update_args}")
+
+        # Friendly, readable summary
+        print("\n" + "=" * 60)
+        if phone_number:
+            print(f"✓ Updated phone number: {phone_number}   (SID: {phone_sid})")
+        else:
+            print(f"✓ Updated phone SID: {phone_sid}")
+        print("Set webhooks:")
+        if voice_url:
+            print(f"  • Voice webhook: {voice_url}")
+        if sms_url:
+            print(f"  • SMS webhook:   {sms_url}")
+        print("=" * 60 + "\n")
         return True
     except TwilioRestException as e:
         print("Failed to update Twilio phone number webhook:")
