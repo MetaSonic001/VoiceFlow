@@ -41,6 +41,7 @@
           <div class="d-flex align-items-center">
             <div class="status-badges small-muted me-3" id="statusBadges">Checking services...</div>
             <button class="btn btn-outline-secondary me-2" onclick="showTutorial(true)"><i class="fa fa-circle-info"></i> Help</button>
+            <button class="btn btn-outline-secondary me-2" onclick="openDebugModal()"><i class="fa fa-bug"></i> Debug</button>
             <button class="btn btn-primary" onclick="buildGraph()"><i class="fa fa-network-wired"></i> Build Graph</button>
           </div>
         </div>
@@ -130,40 +131,51 @@
 
       function togglePanel(){ const p = document.getElementById('leftPanel'); const btn = document.getElementById('togglePanel'); if(!p) return; if(p.dataset.collapsed==='1'){ p.style.width='300px'; p.dataset.collapsed='0'; btn.innerText='Collapse' } else { p.style.width='36px'; p.dataset.collapsed='1'; btn.innerText='Expand' } }
 
-      // Check backend connections and show status badges
+      // Check backend connections and show status badges using /api/debug and Bootstrap popovers
       async function initStatus(){
         const container = document.getElementById('statusBadges')
         if(!container) return
         container.innerHTML = 'Checking services...'
         try{
-          const checks = await Promise.allSettled([fetch('/api/minio'), fetch('/api/postgres'), fetch('/api/chroma')])
-          const parts = []
+          const r = await fetch('/api/debug')
+          if(!r.ok){ container.innerHTML = '<span class="badge bg-danger">Services: error</span>'; return }
+          const d = await r.json()
+          // helper to create popover content (HTML-safe)
+          function mkContent(obj){
+            try{ return '<pre style="white-space:pre-wrap;max-width:360px">'+JSON.stringify(obj,null,2)+'</pre>' }catch(e){ return String(obj) }
+          }
 
+          const parts = []
           // MinIO
-          const m = checks[0]
-          if(m.status==='fulfilled' && m.value.ok){
-            const jm = await m.value.json()
-            const cls = jm.buckets && jm.buckets.length ? 'success' : (jm.error ? 'danger' : 'warning')
-            parts.push(`<span class="badge bg-${cls}">MinIO</span>`)
-          } else { parts.push(`<span class="badge bg-danger">MinIO</span>`) }
+          const jm = d.minio || {}
+          const mcls = jm.buckets && jm.buckets.length ? 'success' : (jm.error ? 'danger' : 'warning')
+          const mMsg = jm.error || (jm.buckets && jm.buckets.length ? `${jm.buckets.length} buckets` : 'no buckets found')
+          parts.push(`<span class="badge bg-${mcls} dbviz-pop" data-bs-toggle="popover" data-bs-html="true" data-bs-content="${mkContent(jm).replace(/"/g,'&quot;')}">MinIO</span>`)
 
           // Postgres
-          const p = checks[1]
-          if(p.status==='fulfilled' && p.value.ok){
-            const jp = await p.value.json()
-            const cls = jp.tables && jp.tables.length ? 'success' : (jp.error ? 'danger' : 'warning')
-            parts.push(`<span class="badge bg-${cls}">Postgres</span>`)
-          } else { parts.push(`<span class="badge bg-danger">Postgres</span>`) }
+          const jp = d.postgres || {}
+          const pcls = jp.tables && jp.tables.length ? 'success' : (jp.error ? 'danger' : 'warning')
+          parts.push(`<span class="badge bg-${pcls} dbviz-pop" data-bs-toggle="popover" data-bs-html="true" data-bs-content="${mkContent(jp).replace(/"/g,'&quot;')}">Postgres</span>`)
 
           // Chroma
-          const c = checks[2]
-          if(c.status==='fulfilled' && c.value.ok){
-            const jc = await c.value.json()
-            const cls = jc.found && jc.found.length ? 'success' : (jc.details && jc.details.length ? 'warning' : 'danger')
-            parts.push(`<span class="badge bg-${cls}">Chroma</span>`)
-          } else { parts.push(`<span class="badge bg-danger">Chroma</span>`) }
+          const jc = d.chroma || {}
+          const ccls = jc.found && jc.found.length ? 'success' : (jc.details && jc.details.length ? 'warning' : 'danger')
+          parts.push(`<span class="badge bg-${ccls} dbviz-pop" data-bs-toggle="popover" data-bs-html="true" data-bs-content="${mkContent(jc).replace(/"/g,'&quot;')}">Chroma</span>`)
 
           container.innerHTML = parts.join(' ')
+
+          // initialize Bootstrap popovers (requires bootstrap JS loaded)
+          // remove existing popovers
+          const existing = document.querySelectorAll('.dbviz-pop')
+          existing.forEach(el=>{ try{ if(el._popover) el._popover.dispose() }catch(e){} })
+          // init new
+          const popTriggerList = [].slice.call(document.querySelectorAll('.dbviz-pop'))
+          popTriggerList.forEach(function (el) {
+            try{
+              var pop = new bootstrap.Popover(el, {trigger: 'hover', container: 'body', placement: 'bottom'})
+              el._popover = pop
+            }catch(e){ /* bootstrap may not be present, ignore */ }
+          })
         }catch(e){ container.innerHTML = '<span class="badge bg-danger">Services: error</span>' }
       }
 
@@ -371,6 +383,82 @@
         }
         return html
       }
+
+      // Debug modal helpers
+      async function openDebugModal(){
+        // fetch /api/debug and populate modal
+        try{
+          const r = await fetch('/api/debug')
+          const j = await r.json()
+          document.getElementById('dbvizDebugRaw').innerText = JSON.stringify(j,null,2)
+          // populate env editor
+          const env = j.env || {}
+          const lines = []
+          for(const k of Object.keys(env)){
+            if(env[k] !== null && env[k] !== undefined){
+              lines.push(`${k}=${env[k]}`)
+            }
+          }
+          document.getElementById('dbvizEnvEditor').value = lines.join('\n')
+          // show modal
+          const modalEl = document.getElementById('dbvizDebugModal')
+          const modal = new bootstrap.Modal(modalEl)
+          modal.show()
+        }catch(e){ alert('Failed to load debug data: '+e) }
+      }
+
+      function copyDebugJSON(){
+        const txt = document.getElementById('dbvizDebugRaw').innerText
+        navigator.clipboard.writeText(txt).then(()=>{ alert('JSON copied to clipboard') }, (err)=>{ alert('Copy failed: '+err) })
+      }
+
+      function copyEnvText(){
+        const txt = document.getElementById('dbvizEnvEditor').value
+        navigator.clipboard.writeText(txt).then(()=>{ alert('.env text copied to clipboard') }, (err)=>{ alert('Copy failed: '+err) })
+      }
+
+      function downloadEnvFile(){
+        const txt = document.getElementById('dbvizEnvEditor').value
+        const blob = new Blob([txt], {type:'text/plain'})
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a'); a.href = url; a.download = '.env'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url)
+      }
     </script>
+    <!-- Debug modal -->
+    <div class="modal fade" id="dbvizDebugModal" tabindex="-1" aria-labelledby="dbvizDebugModalLabel" aria-hidden="true">
+      <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="dbvizDebugModalLabel">DB Visualizer Diagnostics</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <ul class="nav nav-tabs" id="dbvizDebugTabs" role="tablist">
+              <li class="nav-item" role="presentation"><button class="nav-link active" id="raw-tab" data-bs-toggle="tab" data-bs-target="#raw" type="button" role="tab">Raw JSON</button></li>
+              <li class="nav-item" role="presentation"><button class="nav-link" id="env-tab" data-bs-toggle="tab" data-bs-target="#env" type="button" role="tab">Env Editor</button></li>
+            </ul>
+            <div class="tab-content mt-3">
+              <div class="tab-pane fade show active" id="raw" role="tabpanel" aria-labelledby="raw-tab">
+                <pre id="dbvizDebugRaw" style="white-space:pre-wrap;max-height:60vh;overflow:auto;background:#0f1724;color:#e6eef8;padding:12px;border-radius:6px"></pre>
+              </div>
+              <div class="tab-pane fade" id="env" role="tabpanel" aria-labelledby="env-tab">
+                <div class="mb-2 small-muted">Edit env vars below and download as a <code>.env</code> file to apply locally.</div>
+                <textarea id="dbvizEnvEditor" class="form-control" rows="10" style="font-family:monospace"></textarea>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <div class="me-auto">
+              <button class="btn btn-outline-secondary" onclick="copyDebugJSON()"><i class="fa fa-copy"></i> Copy JSON</button>
+              <button class="btn btn-outline-secondary" onclick="copyEnvText()"><i class="fa fa-copy"></i> Copy .env</button>
+              <button class="btn btn-outline-secondary" onclick="downloadEnvFile()"><i class="fa fa-download"></i> Download .env</button>
+            </div>
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- Bootstrap JS for popovers (bundle includes Popper) -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
   </body>
 </html>

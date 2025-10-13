@@ -33,6 +33,84 @@ def _normalize_endpoint(e: str):
 app = FastAPI(title="DB Visualizer")
 
 
+def _collect_diag():
+    """Collect diagnostic info: env vars, minio preview, postgres preview, chroma paths."""
+    diag = {
+        'env': {},
+        'minio': None,
+        'postgres': None,
+        'chroma': None,
+    }
+    # env vars
+    keys = [
+        'MINIO_ENDPOINT','MINIO_URL','MINIO_HOST','MINIO_ACCESS_KEY','MINIO_KEY','MINIO_SECRET_KEY','MINIO_SECRET',
+        'BACKEND_DATABASE_URL','DATABASE_URL','POSTGRES_URL','PG_URI','CHROMA_PERSIST_DIR','CHROMA_PATH'
+    ]
+    for k in keys:
+        diag['env'][k] = os.getenv(k)
+
+    # MinIO preview
+    endpoint = _normalize_endpoint(os.getenv('MINIO_ENDPOINT') or os.getenv('MINIO_URL') or os.getenv('MINIO_HOST'))
+    access = os.getenv('MINIO_ACCESS_KEY') or os.getenv('MINIO_KEY')
+    secret = os.getenv('MINIO_SECRET_KEY') or os.getenv('MINIO_SECRET')
+    preview = {'endpoint': endpoint, 'has_credentials': bool(access and secret)}
+    if endpoint and access and secret:
+        try:
+            import boto3
+            from botocore.client import Config
+            s3 = boto3.resource('s3', endpoint_url=endpoint, aws_access_key_id=access, aws_secret_access_key=secret, config=Config(signature_version='s3v4'))
+            buckets = [b.name for b in s3.buckets.all()]
+            preview['buckets'] = buckets
+        except Exception as e:
+            preview['error'] = str(e)
+    diag['minio'] = preview
+
+    # Postgres preview
+    dburl = os.getenv('BACKEND_DATABASE_URL') or os.getenv('DATABASE_URL') or os.getenv('POSTGRES_URL') or os.getenv('PG_URI')
+    if not dburl:
+        diag['postgres'] = {'database_url': None, 'error': 'No DATABASE_URL/POSTGRES_URL/PG_URI found in environment'}
+    else:
+        try:
+            from sqlalchemy import create_engine, inspect, text
+            eng_url = dburl
+            if '+asyncpg' in eng_url:
+                eng_url = eng_url.replace('+asyncpg', '+psycopg2')
+            eng = create_engine(eng_url)
+            inspector = inspect(eng)
+            tables = inspector.get_table_names()
+            diag['postgres'] = {'database_url': dburl, 'tables': tables}
+        except Exception as e:
+            diag['postgres'] = {'database_url': dburl, 'error': str(e)}
+
+    # Chroma
+    repo = _repo_root()
+    chroma_dir = os.getenv('CHROMA_PERSIST_DIR') or os.getenv('CHROMA_PATH')
+    candidates = []
+    if chroma_dir:
+        candidates.append(Path(chroma_dir))
+    candidates += [
+        repo / 'document-ingestion' / 'chroma_db' / 'chroma.sqlite3',
+        repo / 'document-ingestion' / 'chroma_db' / 'chroma.sqlite',
+        repo / 'document-ingestion' / 'chroma.sqlite3',
+    ]
+    chroma_found = []
+    chroma_details = []
+    for p in candidates:
+        if p.exists():
+            chroma_found.append(str(p))
+            try:
+                conn = sqlite3.connect(str(p))
+                cur = conn.cursor()
+                cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                tables = [r[0] for r in cur.fetchall()]
+                chroma_details.append({'path': str(p), 'tables': tables})
+                conn.close()
+            except Exception as e:
+                chroma_details.append({'path': str(p), 'error': str(e)})
+    diag['chroma'] = {'found': chroma_found, 'details': chroma_details}
+    return diag
+
+
 @app.get("/", response_class=HTMLResponse)
 def index():
     static = pathlib.Path(__file__).parent / 'static' / 'index.html'
@@ -41,15 +119,32 @@ def index():
     return HTMLResponse(static.read_text())
 
 
+
+@app.get('/api/debug')
+def api_debug():
+    """Return diagnostic JSON for the UI to show richer popovers/modals."""
+    try:
+        return JSONResponse(_collect_diag())
+    except Exception as e:
+        return JSONResponse({'error': str(e)})
+
+
 def _repo_root():
     # repo root (assume tools/ is under repo root)
-    return pathlib.Path(__file__).resolve().parents[3]
+    # app.py is at <repo>/tools/db_visualizer/app.py
+    # parents[0] -> db_visualizer, [1] -> tools, [2] -> repo root
+    return pathlib.Path(__file__).resolve().parents[2]
 
 
 @app.get("/api/chroma")
 def inspect_chroma():
     repo = _repo_root()
-    candidates = [
+    # allow an env var to explicitly point to chroma persistence
+    chroma_dir = os.getenv('CHROMA_PERSIST_DIR') or os.getenv('CHROMA_PATH')
+    candidates = []
+    if chroma_dir:
+        candidates.append(pathlib.Path(chroma_dir))
+    candidates += [
         repo / 'document-ingestion' / 'chroma_db' / 'chroma.sqlite3',
         repo / 'document-ingestion' / 'chroma_db' / 'chroma.sqlite',
         repo / 'document-ingestion' / 'chroma.sqlite3',
@@ -242,12 +337,17 @@ def build_graph(limit_minio=50, limit_pg=200, limit_chroma=200):
         diag['minio'] = {'note': 'No MinIO creds/config found in env'}
 
     # 2) Postgres rows
-    dburl = os.getenv('DATABASE_URL') or os.getenv('POSTGRES_URL') or os.getenv('PG_URI')
+    # prefer BACKEND_DATABASE_URL commonly used by the repo, but fall back to other vars
+    dburl = os.getenv('BACKEND_DATABASE_URL') or os.getenv('DATABASE_URL') or os.getenv('POSTGRES_URL') or os.getenv('PG_URI')
     pg_rows = []
     if dburl:
         try:
             from sqlalchemy import create_engine, inspect, text
-            eng = create_engine(dburl)
+            eng_url = dburl
+            # if the project uses asyncpg connection string, make a sync-compatible url for SQLAlchemy inspection
+            if '+asyncpg' in eng_url:
+                eng_url = eng_url.replace('+asyncpg', '+psycopg2')
+            eng = create_engine(eng_url)
             inspector = inspect(eng)
             tables = inspector.get_table_names()
             diag['postgres'] = {'tables': tables}
