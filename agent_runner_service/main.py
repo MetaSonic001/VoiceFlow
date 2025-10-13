@@ -3,9 +3,38 @@ from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 from crewai import Agent, Task, Crew, Process
 from crewai.tools import BaseTool
-from .db import get_db, engine, Base, SessionLocal
-from .async_runner import run_coro_sync
-from .models import PipelineAgent, Pipeline
+
+# Make imports work whether this file is run as a module or as a script.
+try:
+    # Preferred: package relative imports when running as a package
+    from .db import get_db, engine, Base, SessionLocal
+    from .async_runner import run_coro_sync
+    from .models import PipelineAgent, Pipeline
+except Exception:
+    # Fallback: when running `python main.py` directly, load modules as
+    # package modules (agent_runner_service.<module>) so their relative imports work.
+    import sys
+    import pathlib
+    import importlib
+
+    repo_parent = pathlib.Path(__file__).resolve().parent.parent
+    if str(repo_parent) not in sys.path:
+        sys.path.insert(0, str(repo_parent))
+
+    pkg = 'agent_runner_service'
+    db_mod = importlib.import_module(f"{pkg}.db")
+    async_mod = importlib.import_module(f"{pkg}.async_runner")
+    models_mod = importlib.import_module(f"{pkg}.models")
+
+    get_db = getattr(db_mod, 'get_db')
+    engine = getattr(db_mod, 'engine')
+    Base = getattr(db_mod, 'Base')
+    SessionLocal = getattr(db_mod, 'SessionLocal')
+
+    run_coro_sync = getattr(async_mod, 'run_coro_sync')
+
+    PipelineAgent = getattr(models_mod, 'PipelineAgent')
+    Pipeline = getattr(models_mod, 'Pipeline')
 import pathlib
 import sys
 import json
@@ -17,46 +46,58 @@ import importlib
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("agent-runner")
 
-# Attempt to import document-ingestion services (embedder, vector_store, db manager)
+# Document-ingestion helpers are initialized lazily to avoid importing heavy
+# ML libraries at module import time. Call `init_doc_ingest()` from tools when
+# they need embedder/vector-store functionality.
 _DOC_INGEST_AVAILABLE = False
 _embedder = None
 _vector_store = None
 _db_manager = None
 _summarizer = None
-try:
-    repo_root = pathlib.Path(__file__).resolve().parents[1]
-    ingestion_path = repo_root / 'document-ingestion'
-    if ingestion_path.exists():
-        sys.path.insert(0, str(ingestion_path))
-        try:
-            # dynamically import the services package modules used by the ingestion API
-            mod_embed = importlib.import_module('services.embedder')
-            mod_vs = importlib.import_module('services.vector_store')
-            mod_db = importlib.import_module('services.database')
+_DOC_INGEST_INITIALIZED = False
+
+
+def init_doc_ingest():
+    """Attempt to import and instantiate document-ingestion services.
+    This is safe to call multiple times; initialization is idempotent.
+    """
+    global _DOC_INGEST_AVAILABLE, _embedder, _vector_store, _db_manager, _summarizer, _DOC_INGEST_INITIALIZED
+    if _DOC_INGEST_INITIALIZED:
+        return
+    _DOC_INGEST_INITIALIZED = True
+    try:
+        repo_root = pathlib.Path(__file__).resolve().parents[1]
+        ingestion_path = repo_root / 'document-ingestion'
+        if ingestion_path.exists():
+            # Add services package path and import lazily
+            sys.path.insert(0, str(ingestion_path))
             try:
-                mod_sum = importlib.import_module('services.summarizer')
-                Summarizer = getattr(mod_sum, 'Summarizer', None)
-            except Exception:
-                Summarizer = None
+                mod_embed = importlib.import_module('services.embedder')
+                mod_vs = importlib.import_module('services.vector_store')
+                mod_db = importlib.import_module('services.database')
+                try:
+                    mod_sum = importlib.import_module('services.summarizer')
+                    Summarizer = getattr(mod_sum, 'Summarizer', None)
+                except Exception:
+                    Summarizer = None
 
-            TextEmbedder = getattr(mod_embed, 'TextEmbedder', None)
-            VectorStore = getattr(mod_vs, 'VectorStore', None)
-            DatabaseManager = getattr(mod_db, 'DatabaseManager', None)
+                TextEmbedder = getattr(mod_embed, 'TextEmbedder', None)
+                VectorStore = getattr(mod_vs, 'VectorStore', None)
+                DatabaseManager = getattr(mod_db, 'DatabaseManager', None)
 
-            # instantiate local helpers (keep lightweight)
-            _embedder = TextEmbedder() if TextEmbedder else None
-            _vector_store = VectorStore() if VectorStore else None
-            _db_manager = DatabaseManager() if DatabaseManager else None
-            _summarizer = Summarizer() if Summarizer else None
-            _DOC_INGEST_AVAILABLE = True
-            logger.info("Agent-runner: document-ingestion services available and initialized")
-        except Exception as e:
-            logger.exception(f"Failed to initialize document-ingestion services: {e}")
-            _DOC_INGEST_AVAILABLE = False
-    else:
-        logger.info("document-ingestion folder not found; running with local fallback tools")
-except Exception as e:
-    logger.exception(f"Error while attempting to import document-ingestion services: {e}")
+                _embedder = TextEmbedder() if TextEmbedder else None
+                _vector_store = VectorStore() if VectorStore else None
+                _db_manager = DatabaseManager() if DatabaseManager else None
+                _summarizer = Summarizer() if Summarizer else None
+                _DOC_INGEST_AVAILABLE = True
+                logger.info("Agent-runner: document-ingestion services available and initialized")
+            except Exception as e:
+                logger.exception(f"Failed to initialize document-ingestion services: {e}")
+                _DOC_INGEST_AVAILABLE = False
+        else:
+            logger.info("document-ingestion folder not found; running with local fallback tools")
+    except Exception as e:
+        logger.exception(f"Error while attempting to import document-ingestion services: {e}")
 from sqlalchemy.orm import Session
 import uvicorn
 
@@ -81,8 +122,8 @@ class CreatePipelineIn(BaseModel):
 
 # Concrete tools for pipeline agents
 class CuratorTool(BaseTool):
-    name = "curator"
-    description = "Extracts structured FAQs and embeddings from docs and stores them in Chroma"
+    name: str = "curator"
+    description: str = "Extracts structured FAQs and embeddings from docs and stores them in Chroma"
 
     def _run(self, payload) -> str:
         """
@@ -100,6 +141,9 @@ class CuratorTool(BaseTool):
             settings = info.get('settings', {})
             tenant_id = context.get('tenant_id')
             agent_id = context.get('agent_id') or settings.get('agent_id')
+
+            # Ensure document-ingestion services are initialized lazily
+            init_doc_ingest()
 
             # If document-ingestion services are available, use them
             if _DOC_INGEST_AVAILABLE and _db_manager and _embedder and _vector_store:
@@ -148,8 +192,8 @@ class CuratorTool(BaseTool):
 
 
 class EvaluatorTool(BaseTool):
-    name = "evaluator"
-    description = "Evaluates relevance and accuracy of embeddings or results using vector store"
+    name: str = "evaluator"
+    description: str = "Evaluates relevance and accuracy of embeddings or results using vector store"
 
     def _run(self, payload) -> str:
         try:
@@ -161,6 +205,9 @@ class EvaluatorTool(BaseTool):
             settings = info.get('settings', {})
             tenant_id = context.get('tenant_id')
             agent_id = context.get('agent_id') or settings.get('agent_id')
+
+            # Ensure ingestion services are initialized lazily
+            init_doc_ingest()
 
             # If vector store available and we have an embedding to test
             if _DOC_INGEST_AVAILABLE and _vector_store:
@@ -177,8 +224,8 @@ class EvaluatorTool(BaseTool):
 
 
 class SummarizerTool(BaseTool):
-    name = "summarizer"
-    description = "Generates short summary from previous calls/docs using ingestion summarizer if available"
+    name: str = "summarizer"
+    description: str = "Generates short summary from previous calls/docs using ingestion summarizer if available"
 
     def _run(self, payload) -> str:
         try:
@@ -189,6 +236,9 @@ class SummarizerTool(BaseTool):
             context = info.get('context', {})
             settings = info.get('settings', {})
             texts = settings.get('texts') or []
+
+            # Initialize ingestion services lazily
+            init_doc_ingest()
 
             if _DOC_INGEST_AVAILABLE and _summarizer:
                 # summarizer.summarize expects list input
@@ -206,8 +256,8 @@ class SummarizerTool(BaseTool):
 
 
 class QATool(BaseTool):
-    name = "qa"
-    description = "Audits transcripts for tone, compliance, and missed intents using backend data when available"
+    name: str = "qa"
+    description: str = "Audits transcripts for tone, compliance, and missed intents using backend data when available"
 
     def _run(self, payload) -> str:
         try:
@@ -218,6 +268,9 @@ class QATool(BaseTool):
             # payload may contain transcript text directly or a transcript_id
             transcript = info.get('transcript')
             transcript_id = info.get('transcript_id')
+
+            # Lazily initialize ingestion helpers
+            init_doc_ingest()
 
             # If a transcript_id is provided and backend adapter exists in db_manager, try to fetch it
             if _DOC_INGEST_AVAILABLE and _db_manager and transcript_id:
@@ -243,7 +296,7 @@ class QATool(BaseTool):
 
 
 # Helper to materialize a crew agent from a PipelineAgent DB model
-def materialize_agent(db_agent: PipelineAgent):
+def materialize_agent(db_agent: 'PipelineAgent'):
     tools = []
     if db_agent.agent_type == "curator":
         tools = [CuratorTool()]
@@ -272,7 +325,7 @@ def materialize_agent(db_agent: PipelineAgent):
     return agent
 
 
-def run_pipeline(db: Session, pipeline: Pipeline, context: Dict[str, Any]):
+def run_pipeline(db: Session, pipeline: 'Pipeline', context: Dict[str, Any]):
     logger.info(f"Running pipeline {pipeline.id} - {pipeline.name}")
     for idx, stage in enumerate(pipeline.stages or []):
         agent_id = stage.get("agent_id")
@@ -339,7 +392,7 @@ def list_pipelines(db: Session = Depends(get_db)):
 
 
 @app.post("/pipelines/{pipeline_id}/trigger")
-def trigger_pipeline(pipeline_id: int, payload: Optional[Dict[str, Any]] = None, background_tasks: BackgroundTasks = Depends(), db: Session = Depends(get_db)):
+def trigger_pipeline(pipeline_id: int, payload: Optional[Dict[str, Any]] = None, background_tasks: BackgroundTasks = BackgroundTasks(), db: Session = Depends(get_db)):
     pipeline = db.query(Pipeline).filter(Pipeline.id == pipeline_id).first()
     if not pipeline:
         raise HTTPException(status_code=404, detail="Pipeline not found")
