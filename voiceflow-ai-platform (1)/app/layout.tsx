@@ -1,6 +1,6 @@
 import type React from "react"
 import type { Metadata } from "next"
-import { ClerkProvider, SignedIn, SignedOut, UserButton } from '@clerk/nextjs'
+import { ClerkProvider, SignedIn, UserButton } from '@clerk/nextjs'
 import ClerkSync from '@/components/ClerkSync'
 import { GeistSans } from "geist/font/sans"
 import { GeistMono } from "geist/font/mono"
@@ -31,10 +31,6 @@ export default function RootLayout({
       <html lang="en" className="scroll-smooth">
         <body className={`font-sans ${GeistSans.variable} ${GeistMono.variable} antialiased`}>
           <header className="flex justify-end items-center p-4 gap-4 h-16">
-            <SignedOut>
-              {/* You can use Clerk's SignIn/SignUp components in your header here. */}
-              <a href="/sign-in" className="text-accent">Sign in</a>
-            </SignedOut>
             <SignedIn>
               <UserButton />
               <ClerkSync />

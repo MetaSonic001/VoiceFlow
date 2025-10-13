@@ -7,18 +7,32 @@ import { Features } from "@/components/Features"
 import { Pricing } from "@/components/Pricing"
 import { AuthModal } from "@/components/auth-modal"
 import { useRouter } from "next/navigation"
+import { useClerk } from '@clerk/nextjs'
 
 export default function HomePage() {
   const [showAuth, setShowAuth] = useState(false)
   const [authMode, setAuthMode] = useState<"login" | "signup">("signup")
   const router = useRouter()
+  const clerk = useClerk() as any
 
   const handleGetStarted = () => {
+    // Prefer opening Clerk sign-up if available, fallback to local AuthModal
+    if (clerk?.openSignUp) {
+      clerk.openSignUp()
+      return
+    }
+
     setAuthMode("signup")
     setShowAuth(true)
   }
 
   const handleSignIn = () => {
+    // Prefer opening Clerk sign-in if available, fallback to local AuthModal
+    if (clerk?.openSignIn) {
+      clerk.openSignIn()
+      return
+    }
+
     setAuthMode("login")
     setShowAuth(true)
   }
