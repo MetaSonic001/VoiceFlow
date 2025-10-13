@@ -4,7 +4,7 @@ import { auth } from '@clerk/nextjs/server'
 
 export async function POST(req: NextRequest) {
   // Server-side endpoint: verify Clerk auth and forward a trusted request to the Python backend
-  const { userId, sessionId, getToken } = auth()
+  const { userId, sessionId, getToken } = await auth()
   if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
   // Get session user info (Clerk token used to fetch email claim)
@@ -28,9 +28,32 @@ export async function POST(req: NextRequest) {
     }
 
     // Some Clerk installations expose the email in token claims; try to decode JWT if available
-    if (!email && token?.claims) {
-      // @ts-ignore
-      email = token.claims.email || token.claims['email'] || null
+    if (!email && token) {
+      try {
+        let claims: any = null
+
+        if (typeof token === 'string') {
+          // token is a JWT string; decode the payload (base64url)
+          const parts = token.split('.')
+          if (parts.length >= 2) {
+            const payload = parts[1]
+            const base64 = payload.replace(/-/g, '+').replace(/_/g, '/')
+            const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4)
+            const json = Buffer.from(padded, 'base64').toString('utf8')
+            claims = JSON.parse(json)
+          }
+        } else if (typeof token === 'object') {
+          // token might be an object that already contains claims
+          // @ts-ignore
+          claims = token.claims || token
+        }
+
+        if (claims) {
+          email = claims.email || claims['email'] || null
+        }
+      } catch (e) {
+        // ignore decode/parse errors and fall back to other methods
+      }
     }
 
     if (!email) return NextResponse.json({ error: 'Unable to resolve user email from Clerk' }, { status: 400 })

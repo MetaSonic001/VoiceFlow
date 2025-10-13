@@ -3,15 +3,15 @@ import { prisma } from '@/lib/prisma'
 import { auth } from '@clerk/nextjs/server'
 
 export async function POST(req: Request) {
-  const { userId } = auth()
+  const session = await auth()
+  const { userId } = session
   if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
   const body = await req.json().catch(() => ({}))
   const { name } = body
   if (!name) return NextResponse.json({ error: 'Missing name' }, { status: 400 })
-
   // Resolve tenant from onboarding progress
   // @ts-ignore
-  let userEmail = auth().user?.primary_email_address || auth().user?.email || null
+  let userEmail = session.user?.primary_email_address || session.user?.email || null
   if (!userEmail && process.env.CLERK_API_KEY) {
     const r = await fetch(`https://api.clerk.com/v1/users/${userId}`, { headers: { Authorization: `Bearer ${process.env.CLERK_API_KEY}` } })
     if (r.ok) {

@@ -3,14 +3,15 @@ import { prisma } from '@/lib/prisma'
 import { auth } from '@clerk/nextjs/server'
 
 export async function GET() {
-  const { userId } = auth()
+  const session = await auth()
+  const userId = session.userId
   if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
   try {
     // Map Clerk userId to email via Clerk API if CLERK_API_KEY provided, else rely on local token claims
     // For simplicity, attempt to read email from auth() token claims
     // @ts-ignore
-    const email = auth().user?.primary_email_address || auth().user?.email || null
+    const email = (session.user as any)?.primary_email_address || (session.user as any)?.email || null
 
     // Fallback: try to read from CLERK_API_KEY via REST API (optional)
     let userEmail = email
@@ -32,16 +33,17 @@ export async function GET() {
     return NextResponse.json({ error: String(err) }, { status: 500 })
   }
 }
-
 export async function POST(req: Request) {
-  const { userId } = auth()
+  const session = await auth()
+  const userId = session.userId
   if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
   const body = await req.json().catch(() => ({}))
   // expected: { agent_id?, current_step?, data? }
-  // Determine user's email as above
+  // Determine user's email as above (use session first, then Clerk API)
   // @ts-ignore
-  let userEmail = auth().user?.primary_email_address || auth().user?.email || null
+  let userEmail = (session.user as any)?.primary_email_address || (session.user as any)?.email || null
+
   if (!userEmail && process.env.CLERK_API_KEY) {
     const r = await fetch(`https://api.clerk.com/v1/users/${userId}`, { headers: { Authorization: `Bearer ${process.env.CLERK_API_KEY}` } })
     if (r.ok) {
@@ -64,11 +66,13 @@ export async function POST(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-  const { userId } = auth()
+  const session = await auth()
+  const userId = session.userId
   if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
-  // Determine email
+  // Determine email (use session first, then Clerk API)
   // @ts-ignore
-  let userEmail = auth().user?.primary_email_address || auth().user?.email || null
+  let userEmail = (session.user as any)?.primary_email_address || (session.user as any)?.email || null
+
   if (!userEmail && process.env.CLERK_API_KEY) {
     const r = await fetch(`https://api.clerk.com/v1/users/${userId}`, { headers: { Authorization: `Bearer ${process.env.CLERK_API_KEY}` } })
     if (r.ok) {
