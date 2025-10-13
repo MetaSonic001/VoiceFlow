@@ -29,7 +29,9 @@ set BACKEND_DATABASE_URL=postgresql+asyncpg://doc_user:doc_password@localhost:54
 ## 3) Start MinIO (using Docker)
 
 ```cmd
-docker run -p 9000:9000 --name vf-minio -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin -d quay.io/minio/minio server /data
+# Publish MinIO API (9000) and Console (9001). The `--console-address` flag binds the Console to the
+# container port that we also publish to the host. This keeps the Console reachable at http://localhost:9001
+docker run -p 9000:9000 -p 9001:9001 --name vf-minio -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin -d quay.io/minio/minio server /data --console-address ":9001"
 ```
 
 Set MinIO env vars (cmd.exe):

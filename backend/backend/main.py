@@ -55,6 +55,27 @@ metrics = {
 app = FastAPI(title='VoiceFlow Backend')
 
 
+@app.on_event('startup')
+async def ensure_minio_bucket_on_startup():
+    """Ensure the configured MinIO bucket exists on startup (best-effort; non-blocking)."""
+    from .minio_helper import get_minio_client, MINIO_BUCKET
+    import asyncio
+
+    def _ensure():
+        try:
+            c = get_minio_client()
+            if not c.bucket_exists(MINIO_BUCKET):
+                c.make_bucket(MINIO_BUCKET)
+                logger.info(f"Created MinIO bucket: {MINIO_BUCKET}")
+            else:
+                logger.info(f"MinIO bucket exists: {MINIO_BUCKET}")
+        except Exception as e:
+            logger.warning(f"MinIO bucket ensure failed on startup: {e}")
+
+    # Run in thread to avoid blocking startup
+    asyncio.get_event_loop().run_in_executor(None, _ensure)
+
+
 @app.middleware('http')
 async def log_requests(request: Request, call_next):
     metrics['requests'] += 1
