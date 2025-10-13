@@ -808,6 +808,27 @@ async def trigger_ingest(document_id: str, background_tasks: BackgroundTasks):
             current['voice'] = payload
             await session.execute(text('UPDATE onboarding_progress SET data = :data WHERE user_email = :email'), {'data': current, 'email': user.get('email')})
             await session.commit()
+            # Also persist voice choices into the Agent record if present
+            try:
+                res2 = await session.execute(text('SELECT agent_id FROM onboarding_progress WHERE user_email = :email'), {'email': user.get('email')})
+                r2 = res2.fetchone()
+                aid = r2[0] if r2 else None
+                if aid:
+                    # read existing channels JSON from agent
+                    existing = {}
+                    try:
+                        rch = await session.execute(text('SELECT channels FROM agents WHERE id = :agent'), {'agent': aid})
+                        er = rch.fetchone()
+                        existing = er[0] if er and er[0] else {}
+                    except Exception:
+                        existing = {}
+                    # merge voice into channels
+                    merged_channels = dict(existing or {})
+                    merged_channels['voice'] = payload
+                    await session.execute(text('UPDATE agents SET channels = :channels WHERE id = :agent'), {'channels': merged_channels, 'agent': aid})
+                    await session.commit()
+            except Exception:
+                pass
             return {'success': True}
 
     @app.post('/onboarding/channels')
@@ -820,6 +841,17 @@ async def trigger_ingest(document_id: str, background_tasks: BackgroundTasks):
             current['channels'] = payload
             await session.execute(text('UPDATE onboarding_progress SET data = :data WHERE user_email = :email'), {'data': current, 'email': user.get('email')})
             await session.commit()
+            # Also update agent row's channels and phone_number if agent exists
+            try:
+                res2 = await session.execute(text('SELECT agent_id FROM onboarding_progress WHERE user_email = :email'), {'email': user.get('email')})
+                r2 = res2.fetchone()
+                aid = r2[0] if r2 else None
+                if aid:
+                    # update agents.channels and phone_number
+                    await session.execute(text('UPDATE agents SET channels = :channels, phone_number = :phone WHERE id = :agent'), {'channels': payload, 'phone': payload.get('phone_number'), 'agent': aid})
+                    await session.commit()
+            except Exception:
+                pass
             return {'success': True}
 
     @app.post('/onboarding/deploy')
@@ -829,7 +861,15 @@ async def trigger_ingest(document_id: str, background_tasks: BackgroundTasks):
         if not agent_id:
             raise HTTPException(400, 'Missing agent_id')
         # In real flow, call runner or twilio; return fake phone
-        return {'success': True, 'phone_number': '+15551234567'}
+        phone = '+15551234567'
+        # persist phone number to agent row if exists
+        async with get_session() as session:
+            try:
+                await session.execute(text('UPDATE agents SET phone_number = :phone WHERE id = :agent'), {'phone': phone, 'agent': agent_id})
+                await session.commit()
+            except Exception:
+                pass
+        return {'success': True, 'phone_number': phone}
 
 
     @app.get('/runner/pipelines')

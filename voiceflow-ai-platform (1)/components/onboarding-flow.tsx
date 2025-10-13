@@ -122,7 +122,14 @@ export function OnboardingFlow() {
         if (currentStep === 7) {
           const effectiveAgentId = (merged as any).agent_id || agentId || ''
           try {
-            const res = await apiClient.deployAgent(effectiveAgentId)
+            let res: any = undefined
+            // If the child component already performed deployment (passes deployed flag), skip re-deploy
+            if ((stepData && (stepData as any).deployed) || (merged as any).deployed) {
+              res = { phone_number: (stepData && (stepData as any).phone_number) || (merged as any).phone_number }
+            } else {
+              res = await apiClient.deployAgent(effectiveAgentId)
+            }
+
             toast({ title: 'Deployment started', description: 'Agent deployment is in progress.' })
             if (res?.phone_number) {
               const mergedWithPhone = { ...merged, phone_number: res.phone_number }
@@ -143,6 +150,13 @@ export function OnboardingFlow() {
     })()
 
     // advance UI
+    if ((stepData && (stepData as any).deployed) || (merged as any).deployed) {
+      // If deployed, move to final state and redirect to dashboard
+      setCurrentStep(STEPS.length)
+      // small delay to allow UI to update
+      setTimeout(() => router.push('/dashboard'), 400)
+      return
+    }
     if (currentStep < STEPS.length) {
       setCurrentStep(currentStep + 1)
     } else {

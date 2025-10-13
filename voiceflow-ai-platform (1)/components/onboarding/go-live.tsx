@@ -58,7 +58,8 @@ export function GoLive({ onComplete, phoneNumber }: GoLiveProps) {
   }
 
   const handleComplete = () => {
-    onComplete({ deployed: true })
+    // Pass deployed info back to parent so it can persist and redirect
+    onComplete({ deployed: isDeployed, phone_number: deployedNumber })
   }
 
   const copyPhoneNumber = () => {
