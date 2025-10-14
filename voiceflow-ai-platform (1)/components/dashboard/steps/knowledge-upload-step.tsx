@@ -85,145 +85,166 @@ export function KnowledgeUploadStep({ data, onDataChange, initialData }: Knowled
   }
 
   return (
-    <div className="space-y-6">
-      <div className="text-center space-y-2">
-        <h2 className="text-xl sm:text-2xl font-bold">Upload Knowledge Base</h2>
-        <p className="text-sm sm:text-base text-muted-foreground">Add documents and websites to train your agent</p>
-      </div>
+    <div className="w-full max-w-4xl mx-auto">
+      <div className="space-y-8">
+        {/* Header */}
+        <div className="text-center space-y-3">
+          <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">Upload Knowledge Base</h2>
+          <p className="text-base text-muted-foreground max-w-2xl mx-auto">
+            Add documents and websites to train your agent
+          </p>
+        </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
-        {/* File Upload */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center space-x-2 text-base sm:text-lg">
-              <FileText className="h-4 w-4 sm:h-5 sm:w-5" />
-              <span>Upload Documents</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div
-              className={`border-2 border-dashed rounded-lg p-4 sm:p-6 text-center transition-colors ${
-                dragActive ? 'border-primary bg-primary/5' : 'border-muted-foreground/25'
-              }`}
-              onDragEnter={handleDrag}
-              onDragLeave={handleDrag}
-              onDragOver={handleDrag}
-              onDrop={handleDrop}
-            >
-              <Upload className="h-8 w-8 sm:h-10 sm:w-10 mx-auto mb-3 sm:mb-4 text-muted-foreground" />
-              <p className="text-xs sm:text-sm text-muted-foreground mb-2">
-                Drag and drop files here, or click to select
-              </p>
-              <input
-                type="file"
-                multiple
-                accept=".pdf,.doc,.docx,.txt,.md"
-                onChange={handleFileUpload}
-                className="hidden"
-                id="file-upload"
-              />
-              <Label htmlFor="file-upload">
-                <Button variant="outline" className="cursor-pointer text-xs sm:text-sm">
-                  Choose Files
-                </Button>
-              </Label>
-            </div>
+        {/* Main Content Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* File Upload Card */}
+          <Card className="shadow-sm">
+            <CardHeader className="pb-4">
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <FileText className="h-5 w-5 text-primary" />
+                <span>Upload Documents</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div
+                className={`border-2 border-dashed rounded-xl p-8 text-center transition-all duration-200 cursor-pointer ${dragActive
+                    ? 'border-primary bg-primary/10 scale-[0.98]'
+                    : 'border-muted-foreground/25 hover:border-primary/50 hover:bg-accent/5'
+                  }`}
+                onDragEnter={handleDrag}
+                onDragLeave={handleDrag}
+                onDragOver={handleDrag}
+                onDrop={handleDrop}
+              >
+                <Upload className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+                <p className="text-sm text-muted-foreground mb-3">
+                  Drag and drop files here, or click to select
+                </p>
+                <p className="text-xs text-muted-foreground mb-4">
+                  Supported: PDF, DOC, DOCX, TXT, MD
+                </p>
+                <input
+                  type="file"
+                  multiple
+                  accept=".pdf,.doc,.docx,.txt,.md"
+                  onChange={handleFileUpload}
+                  className="hidden"
+                  id="file-upload"
+                />
+                <Label htmlFor="file-upload">
+                  <Button variant="outline" size="lg" className="cursor-pointer">
+                    <Upload className="h-4 w-4 mr-2" />
+                    Choose Files
+                  </Button>
+                </Label>
+              </div>
 
-            {uploadedFiles.length > 0 && (
-              <div className="space-y-2">
-                <Label className="text-sm">Uploaded Files:</Label>
-                <div className="space-y-2 max-h-32 overflow-y-auto">
-                  {uploadedFiles.map((file, index) => (
-                    <div key={index} className="flex items-center justify-between p-2 bg-muted rounded text-sm">
-                      <span className="truncate mr-2">{file}</span>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => removeFile(index)}
-                        className="flex-shrink-0"
+              {uploadedFiles.length > 0 && (
+                <div className="space-y-3">
+                  <Label className="text-sm font-medium">Uploaded Files ({uploadedFiles.length})</Label>
+                  <div className="space-y-2 max-h-40 overflow-y-auto pr-2">
+                    {uploadedFiles.map((file, index) => (
+                      <div
+                        key={index}
+                        className="flex items-center justify-between p-3 bg-muted/50 rounded-lg hover:bg-muted transition-colors"
                       >
-                        <X className="h-3 w-3 sm:h-4 sm:w-4" />
-                      </Button>
-                    </div>
-                  ))}
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                          <span className="truncate text-sm">{file}</span>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeFile(index)}
+                          className="flex-shrink-0 h-8 w-8 p-0"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+              )}
+            </CardContent>
+          </Card>
 
-        {/* Website URLs */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center space-x-2 text-base sm:text-lg">
-              <Link className="h-4 w-4 sm:h-5 sm:w-5" />
-              <span>Website URLs</span>
+          {/* Website URLs Card */}
+          <Card className="shadow-sm">
+            <CardHeader className="pb-4">
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Link className="h-5 w-5 text-primary" />
+                <span>Website URLs</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Add website URLs to crawl and extract knowledge from
+              </p>
+
+              <div className="space-y-3 max-h-[280px] overflow-y-auto pr-2">
+                {websiteUrls.map((url, index) => (
+                  <div key={index} className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Link className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        type="url"
+                        placeholder="https://example.com"
+                        value={url}
+                        onChange={(e) => updateWebsiteUrl(index, e.target.value)}
+                        className="pl-10 h-11"
+                      />
+                    </div>
+                    {websiteUrls.length > 1 && (
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => removeWebsiteUrl(index)}
+                        className="flex-shrink-0 h-11 w-11"
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <Button
+                variant="outline"
+                onClick={addWebsiteUrl}
+                className="w-full h-11"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Add Another URL
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Knowledge Base Summary */}
+        <Card className="bg-primary/5 border-primary/20 shadow-sm">
+          <CardHeader className="pb-4">
+            <CardTitle className="flex items-center gap-2 text-lg text-primary">
+              <Database className="h-5 w-5" />
+              <span>Knowledge Base Summary</span>
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <p className="text-xs sm:text-sm text-muted-foreground">
-              Add website URLs to crawl and extract knowledge from
-            </p>
-            
-            <div className="space-y-3">
-              {websiteUrls.map((url, index) => (
-                <div key={index} className="flex space-x-2">
-                  <Input
-                    type="url"
-                    placeholder="https://example.com"
-                    value={url}
-                    onChange={(e) => updateWebsiteUrl(index, e.target.value)}
-                    className="text-sm"
-                  />
-                  {websiteUrls.length > 1 && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => removeWebsiteUrl(index)}
-                      className="flex-shrink-0"
-                    >
-                      <X className="h-3 w-3 sm:h-4 sm:w-4" />
-                    </Button>
-                  )}
+          <CardContent>
+            <div className="grid grid-cols-2 gap-6 text-center">
+              <div className="space-y-2">
+                <div className="text-3xl font-bold text-primary">{uploadedFiles.length}</div>
+                <div className="text-sm text-muted-foreground">Documents Uploaded</div>
+              </div>
+              <div className="space-y-2">
+                <div className="text-3xl font-bold text-primary">
+                  {websiteUrls.filter(url => url.trim()).length}
                 </div>
-              ))}
+                <div className="text-sm text-muted-foreground">Website URLs Added</div>
+              </div>
             </div>
-            
-            <Button
-              variant="outline"
-              onClick={addWebsiteUrl}
-              className="w-full text-sm"
-            >
-              <Plus className="h-3 w-3 sm:h-4 sm:w-4 mr-2" />
-              Add Another URL
-            </Button>
           </CardContent>
         </Card>
       </div>
-
-      {/* Knowledge Base Preview */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center space-x-2 text-base sm:text-lg">
-            <Database className="h-4 w-4 sm:h-5 sm:w-5" />
-            <span>Knowledge Base Summary</span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 gap-4 text-center">
-            <div>
-              <div className="text-xl sm:text-2xl font-bold text-primary">{uploadedFiles.length}</div>
-              <div className="text-xs sm:text-sm text-muted-foreground">Documents</div>
-            </div>
-            <div>
-              <div className="text-xl sm:text-2xl font-bold text-primary">
-                {websiteUrls.filter(url => url.trim()).length}
-              </div>
-              <div className="text-xs sm:text-sm text-muted-foreground">Website URLs</div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
     </div>
   )
 }
+
