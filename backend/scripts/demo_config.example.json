@@ -1,0 +1,10 @@
+{
+  "backend_url": "http://localhost:8000",
+  "ingestion_url": "http://localhost:8002",
+  "agent_workflow_url": "http://localhost:8001",
+  "urls": [
+    "https://frcrce.ac.in/",
+    "https://frcrce.ac.in/about-us/",
+    "https://frcrce.ac.in/department-of-computer-engineering/"
+  ]
+}

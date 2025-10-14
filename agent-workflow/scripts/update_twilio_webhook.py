@@ -105,24 +105,30 @@ def choose_phone_number(client: Client):
         choice = 1
         print(f"Automatically selecting the only number: {numbers[0].phone_number}")
     else:
-        # Prompt user to select a number
-        try:
-            selection = input(f"Select a number to update (1-{len(numbers)}) or 'q' to cancel: ").strip()
-        except KeyboardInterrupt:
-            print("\nSelection cancelled")
-            return None
-
-        if selection.lower() == 'q':
-            print("Cancelled by user")
-            return None
-        try:
-            choice = int(selection)
-            if choice < 1 or choice > len(numbers):
-                print("Invalid selection")
+        # Allow non-interactive auto-selection via env var
+        auto_first = os.getenv('TWILIO_AUTO_SELECT_FIRST', '').lower() in ('1', 'true', 'yes')
+        if auto_first:
+            choice = 1
+            print(f"Auto-selecting first number: {numbers[0].phone_number}")
+        else:
+            # Prompt user to select a number
+            try:
+                selection = input(f"Select a number to update (1-{len(numbers)}) or 'q' to cancel: ").strip()
+            except KeyboardInterrupt:
+                print("\nSelection cancelled")
                 return None
-        except ValueError:
-            print("Invalid input")
-            return None
+
+            if selection.lower() == 'q':
+                print("Cancelled by user")
+                return None
+            try:
+                choice = int(selection)
+                if choice < 1 or choice > len(numbers):
+                    print("Invalid selection")
+                    return None
+            except ValueError:
+                print("Invalid input")
+                return None
 
     selected = numbers[choice - 1]
     print(f"Selected: {selected.phone_number} (SID: {selected.sid})")

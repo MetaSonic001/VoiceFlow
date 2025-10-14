@@ -88,8 +88,21 @@ async def ensure_minio_bucket_on_startup():
         except Exception as e:
             logger.warning(f"MinIO bucket ensure failed on startup: {e}")
 
-    # Run in thread to avoid blocking startup
-    asyncio.get_event_loop().run_in_executor(None, _ensure)
+    # Run in a thread to avoid blocking startup. Prefer asyncio.to_thread when
+    # an event loop is running. If no loop is available, start a background
+    # thread to run the synchronous work. Catch cancellation to avoid
+    # propagating errors when the server shuts down during startup.
+    try:
+        try:
+            asyncio.get_running_loop()
+            # schedule without awaiting so startup continues
+            asyncio.create_task(asyncio.to_thread(_ensure))
+        except RuntimeError:
+            # no running loop (this can happen in some test or startup contexts)
+            import threading
+            threading.Thread(target=_ensure, daemon=True).start()
+    except Exception as e:
+        logger.warning(f'Failed to schedule MinIO ensure task: {e}')
 
 
 @app.on_event('startup')
@@ -126,13 +139,41 @@ async def ensure_db_tables_on_startup():
         try:
             # await creation so startup waits for tables to be present
             await _create()
+        except asyncio.CancelledError:
+            logger.info('DB table creation cancelled during startup')
         except Exception as e:
             logger.warning(f'DB table creation failed during startup: {e}')
     else:
         try:
-            asyncio.create_task(_create())
-        except Exception:
-            asyncio.get_event_loop().run_in_executor(None, lambda: None)
+            try:
+                # If an event loop is running, schedule the async function as a task
+                asyncio.get_running_loop()
+                task = asyncio.create_task(_create())
+
+                def _on_done(t):
+                    try:
+                        t.result()
+                    except asyncio.CancelledError:
+                        logger.info('DB init task cancelled')
+                    except Exception as e:
+                        logger.warning(f'DB init background task failed: {e}')
+
+                task.add_done_callback(_on_done)
+            except RuntimeError:
+                # No running loop: start a background thread that runs the async
+                # initializer using asyncio.run. Running the async DB init in a
+                # separate thread avoids interfering with the main event loop.
+                import threading
+
+                def _run_in_thread():
+                    try:
+                        asyncio.run(_create())
+                    except Exception as e:
+                        logger.warning(f'DB init (thread) failed: {e}')
+
+                threading.Thread(target=_run_in_thread, daemon=True).start()
+        except Exception as e:
+            logger.warning(f'Failed to schedule DB init task: {e}')
 
 
 @app.middleware('http')
@@ -252,12 +293,18 @@ async def create_agent(payload: AgentCreate):
 
 
 @app.get('/agents')
-async def list_agents(user=Depends(get_current_user)):
+async def list_agents(request: Request, user=Depends(get_current_user)):
     """Return a list of agents visible to the current user.
 
     If the user has onboarding progress with a tenant_id, filter agents to that tenant.
     Otherwise return all agents (limited to 200 rows).
     """
+    # Parse query parameters
+    page = int(request.query_params.get('page', 1))
+    limit = min(int(request.query_params.get('limit', 20)), 200)
+    search = request.query_params.get('search', '')
+    status = request.query_params.get('status', '')
+    
     email = user.get('email') if isinstance(user, dict) else None
     async with get_session() as session:
         tenant_id = None
@@ -267,23 +314,49 @@ async def list_agents(user=Depends(get_current_user)):
             if row and row[0]:
                 tenant_id = row[0]
 
+        # Build query
+        where_clauses = []
+        params = {}
+        
         if tenant_id:
-            q = await session.execute(text('SELECT id, tenant_id, name, chroma_collection, config_path, created_at FROM agents WHERE tenant_id = :tenant ORDER BY created_at DESC'), {'tenant': tenant_id})
-        else:
-            q = await session.execute(text('SELECT id, tenant_id, name, chroma_collection, config_path, created_at FROM agents ORDER BY created_at DESC LIMIT 200'))
-
+            where_clauses.append('tenant_id = :tenant')
+            params['tenant'] = tenant_id
+        
+        if search:
+            where_clauses.append('name ILIKE :search')
+            params['search'] = f'%{search}%'
+        
+        if status:
+            where_clauses.append('status = :status')
+            params['status'] = status
+        
+        where_sql = ' AND '.join(where_clauses) if where_clauses else '1=1'
+        
+        # Get total count
+        count_sql = f'SELECT COUNT(*) FROM agents WHERE {where_sql}'
+        res = await session.execute(text(count_sql), params)
+        total = res.scalar()
+        
+        # Get paginated results
+        offset = (page - 1) * limit
+        sql = f'SELECT id, tenant_id, name, chroma_collection, config_path, status, phone_number, created_at FROM agents WHERE {where_sql} ORDER BY created_at DESC LIMIT :limit OFFSET :offset'
+        params['limit'] = limit
+        params['offset'] = offset
+        
+        q = await session.execute(text(sql), params)
         rows = q.fetchall()
+        
         agents = []
         for r in rows:
-            aid, tid, name, chroma_collection, config_path, created_at = r
+            aid, tid, name, chroma_collection, config_path, agent_status, phone_number, created_at = r
             agents.append({
                 'id': str(aid),
                 'name': name,
                 'role': 'AI Agent',
-                'status': 'active',
+                'status': agent_status or 'active',
                 'description': None,
                 'channels': [],
-                'phoneNumber': None,
+                'phoneNumber': phone_number,
                 'totalCalls': 0,
                 'totalChats': 0,
                 'successRate': 0,
@@ -292,7 +365,7 @@ async def list_agents(user=Depends(get_current_user)):
                 'createdAt': created_at.isoformat() if created_at else None,
             })
 
-        return {'agents': agents}
+        return {'agents': agents, 'total': total, 'page': page, 'limit': limit}
 
 
 @app.get('/agents/{agent_id}')
@@ -624,17 +697,31 @@ async def trigger_ingest(document_id: str, background_tasks: BackgroundTasks):
 
 
     ### Agent-runner proxy endpoints (backend as orchestrator)
-    async def _forward_to_runner(request: Request, method: str, path: str, json_body=None):
-        """Forward an incoming request to the configured agent-runner service.
-
-        Preserves Authorization header if present.
-        Returns parsed JSON or raises HTTPException on failure.
-        """
+    async def _get_tenant_headers(request: Request, user):
+        """Get headers including tenant_id for forwarding to agent-runner."""
         headers = {}
         auth = request.headers.get('authorization')
         if auth:
             headers['Authorization'] = auth
+        
+        email = user.get('email') if isinstance(user, dict) else None
+        tenant_id = None
+        if email:
+            async with get_session() as session:
+                res = await session.execute(text('SELECT tenant_id FROM onboarding_progress WHERE user_email = :email'), {'email': email})
+                row = res.fetchone()
+                if row and row[0]:
+                    tenant_id = row[0]
+        
+        if tenant_id:
+            headers['X-Tenant-ID'] = str(tenant_id)
+        
+        return headers
 
+    async def _forward_to_runner_with_tenant(request: Request, method: str, path: str, json_body=None, user=Depends(get_current_user)):
+        """Forward request to agent-runner with tenant context."""
+        headers = await _get_tenant_headers(request, user)
+        
         url = AGENT_RUNNER_URL.rstrip('/') + path
         async with httpx.AsyncClient() as client:
             try:
@@ -643,7 +730,6 @@ async def trigger_ingest(document_id: str, background_tasks: BackgroundTasks):
                 raise HTTPException(status_code=502, detail=f"Failed to contact agent-runner: {e}")
 
         if resp.status_code >= 400:
-            # attempt to forward runner's error message
             try:
                 data = resp.json()
             except Exception:
@@ -657,14 +743,50 @@ async def trigger_ingest(document_id: str, background_tasks: BackgroundTasks):
 
 
     @app.get('/runner/agents')
-    async def runner_list_agents(request: Request):
-        return await _forward_to_runner(request, 'GET', '/agents')
+    async def runner_list_agents(request: Request, user=Depends(get_current_user)):
+        return await _forward_to_runner_with_tenant(request, 'GET', '/agents', user=user)
 
 
     @app.post('/runner/agents')
-    async def runner_create_agent(request: Request):
+    async def runner_create_agent(request: Request, user=Depends(get_current_user)):
+        email = user.get('email') if isinstance(user, dict) else None
+        tenant_id = None
+        if email:
+            async with get_session() as session:
+                res = await session.execute(text('SELECT tenant_id FROM onboarding_progress WHERE user_email = :email'), {'email': email})
+                row = res.fetchone()
+                if row and row[0]:
+                    tenant_id = row[0]
+        
         payload = await request.json()
-        return await _forward_to_runner(request, 'POST', '/agents', json_body=payload)
+        if tenant_id:
+            payload['tenant_id'] = tenant_id
+        
+        headers = {}
+        auth = request.headers.get('authorization')
+        if auth:
+            headers['Authorization'] = auth
+        if tenant_id:
+            headers['X-Tenant-ID'] = str(tenant_id)
+
+        url = AGENT_RUNNER_URL.rstrip('/') + '/agents'
+        async with httpx.AsyncClient() as client:
+            try:
+                resp = await client.request('POST', url, json=payload, headers=headers, timeout=30.0)
+            except Exception as e:
+                raise HTTPException(status_code=502, detail=f"Failed to contact agent-runner: {e}")
+
+        if resp.status_code >= 400:
+            try:
+                data = resp.json()
+            except Exception:
+                data = {'detail': resp.text}
+            raise HTTPException(status_code=resp.status_code, detail=data)
+
+        try:
+            return resp.json()
+        except Exception:
+            return {'result': resp.text}
 
 
     # Onboarding endpoints
@@ -761,7 +883,7 @@ async def trigger_ingest(document_id: str, background_tasks: BackgroundTasks):
             return {'agent_id': str(a.id)}
 
     @app.post('/onboarding/knowledge')
-    async def upload_knowledge(request: Request, user=Depends(get_current_user)):
+    async def upload_knowledge(request: Request, background_tasks: BackgroundTasks, user=Depends(get_current_user)):
         # Accept multipart/form-data with files and websites
         form = await request.form()
         files = form.getlist('files') if hasattr(form, 'getlist') else []
@@ -794,7 +916,36 @@ async def trigger_ingest(document_id: str, background_tasks: BackgroundTasks):
                     session.add(doc)
                     await session.commit()
                     await session.refresh(doc)
+                    # Trigger background ingestion
+                    background_tasks.add_task(ingest_via_worker, doc.id, s3path, agent_id, tenant_id)
                     uploaded.append(str(doc.id))
+            
+            # Handle websites - create document entries for each website
+            if websites:
+                website_list = websites.split(',') if isinstance(websites, str) else []
+                for url in website_list:
+                    url = url.strip()
+                    if url:
+                        # Create a document entry for website scraping
+                        doc = Document(agent_id=agent_id, tenant_id=tenant_id, filename=f"website:{url}", file_path=url, file_type='website', content=None)
+                        session.add(doc)
+                        await session.commit()
+                        await session.refresh(doc)
+                        # Trigger background ingestion for website
+                        background_tasks.add_task(ingest_via_worker, doc.id, url, agent_id, tenant_id)
+                        uploaded.append(str(doc.id))
+            
+            # Handle FAQ text
+            if faq_text and faq_text.strip():
+                # Create a document entry for FAQ text
+                doc = Document(agent_id=agent_id, tenant_id=tenant_id, filename="faq.txt", file_path=None, file_type='text', content=faq_text)
+                session.add(doc)
+                await session.commit()
+                await session.refresh(doc)
+                # Trigger background ingestion for FAQ text
+                background_tasks.add_task(ingest_via_worker, doc.id, None, agent_id, tenant_id)
+                uploaded.append(str(doc.id))
+                
             return {'success': True, 'uploaded': uploaded}
 
     @app.post('/onboarding/voice')
@@ -855,102 +1006,206 @@ async def trigger_ingest(document_id: str, background_tasks: BackgroundTasks):
             return {'success': True}
 
     @app.post('/onboarding/deploy')
-    async def deploy_agent(payload: dict, user=Depends(get_current_user)):
+    async def deploy_agent(request: Request, payload: dict, user=Depends(get_current_user)):
         agent_id = payload.get('agent_id')
-        # For dev: pretend to deploy and return a phone number
         if not agent_id:
             raise HTTPException(400, 'Missing agent_id')
-        # In real flow, call runner or twilio; return fake phone
-        phone = '+15551234567'
-        # persist phone number to agent row if exists
+        
         async with get_session() as session:
-            try:
-                await session.execute(text('UPDATE agents SET phone_number = :phone WHERE id = :agent'), {'phone': phone, 'agent': agent_id})
-                await session.commit()
-            except Exception:
-                pass
-        return {'success': True, 'phone_number': phone}
+            # Get agent and onboarding data
+            res = await session.execute(text('SELECT name, tenant_id FROM agents WHERE id = :agent'), {'agent': agent_id})
+            agent_row = res.fetchone()
+            if not agent_row:
+                raise HTTPException(404, 'Agent not found')
+            agent_name, tenant_id = agent_row
+            
+            # Get onboarding data for configuration
+            res2 = await session.execute(text('SELECT data FROM onboarding_progress WHERE user_email = :email'), {'email': user.get('email')})
+            progress_row = res2.fetchone()
+            onboarding_data = progress_row[0] if progress_row and progress_row[0] else {}
+            
+            # Create ChromaDB collection
+            from .chroma_helper import ensure_collection, collection_name
+            collection_name_str = collection_name(tenant_id, agent_id)
+            ensure_collection(tenant_id, agent_id)
+            
+            # Update agent with collection name
+            await session.execute(text('UPDATE agents SET chroma_collection = :collection WHERE id = :agent'), {'collection': collection_name_str, 'agent': agent_id})
+            
+            # Create pipeline agents in agent runner
+            # First, create a curator agent
+            curator_payload = {
+                'name': f'{agent_name} Curator',
+                'agent_type': 'curator',
+                'tenant_id': tenant_id,
+                'config': {
+                    'agent_id': agent_id,
+                    'tenant_id': tenant_id,
+                    'role': onboarding_data.get('agent', {}).get('role', 'General Assistant')
+                }
+            }
+            
+            # Call agent runner to create pipeline agent
+            headers = {'X-Tenant-ID': str(tenant_id)}
+            auth = request.headers.get('authorization')
+            if auth:
+                headers['Authorization'] = auth
+            
+            url = AGENT_RUNNER_URL.rstrip('/') + '/agents'
+            async with httpx.AsyncClient() as client:
+                try:
+                    resp = await client.post(url, json=curator_payload, headers=headers, timeout=30.0)
+                    if resp.status_code >= 400:
+                        logger.warning(f"Failed to create pipeline agent: {resp.text}")
+                    else:
+                        curator_data = resp.json()
+                        curator_id = curator_data.get('id')
+                        
+                        # Create pipeline
+                        pipeline_payload = {
+                            'name': f'{agent_name} Pipeline',
+                            'tenant_id': tenant_id,
+                            'stages': [
+                                {
+                                    'type': 'curator',
+                                    'agent_id': curator_id,
+                                    'settings': {
+                                        'prompt': f'Process queries for {agent_name}',
+                                        'top_k': 5
+                                    }
+                                }
+                            ]
+                        }
+                        
+                        resp2 = await client.post(AGENT_RUNNER_URL.rstrip('/') + '/pipelines', json=pipeline_payload, headers=headers, timeout=30.0)
+                        if resp2.status_code >= 400:
+                            logger.warning(f"Failed to create pipeline: {resp2.text}")
+                except Exception as e:
+                    logger.exception(f"Failed to create agent runner resources: {e}")
+            
+            # Set up phone number (for now, fake one)
+            phone = '+15551234567'
+            await session.execute(text('UPDATE agents SET phone_number = :phone WHERE id = :agent'), {'phone': phone, 'agent': agent_id})
+            await session.commit()
+            
+            return {'success': True, 'phone_number': phone}
 
 
     @app.get('/runner/pipelines')
-    async def runner_list_pipelines(request: Request):
-        return await _forward_to_runner(request, 'GET', '/pipelines')
+    async def runner_list_pipelines(request: Request, user=Depends(get_current_user)):
+        return await _forward_to_runner_with_tenant(request, 'GET', '/pipelines', user=user)
 
 
     @app.post('/runner/pipelines')
-    async def runner_create_pipeline(request: Request):
+    async def runner_create_pipeline(request: Request, user=Depends(get_current_user)):
+        email = user.get('email') if isinstance(user, dict) else None
+        tenant_id = None
+        if email:
+            async with get_session() as session:
+                res = await session.execute(text('SELECT tenant_id FROM onboarding_progress WHERE user_email = :email'), {'email': email})
+                row = res.fetchone()
+                if row and row[0]:
+                    tenant_id = row[0]
+        
         payload = await request.json()
-        return await _forward_to_runner(request, 'POST', '/pipelines', json_body=payload)
+        if tenant_id and 'tenant_id' not in payload:
+            payload['tenant_id'] = tenant_id
+        
+        headers = {}
+        auth = request.headers.get('authorization')
+        if auth:
+            headers['Authorization'] = auth
+        if tenant_id:
+            headers['X-Tenant-ID'] = str(tenant_id)
+
+        url = AGENT_RUNNER_URL.rstrip('/') + '/pipelines'
+        async with httpx.AsyncClient() as client:
+            try:
+                resp = await client.request('POST', url, json=payload, headers=headers, timeout=30.0)
+            except Exception as e:
+                raise HTTPException(status_code=502, detail=f"Failed to contact agent-runner: {e}")
+
+        if resp.status_code >= 400:
+            try:
+                data = resp.json()
+            except Exception:
+                data = {'detail': resp.text}
+            raise HTTPException(status_code=resp.status_code, detail=data)
+
+        try:
+            return resp.json()
+        except Exception:
+            return {'result': resp.text}
 
 
     @app.post('/runner/pipelines/{pipeline_id}/trigger')
-    async def runner_trigger_pipeline(pipeline_id: int, request: Request):
+    async def runner_trigger_pipeline(pipeline_id: int, request: Request, user=Depends(get_current_user)):
         payload = None
         try:
             payload = await request.json()
         except Exception:
             payload = {}
-        return await _forward_to_runner(request, 'POST', f'/pipelines/{pipeline_id}/trigger', json_body=payload)
+        return await _forward_to_runner_with_tenant(request, 'POST', f'/pipelines/{pipeline_id}/trigger', json_body=payload, user=user)
 
 
     @app.get('/runner/agents/{agent_id}')
-    async def runner_get_agent(agent_id: int, request: Request):
-        return await _forward_to_runner(request, 'GET', f'/agents/{agent_id}')
+    async def runner_get_agent(agent_id: int, request: Request, user=Depends(get_current_user)):
+        return await _forward_to_runner_with_tenant(request, 'GET', f'/agents/{agent_id}', user=user)
 
 
     @app.put('/runner/agents/{agent_id}')
-    async def runner_update_agent(agent_id: int, request: Request):
+    async def runner_update_agent(agent_id: int, request: Request, user=Depends(get_current_user)):
         payload = await request.json()
-        return await _forward_to_runner(request, 'PUT', f'/agents/{agent_id}', json_body=payload)
+        return await _forward_to_runner_with_tenant(request, 'PUT', f'/agents/{agent_id}', json_body=payload, user=user)
 
 
     @app.delete('/runner/agents/{agent_id}')
-    async def runner_delete_agent(agent_id: int, request: Request):
-        return await _forward_to_runner(request, 'DELETE', f'/agents/{agent_id}')
+    async def runner_delete_agent(agent_id: int, request: Request, user=Depends(get_current_user)):
+        return await _forward_to_runner_with_tenant(request, 'DELETE', f'/agents/{agent_id}', user=user)
 
 
     @app.post('/runner/agents/{agent_id}/pause')
-    async def runner_pause_agent(agent_id: int, request: Request):
+    async def runner_pause_agent(agent_id: int, request: Request, user=Depends(get_current_user)):
         try:
             payload = await request.json()
         except Exception:
             payload = {}
-        return await _forward_to_runner(request, 'POST', f'/agents/{agent_id}/pause', json_body=payload)
+        return await _forward_to_runner_with_tenant(request, 'POST', f'/agents/{agent_id}/pause', json_body=payload, user=user)
 
 
     @app.post('/runner/agents/{agent_id}/activate')
-    async def runner_activate_agent(agent_id: int, request: Request):
+    async def runner_activate_agent(agent_id: int, request: Request, user=Depends(get_current_user)):
         try:
             payload = await request.json()
         except Exception:
             payload = {}
-        return await _forward_to_runner(request, 'POST', f'/agents/{agent_id}/activate', json_body=payload)
+        return await _forward_to_runner_with_tenant(request, 'POST', f'/agents/{agent_id}/activate', json_body=payload, user=user)
 
 
     @app.get('/runner/pipelines/{pipeline_id}')
-    async def runner_get_pipeline(pipeline_id: int, request: Request):
-        return await _forward_to_runner(request, 'GET', f'/pipelines/{pipeline_id}')
+    async def runner_get_pipeline(pipeline_id: int, request: Request, user=Depends(get_current_user)):
+        return await _forward_to_runner_with_tenant(request, 'GET', f'/pipelines/{pipeline_id}', user=user)
 
 
     @app.put('/runner/pipelines/{pipeline_id}')
-    async def runner_update_pipeline(pipeline_id: int, request: Request):
+    async def runner_update_pipeline(pipeline_id: int, request: Request, user=Depends(get_current_user)):
         payload = await request.json()
-        return await _forward_to_runner(request, 'PUT', f'/pipelines/{pipeline_id}', json_body=payload)
+        return await _forward_to_runner_with_tenant(request, 'PUT', f'/pipelines/{pipeline_id}', json_body=payload, user=user)
 
 
     @app.delete('/runner/pipelines/{pipeline_id}')
-    async def runner_delete_pipeline(pipeline_id: int, request: Request):
-        return await _forward_to_runner(request, 'DELETE', f'/pipelines/{pipeline_id}')
+    async def runner_delete_pipeline(pipeline_id: int, request: Request, user=Depends(get_current_user)):
+        return await _forward_to_runner_with_tenant(request, 'DELETE', f'/pipelines/{pipeline_id}', user=user)
 
 
     @app.get('/runner/health')
-    async def runner_health(request: Request):
-        return await _forward_to_runner(request, 'GET', '/health')
+    async def runner_health(request: Request, user=Depends(get_current_user)):
+        return await _forward_to_runner_with_tenant(request, 'GET', '/health', user=user)
 
 
     @app.get('/runner/metrics')
-    async def runner_metrics(request: Request):
-        return await _forward_to_runner(request, 'GET', '/metrics')
+    async def runner_metrics(request: Request, user=Depends(get_current_user)):
+        return await _forward_to_runner_with_tenant(request, 'GET', '/metrics', user=user)
 
 
 class PipelineAgentCreate(BaseModel):

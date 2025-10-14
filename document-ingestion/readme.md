@@ -15,11 +15,35 @@ A comprehensive FastAPI service for ingesting documents, images, PDFs, and URLs 
 
 ## Architecture
 
+### Document Flow
+
+```mermaid
+graph TD
+    A[Upload] --> B[File Detection]
+    B --> C{File Type}
+    C -->|Image/PDF| D[OCR Processing]
+    C -->|URL| E[Web Scraping]
+    C -->|Text| F[Direct Processing]
+    D --> G[Chunking]
+    E --> G
+    F --> G
+    G --> H[Embedding Generation]
+    H --> I[Storage]
+    I --> J[Backend DB - Metadata]
+    I --> K[ChromaDB - Vectors]
 ```
-Upload → File Detection → Processing (OCR/Scraping) → Chunking → Embedding → Storage
-                                                                              ├── Postgres (Original)
-                                                                              └── ChromaDB (Vectors)
-```
+
+### Fallback Storage
+
+When the backend database is unavailable, documents are temporarily stored in `pending_documents/` as JSON files with base64-encoded content. These are automatically flushed to the backend database when connectivity is restored.
+
+**Important**: The `pending_documents/` folder is located in the `document-ingestion/` directory only. Do not create or use pending documents folders elsewhere in the project.
+
+### Storage Strategy
+
+- **Primary**: Direct storage to backend PostgreSQL database via adapter
+- **Fallback**: Local JSON files in `document-ingestion/pending_documents/` when backend unavailable
+- **Recovery**: Automatic flushing of pending documents when backend connection restored
 
 ## Installation
 
@@ -35,55 +59,62 @@ Upload → File Detection → Processing (OCR/Scraping) → Chunking → Embeddi
 ### Setup
 
 1. **Clone and navigate to project**:
-```bash
-cd document-ingestion-api
-```
+
+   ```bash
+   cd document-ingestion-api
+   ```
 
 2. **Create virtual environment**:
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
+
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   ```
 
 3. **Install dependencies**:
-```bash
-pip install -r requirements.txt
-```
+
+   ```bash
+   pip install -r requirements.txt
+   ```
 
 4. **Configure environment**:
-```bash
-cp .env.example .env
-# Edit .env with your credentials
-```
+
+   ```bash
+   cp .env.example .env
+   # Edit .env with your credentials
+   ```
 
 5. **Create Postgres table** (the service will auto-create this on first run, but here's the SQL):
-```sql
-CREATE TABLE documents (
-  id TEXT PRIMARY KEY,
-  filename TEXT,
-  file_type TEXT,
-  file_size BIGINT,
-  content BYTEA,
-  metadata JSONB,
-  status TEXT,
-  error_message TEXT,
-  created_at TIMESTAMP,
-  updated_at TIMESTAMP
-);
 
-CREATE INDEX idx_documents_status ON documents(status);
-CREATE INDEX idx_documents_created_at ON documents(created_at DESC);
-```
+   ```sql
+   CREATE TABLE documents (
+     id TEXT PRIMARY KEY,
+     filename TEXT,
+     file_type TEXT,
+     file_size BIGINT,
+     content BYTEA,
+     metadata JSONB,
+     status TEXT,
+     error_message TEXT,
+     created_at TIMESTAMP,
+     updated_at TIMESTAMP
+   );
+
+   CREATE INDEX idx_documents_status ON documents(status);
+   CREATE INDEX idx_documents_created_at ON documents(created_at DESC);
+   ```
 
 ## Running the Service
 
 ### Development
+
 ```bash
 # For local development without auto-reload (recommended to avoid multi-process startup issues):
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
 ### Production
+
 ```bash
 uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4
 ```
@@ -91,11 +122,13 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4
 ## API Endpoints
 
 ### 1. Health Check
+
 **GET** `/health`
 
 Check if all services are running.
 
 **Response:**
+
 ```json
 {
   "status": "healthy",
@@ -110,17 +143,20 @@ Check if all services are running.
 ```
 
 ### 2. File Upload Ingestion
+
 **POST** `/ingest`
 
 Upload and process any file (image, PDF, or text file with URL).
 
 **Request:**
+
 ```bash
 curl -X POST "http://localhost:8002/ingest" \
   -F "file=@document.pdf"
 ```
 
 **Response:**
+
 ```json
 {
   "status": "success",
@@ -132,11 +168,13 @@ curl -X POST "http://localhost:8002/ingest" \
 ```
 
 ### 3. URL Ingestion
+
 **POST** `/ingest/url`
 
 Scrape and process a URL.
 
 **Request:**
+
 ```json
 {
   "url": "https://example.com/article",
@@ -148,6 +186,7 @@ Scrape and process a URL.
 ```
 
 **Response:**
+
 ```json
 {
   "status": "success",
@@ -159,22 +198,26 @@ Scrape and process a URL.
 ```
 
 ### 4. Webhook Upload
+
 **POST** `/webhook/upload`
 
 Webhook endpoint for external services (same functionality as `/ingest`).
 
 **Request:**
+
 ```bash
 curl -X POST "http://localhost:8002/webhook/upload" \
   -F "file=@image.jpg"
 ```
 
 ### 5. Get Document
+
 **GET** `/documents/{document_id}`
 
 Retrieve document metadata and status.
 
 **Response:**
+
 ```json
 {
   "status": "success",
@@ -190,11 +233,13 @@ Retrieve document metadata and status.
 ```
 
 ### 6. Search Documents
+
 **GET** `/search?query=your search query&limit=10`
 
 Search documents using vector similarity.
 
 **Response:**
+
 ```json
 {
   "status": "success",

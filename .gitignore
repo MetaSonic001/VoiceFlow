@@ -1,0 +1,27 @@
+# Ignore downloaded models and large data
+models/
+
+# Keep existing repository-level ignores as needed
+node_modules/
+.env
+*.log
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE/editor
+.vscode/
+.idea/
+
+# Chroma DB
+document-ingestion/chroma_db/
+
+# Other temporary files
+*.sqlite3

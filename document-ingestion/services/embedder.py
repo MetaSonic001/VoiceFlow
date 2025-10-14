@@ -7,6 +7,11 @@ from sentence_transformers import SentenceTransformer
 from typing import List
 import logging
 import numpy as np
+import os
+import pathlib
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +23,7 @@ class TextEmbedder:
     
     def __init__(
         self,
-        model_name: str = "all-MiniLM-L6-v2",
+        model_name: str = None,
         chunk_size: int = 800,
         chunk_overlap: int = 200
     ):
@@ -30,9 +35,36 @@ class TextEmbedder:
             chunk_size: Size of text chunks in characters (default tuned ~800 to target 300-1000 token sweet spot)
             chunk_overlap: Overlap between chunks in characters (default tuned ~25% overlap)
         """
+        # Determine model source. Prefer a local directory if provided via
+        # EMBEDDING_MODEL_PATH env var or if the provided model_name is a path.
         try:
-            logger.info(f"Loading embedding model: {model_name}")
-            self.model = SentenceTransformer(model_name)
+            env_model_path = os.getenv('EMBEDDING_MODEL_PATH') or os.getenv('EMBEDDING_LOCAL_DIR')
+            effective_model = model_name or os.getenv('EMBEDDING_MODEL') or 'all-MiniLM-L6-v2'
+            # If env path provided and exists, use it
+            if env_model_path:
+                p = pathlib.Path(env_model_path)
+                if p.exists():
+                    logger.info(f"Loading local embedding model from path: {str(p)}")
+                    self.model = SentenceTransformer(str(p))
+                else:
+                    # Directory doesn't exist yet; fall back to HF name but save to local later
+                    logger.info(f"Local embedding path {str(p)} does not exist; will load model '{effective_model}' and save to {str(p)}")
+                    self.model = SentenceTransformer(effective_model)
+                    try:
+                        p.parent.mkdir(parents=True, exist_ok=True)
+                        self.model.save(str(p))
+                        logger.info(f"Saved embedding model to {str(p)}")
+                    except Exception:
+                        logger.warning(f"Failed to save model to {str(p)}; continuing with cached model")
+            else:
+                # If model_name looks like a filesystem path, prefer it
+                maybe_path = pathlib.Path(effective_model)
+                if maybe_path.exists():
+                    logger.info(f"Loading embedding model from local path: {str(maybe_path)}")
+                    self.model = SentenceTransformer(str(maybe_path))
+                else:
+                    logger.info(f"Loading embedding model by name: {effective_model}")
+                    self.model = SentenceTransformer(effective_model)
             # Enforce numeric types for sizes (defensive cast)
             try:
                 self.chunk_size = int(chunk_size)

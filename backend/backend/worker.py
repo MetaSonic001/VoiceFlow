@@ -3,7 +3,7 @@ from fastapi import BackgroundTasks
 from typing import Optional
 from .minio_helper import get_minio_client, MINIO_BUCKET
 from .db import AsyncSessionLocal
-from .models import Document
+from .models import Document, Pipeline, PipelineAgent
 import aiofiles
 import os
 import pathlib
@@ -11,8 +11,62 @@ import traceback
 import sys
 import io
 import logging
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.orm import sessionmaker
+from contextlib import asynccontextmanager
+import time
 
 logger = logging.getLogger(__name__)
+
+
+async def _retry_db_operation(operation, max_retries=3, delay=1.0):
+    """Retry database operations that may fail due to event loop issues."""
+    last_exception = None
+    for attempt in range(max_retries):
+        try:
+            return await operation()
+        except (RuntimeError, ConnectionError, asyncio.TimeoutError) as e:
+            last_exception = e
+            if "attached to a different loop" in str(e) or "another operation is in progress" in str(e):
+                logger.warning(f"Database operation failed (attempt {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(delay * (2 ** attempt))  # Exponential backoff
+                    continue
+            # Re-raise immediately for non-retryable errors
+            raise
+        except Exception as e:
+            # For other exceptions, don't retry
+            raise
+    # If we get here, all retries failed
+    logger.error(f"Database operation failed after {max_retries} attempts: {last_exception}")
+    raise last_exception
+
+
+async def _create_task_session():
+    """Create a database session factory bound to the current event loop.
+
+    This ensures that asyncpg connections are created in the same event loop
+    as the worker task, preventing 'Task got Future attached to a different loop' errors.
+    """
+    # Get database URL from environment
+    database_url = os.getenv('BACKEND_DATABASE_URL') or os.getenv('DATABASE_URL') or 'postgresql+asyncpg://doc_user:doc_password@localhost:5433/documents_db'
+
+    # Create engine bound to current event loop
+    engine = create_async_engine(database_url, future=True, echo=False)
+
+    # Create session maker for this engine
+    session_maker = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+
+    @asynccontextmanager
+    async def get_session():
+        async with session_maker() as session:
+            try:
+                yield session
+            finally:
+                # Ensure session is properly closed
+                await session.close()
+
+    return get_session
 
 
 async def ingest_document_task(document_id, s3_path, agent_id, tenant_id):
@@ -21,6 +75,9 @@ async def ingest_document_task(document_id, s3_path, agent_id, tenant_id):
     This is a placeholder that should call the document-ingestion pipeline present
     in the repository (e.g. document-ingestion services). For now it updates DB status.
     """
+    # Create a database session factory bound to the current event loop
+    get_session = await _create_task_session()
+
     # Real ingestion flow: download from MinIO, run extraction, chunking, embedding, and upsert
     # We'll attempt to reuse the repository's document-ingestion services by adding
     # the document-ingestion folder to sys.path so we can import its modules.
@@ -47,8 +104,11 @@ async def ingest_document_task(document_id, s3_path, agent_id, tenant_id):
             raise
 
         # Fetch backend document metadata
-        async with AsyncSessionLocal() as session:
-            backend_doc = await session.get(Document, document_id)
+        async def _fetch_doc():
+            async with get_session() as session:
+                return await session.get(Document, document_id)
+        
+        backend_doc = await _retry_db_operation(_fetch_doc)
 
         filename = getattr(backend_doc, 'filename', None) if backend_doc else None
         file_type = getattr(backend_doc, 'file_type', None) if backend_doc else None
@@ -101,11 +161,14 @@ async def ingest_document_task(document_id, s3_path, agent_id, tenant_id):
         except Exception:
             logger.exception(f"Failed to download {obj} from MinIO bucket {bucket}")
             # mark backend document as failed
-            async with AsyncSessionLocal() as session:
-                doc = await session.get(Document, document_id)
-                if doc:
-                    doc.embedding_status = 'failed'
-                    await session.commit()
+            async def _mark_failed():
+                async with get_session() as session:
+                    doc = await session.get(Document, document_id)
+                    if doc:
+                        doc.embedding_status = 'failed'
+                        await session.commit()
+            
+            await _retry_db_operation(_mark_failed)
             return
 
         # First try to reuse the document-ingestion pipeline's process_document
@@ -125,6 +188,19 @@ async def ingest_document_task(document_id, s3_path, agent_id, tenant_id):
                 except Exception:
                     file_type = 'unknown'
 
+            # Check if detected text file contains a URL
+            if file_type in ["text", "text/plain"] and tmp_path:
+                try:
+                    with open(tmp_path, 'r', encoding='utf-8') as f:
+                        text_content = f.read().strip()
+                    if fd.is_url(text_content):
+                        file_type = "url"
+                        # Update input to be the URL string for process_document
+                        input_to_ingest = text_content.encode('utf-8')
+                        logger.info(f"Detected URL in text file: {text_content}")
+                except Exception as e:
+                    logger.warning(f"Failed to check for URL in text file: {e}")
+
             metadata = {'original_filename': filename or obj, 'ingested_via': 'backend_worker', 'tenant_id': tenant_id, 'agent_id': agent_id}
 
             # Mark backend doc processing and also mark ingestion DB status if possible
@@ -134,11 +210,14 @@ async def ingest_document_task(document_id, s3_path, agent_id, tenant_id):
                 except Exception:
                     logger.exception('Failed to update ingestion DB status to processing')
 
-            async with AsyncSessionLocal() as session:
-                doc = await session.get(Document, document_id)
-                if doc:
-                    doc.embedding_status = 'processing'
-                    await session.commit()
+            async def _mark_processing():
+                async with get_session() as session:
+                    doc = await session.get(Document, document_id)
+                    if doc:
+                        doc.embedding_status = 'processing'
+                        await session.commit()
+            
+            await _retry_db_operation(_mark_processing)
 
             # Call the ingestion pipeline (it will store to its DB and vector store).
             # Ensure we pass tenant/agent context so Chroma stores in the correct collection.
@@ -147,11 +226,14 @@ async def ingest_document_task(document_id, s3_path, agent_id, tenant_id):
                 input_to_ingest = str(tmp_path) if tmp_path else content
                 res = await ingestion_process_document(input_to_ingest, filename or obj, file_type, metadata)
                 # ingestion pipeline should have updated canonical ingestion DB; ensure backend row is marked completed
-                async with AsyncSessionLocal() as session:
-                    doc = await session.get(Document, document_id)
-                    if doc:
-                        doc.embedding_status = 'completed'
-                        await session.commit()
+                async def _mark_completed():
+                    async with get_session() as session:
+                        doc = await session.get(Document, document_id)
+                        if doc:
+                            doc.embedding_status = 'completed'
+                            await session.commit()
+                
+                await _retry_db_operation(_mark_completed)
                 return
             except Exception as e:
                 logger.exception(f"document-ingestion.process_document failed: {e}")
@@ -191,11 +273,14 @@ async def ingest_document_task(document_id, s3_path, agent_id, tenant_id):
             except Exception:
                 logger.exception('Failed to update ingestion DB status to processing (local fallback)')
 
-        async with AsyncSessionLocal() as session:
-            doc = await session.get(Document, document_id)
-            if doc:
-                doc.embedding_status = 'processing'
-                await session.commit()
+        async def _mark_processing_fallback():
+            async with get_session() as session:
+                doc = await session.get(Document, document_id)
+                if doc:
+                    doc.embedding_status = 'processing'
+                    await session.commit()
+        
+        await _retry_db_operation(_mark_processing_fallback)
 
         # Extract text depending on type
         extracted_text = ''
@@ -259,11 +344,14 @@ async def ingest_document_task(document_id, s3_path, agent_id, tenant_id):
                     logger.exception('Failed to update ingestion DB status to completed')
 
             # Mark backend doc completed
-            async with AsyncSessionLocal() as session:
-                doc = await session.get(Document, document_id)
-                if doc:
-                    doc.embedding_status = 'completed'
-                    await session.commit()
+            async def _mark_completed_fallback():
+                async with get_session() as session:
+                    doc = await session.get(Document, document_id)
+                    if doc:
+                        doc.embedding_status = 'completed'
+                        await session.commit()
+            
+            await _retry_db_operation(_mark_completed_fallback)
 
         except Exception as e:
             logger.exception(f"Ingestion failed for document {document_id}: {e}")
@@ -274,36 +362,55 @@ async def ingest_document_task(document_id, s3_path, agent_id, tenant_id):
                 except Exception:
                     logger.exception('Failed to update ingestion DB status to failed')
 
-            async with AsyncSessionLocal() as session:
-                doc = await session.get(Document, document_id)
-                if doc:
-                    doc.embedding_status = 'failed'
-                    await session.commit()
+            async def _mark_failed_exception():
+                async with get_session() as session:
+                    doc = await session.get(Document, document_id)
+                    if doc:
+                        doc.embedding_status = 'failed'
+                        await session.commit()
+            
+            await _retry_db_operation(_mark_failed_exception)
             return
 
     except Exception as e:
         traceback.print_exc()
         # Ensure backend doc is marked failed
         try:
-            async with AsyncSessionLocal() as session:
-                doc = await session.get(Document, document_id)
-                if doc:
-                    doc.embedding_status = 'failed'
-                    await session.commit()
+            async def _mark_failed_outer():
+                async with get_session() as session:
+                    doc = await session.get(Document, document_id)
+                    if doc:
+                        doc.embedding_status = 'failed'
+                        await session.commit()
+            
+            await _retry_db_operation(_mark_failed_outer)
         except Exception:
             logger.exception('Failed to mark document failed in backend DB')
     finally:
         # cleanup temporary file if created
         try:
             if tmp_path:
-                import os
                 os.unlink(tmp_path)
         except Exception:
             logger.exception('Failed to remove temporary file')
 
 
 def schedule_ingestion(background_tasks: BackgroundTasks, document_id, s3_path, agent_id, tenant_id):
-    background_tasks.add_task(asyncio.create_task, ingest_document_task(document_id, s3_path, agent_id, tenant_id))
+    # BackgroundTasks will run the callable in a worker thread. Calling
+    # asyncio.create_task inside that thread fails with "no running event loop".
+    # Instead, run the coroutine to completion inside that thread using
+    # asyncio.run, which creates a fresh event loop for the coroutine.
+    try:
+        coro = ingest_document_task(document_id, s3_path, agent_id, tenant_id)
+        background_tasks.add_task(asyncio.run, coro)
+    except Exception:
+        # Fallback: if BackgroundTasks API changes or fails, spawn a fire-and-forget
+        # task in the current loop when possible.
+        try:
+            asyncio.create_task(ingest_document_task(document_id, s3_path, agent_id, tenant_id))
+        except Exception:
+            # Last resort: run synchronously (blocking); not ideal but ensures ingestion runs
+            asyncio.run(ingest_document_task(document_id, s3_path, agent_id, tenant_id))
 
 
 async def run_pipeline_stages(pipeline_id: str, target_agent_id: Optional[str] = None):
@@ -313,18 +420,12 @@ async def run_pipeline_stages(pipeline_id: str, target_agent_id: Optional[str] =
     This function implements simple orchestration and placeholder calls to common agent types:
       - curator: runs a knowledge curation pass (sync embeddings / extract FAQs)
       - evaluator: runs a lightweight evaluation over recent embeddings
-      - summarizer: summarizes recent calls or documents
-      - qa: runs QA audits on transcripts / recent calls
-
-    The implementations here are intentionally lightweight: they either call into
-    document-ingestion services when available, or log the intended action.
     """
-    import pathlib, sys
-    from .db import AsyncSessionLocal
-    from .models import Pipeline, PipelineAgent
+    # Create a database session factory bound to the current event loop
+    get_session = await _create_task_session()
 
-    # make document-ingestion importable
     try:
+        # Ensure ingestion path is available for imports
         repo_root = pathlib.Path(__file__).resolve().parents[2]
         ingestion_path = repo_root / 'document-ingestion'
         if str(ingestion_path) not in sys.path and ingestion_path.exists():
@@ -332,66 +433,12 @@ async def run_pipeline_stages(pipeline_id: str, target_agent_id: Optional[str] =
     except Exception:
         pass
 
-    async with AsyncSessionLocal() as session:
-        p = await session.get(Pipeline, pipeline_id)
+    async with get_session() as session:
+        async def _get_pipeline():
+            return await session.get(Pipeline, pipeline_id)
+        
+        p = await _retry_db_operation(_get_pipeline)
         if not p:
             logger.error('Pipeline not found: %s', pipeline_id)
             return
         stages = p.stages or []
-
-    # Simple context passed between stages
-    context = {'tenant_id': str(p.tenant_id), 'agent_id': str(p.agent_id) if p.agent_id else target_agent_id}
-
-    for idx, stage in enumerate(stages):
-        stype = stage.get('type')
-        agent_ref = stage.get('agent_ref')
-        settings = stage.get('settings', {})
-        logger.info('Pipeline %s: running stage %d type=%s agent_ref=%s', pipeline_id, idx, stype, agent_ref)
-
-        # Attempt to load a PipelineAgent for the agent_ref if provided
-        pa_obj = None
-        if agent_ref:
-            async with AsyncSessionLocal() as session:
-                try:
-                    pa_obj = await session.get(PipelineAgent, agent_ref)
-                except Exception:
-                    pa_obj = None
-
-        # Handle common stage types
-        if stype == 'curator':
-            # Knowledge curation: extract FAQs, generate embeddings for new docs
-            try:
-                # Use ingestion sync_from_database if available
-                from services.vector_store import VectorStore
-                from services.summarizer import Summarizer
-                from services.database import DatabaseManager
-                vs = VectorStore()
-                dbm = DatabaseManager()
-                summ = Summarizer() if 'Summarizer' in globals() else None
-                # call sync (this will reindex docs for tenant/agent)
-                await vs.sync_from_database(dbm, None, None, None, None, summarizer=None)
-            except Exception as e:
-                logger.exception('Curator stage failed or services unavailable: %s', e)
-
-        elif stype == 'evaluator':
-            # Evaluator: run lightweight checks (placeholder)
-            logger.info('Evaluator: would run relevance/accuracy checks (placeholder) settings=%s', settings)
-
-        elif stype == 'summarizer':
-            # Summarizer: summarize recent calls/docs to prime context
-            try:
-                from services.summarizer import Summarizer
-                summ = Summarizer()
-                # call summarizer with tenant/agent context if available
-                await summ.run_for_context(context.get('tenant_id'), context.get('agent_id'), settings)
-            except Exception:
-                logger.exception('Summarizer not available or failed; skipping')
-
-        elif stype == 'qa':
-            # QA auditing: check recent transcripts/calls
-            logger.info('QA auditor: would analyze recent transcripts for compliance (placeholder) settings=%s', settings)
-
-        else:
-            logger.warning('Unknown pipeline stage type: %s', stype)
-
-    logger.info('Pipeline %s completed', pipeline_id)

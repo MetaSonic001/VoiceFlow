@@ -90,19 +90,21 @@ class WebScraper:
         Returns:
             Extracted text content
         """
-        logger.info(f"Starting scrape for URL: {url}")
+        logger.info(f"🔍 Starting web scraping process for URL: {url}")
+        logger.info(f"📋 Scrape configuration: wait_for_js={wait_for_js}, respect_robots={self.respect_robots}")
 
         # robots.txt check
         if self.respect_robots and not await self._allowed_by_robots(url):
-            logger.warning(f"Robots.txt disallows scraping URL: {url}")
+            logger.warning(f"🚫 Robots.txt disallows scraping URL: {url}")
             return ""
 
         # If configured to force HTTP-only fetching, skip the JS/Crawl4AI path
         if self.force_http or not wait_for_js:
-            logger.info("Using HTTP-only fetch (no JS) for URL")
+            logger.info("🌐 Using HTTP-only fetch (no JavaScript rendering)")
             return await self._http_fetch(url)
         
         try:
+            logger.info("⚙️ Configuring Crawl4AI crawler...")
             # Configure crawler run
             run_config = CrawlerRunConfig(
                 cache_mode=CacheMode.BYPASS,
@@ -112,28 +114,37 @@ class WebScraper:
                 screenshot=False,  # Don't need screenshots
                 verbose=False
             )
+            logger.info("✅ Crawler configuration complete")
             
+            logger.info("🚀 Initializing AsyncWebCrawler...")
             async with AsyncWebCrawler(config=self.browser_config) as crawler:
-                logger.info(f"Crawler initialized, fetching URL: {url}")
+                logger.info(f"📡 Fetching URL with crawler: {url}")
                 
                 result = await crawler.arun(url=url, config=run_config)
+                logger.info(f"📊 Crawl result received: success={result.success}")
                 
                 if not result.success:
                     error_msg = result.error_message or "Unknown error"
-                    logger.error(f"Crawl failed: {error_msg}")
+                    logger.error(f"❌ Crawl failed: {error_msg}")
                     raise Exception(f"Failed to scrape URL: {error_msg}")
                 
                 # Get filtered markdown content
                 content = result.markdown.fit_markdown or result.markdown.raw_markdown
+                logger.info(f"📝 Content extracted: {len(content)} characters")
+                logger.info(f"📄 Content preview: {content[:200]}...")
                 
-                logger.info(f"JS wait scrape complete: {len(content)} characters")
                 # optional ingestion pipeline
                 if self.ingest_after_scrape and content:
+                    logger.info("💾 Ingesting scraped content...")
                     await self._ingest_scraped_content(url, content)
+                    logger.info("✅ Content ingestion complete")
+                
+                logger.info("🎉 Web scraping process completed successfully")
                 return content
         
         except Exception as e:
-            logger.error(f"Error in JS wait scraping (playwright/crawl4ai): {e}", exc_info=True)
+            logger.error(f"💥 Error in JavaScript scraping (Crawl4AI): {e}", exc_info=True)
+            logger.info("🔄 Falling back to HTTP fetch...")
             # Fall back to HTTP fetch
             return await self._http_fetch(url)
 
@@ -143,35 +154,46 @@ class WebScraper:
         Returns empty string on any failure.
         """
         try:
-            logger.info("Attempting HTTP fallback fetch for URL")
+            logger.info(f"🌐 Starting HTTP fallback fetch for URL: {url}")
             async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, proxies=self.http_proxies) as client:
+                logger.info("📡 Sending HTTP GET request...")
                 resp = await client.get(url)
+                logger.info(f"📊 HTTP response received: status={resp.status_code}")
                 resp.raise_for_status()
                 html = resp.text or ""
+                logger.info(f"📄 Raw HTML received: {len(html)} characters")
 
             if not html or len(html.strip()) == 0:
-                logger.warning("HTTP fallback returned empty body")
+                logger.warning("⚠️ HTTP fallback returned empty body")
                 return ""
 
             if _HAS_BS4:
                 try:
+                    logger.info("🍲 Processing HTML with BeautifulSoup...")
                     soup = BeautifulSoup(html, "html.parser")
                     text = soup.get_text(separator="\n")
-                    logger.info(f"HTTP fallback succeeded (BeautifulSoup): {len(text)} characters")
+                    logger.info(f"✅ BeautifulSoup extraction succeeded: {len(text)} characters")
+                    logger.info(f"📝 Extracted text preview: {text[:200]}...")
+                    
                     if self.ingest_after_scrape and text:
+                        logger.info("💾 Ingesting BeautifulSoup content...")
                         await self._ingest_scraped_content(url, text)
+                        logger.info("✅ BeautifulSoup content ingestion complete")
                     return text
                 except Exception as be:
-                    logger.warning(f"BeautifulSoup extraction failed: {be}")
+                    logger.warning(f"⚠️ BeautifulSoup extraction failed: {be}")
+                    logger.info("🔄 Falling back to raw HTML...")
                     # Fall through to return raw HTML
 
-            logger.info(f"HTTP fallback succeeded (raw HTML): {len(html)} characters")
+            logger.info(f"✅ HTTP fallback succeeded (raw HTML): {len(html)} characters")
             if self.ingest_after_scrape and html:
+                logger.info("💾 Ingesting raw HTML content...")
                 await self._ingest_scraped_content(url, html)
+                logger.info("✅ Raw HTML content ingestion complete")
             return html
 
         except Exception as hf:
-            logger.error(f"HTTP fallback also failed: {hf}", exc_info=True)
+            logger.error(f"💥 HTTP fallback failed: {hf}", exc_info=True)
             return ""
     
     async def scrape_with_pagination(

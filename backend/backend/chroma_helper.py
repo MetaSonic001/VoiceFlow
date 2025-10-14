@@ -52,7 +52,15 @@ def _get_client():
 def ensure_collection(tenant_id: str, agent_id: str, embedding_dim: int = None):
     client = _get_client()
     name = collection_name(tenant_id, agent_id)
-    metadata = {"embedding_dim": embedding_dim} if embedding_dim else {}
+    # Build metadata for collection. chromadb requires non-empty metadata,
+    # so always include tenant_id and agent_id. Add embedding_dim when provided.
+    metadata = {}
+    if embedding_dim:
+        metadata['embedding_dim'] = embedding_dim
+    # include tenant and agent identifiers to ensure metadata is not empty
+    metadata['tenant_id'] = str(tenant_id)
+    metadata['agent_id'] = str(agent_id)
+
     coll = client.get_or_create_collection(name=name, metadata=metadata)
     logger.info(f"Ensured collection {name} (metadata={metadata})")
     return coll

@@ -7,6 +7,7 @@ class PipelineAgent(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, index=True)
     agent_type = Column(String, index=True)  # curator, evaluator, summarizer, qa
+    tenant_id = Column(String, index=True, nullable=True)
     config = Column(JSON, default={})
     created_at = Column(DateTime, server_default=func.now())
 

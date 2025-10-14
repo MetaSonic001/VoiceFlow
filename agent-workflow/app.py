@@ -202,6 +202,8 @@ class QueryRequest(BaseModel):
     query: str = Field(..., description="The user's question or query")
     user_id: Optional[str] = Field(None, description="Optional user identifier")
     stream: bool = Field(False, description="Enable streaming response")
+    tenant_id: Optional[str] = Field(None, description="Tenant identifier for multi-tenant queries")
+    agent_id: Optional[str] = Field(None, description="Agent identifier for multi-tenant queries")
     
 class TwilioWebhookRequest(BaseModel):
     Body: str = Field(..., description="Message body from Twilio")
@@ -228,11 +230,23 @@ class StreamChunk(BaseModel):
 # RAG Agent Class
 # ========================
 class RAGAgent:
-    def __init__(self):
+    def __init__(self, tenant_id: Optional[str] = None, agent_id: Optional[str] = None):
         """Initialize the RAG Agent with ChromaDB and Groq client"""
         try:
             # Validate configuration
             Config.validate()
+            
+            # Store tenant/agent context
+            self.tenant_id = tenant_id
+            self.agent_id = agent_id
+            
+            # Determine collection name (multi-tenant support)
+            if tenant_id and agent_id:
+                # Use tenant-specific collection
+                collection_name = f"{tenant_id}_{agent_id}".replace('-', '_')
+            else:
+                # Fallback to default single collection
+                collection_name = Config.COLLECTION_NAME
             
             # Initialize ChromaDB
             logger.info(f"Initializing ChromaDB at: {Config.CHROMA_DB_PATH}")
@@ -244,13 +258,13 @@ class RAGAgent:
             # Get or create collection
             try:
                 self.collection = self.chroma_client.get_or_create_collection(
-                    name=Config.COLLECTION_NAME,
+                    name=collection_name,
                     metadata={"hnsw:space": "cosine"}
                 )
-                logger.info(f"Loaded collection: {Config.COLLECTION_NAME}")
+                logger.info(f"Loaded collection: {collection_name}")
             except Exception as e:
                 logger.error(f"Collection not found: {e}")
-                raise ValueError(f"Collection '{Config.COLLECTION_NAME}' not found in ChromaDB")
+                raise ValueError(f"Collection '{collection_name}' not found in ChromaDB")
 
             # Ensure we use the same embedder as ingestion (so embeddings line up)
             # Add document-ingestion services folder to path so we can import the embedder
@@ -1055,7 +1069,7 @@ Answer:"""
         
         return formatted
     
-    def process(self, query: str, user_id: Optional[str] = None) -> QueryResponse:
+    def process(self, query: str, user_id: Optional[str] = None, tenant_id: Optional[str] = None, agent_id: Optional[str] = None) -> QueryResponse:
         """
         Main workflow: Execute all steps (non-streaming)
         """
@@ -1230,7 +1244,7 @@ Answer:"""
                 metadata={"user_id": user_id}
             )
     
-    async def process_stream(self, query: str, user_id: Optional[str] = None):
+    async def process_stream(self, query: str, user_id: Optional[str] = None, tenant_id: Optional[str] = None, agent_id: Optional[str] = None):
         """
         Main workflow with streaming: Execute all steps and stream the response
         Yields JSON chunks as Server-Sent Events
@@ -1364,28 +1378,30 @@ Answer:"""
                 "error": str(e)
             }
 
-# ========================
 # Lazy Agent initialization
-# Initialize the agent on first use to avoid heavy startup work during
+# Initialize agents on first use to avoid heavy startup work during
 # module import (model downloads, Chroma open, etc.). Call get_agent()
-# to obtain a ready agent instance.
+# to obtain a ready agent instance for specific tenant/agent.
 # ========================
-agent = None
+_agents = {}  # Cache agents by (tenant_id, agent_id) key
 _agent_init_lock = threading.Lock()
 
-def get_agent():
-    """Lazily initialize and return the global RAGAgent instance."""
-    global agent
-    if agent is None:
+def get_agent(tenant_id: Optional[str] = None, agent_id: Optional[str] = None):
+    """Lazily initialize and return the RAGAgent instance for the given tenant/agent."""
+    # Use None as key for default single-tenant agent
+    key = (tenant_id, agent_id)
+    
+    if key not in _agents:
         with _agent_init_lock:
-            if agent is None:
+            if key not in _agents:
                 try:
-                    agent = RAGAgent()
-                    logger.info("RAG Agent initialized successfully (lazy)")
+                    agent = RAGAgent(tenant_id=tenant_id, agent_id=agent_id)
+                    _agents[key] = agent
+                    logger.info(f"RAG Agent initialized for tenant={tenant_id}, agent={agent_id}")
                 except Exception as e:
-                    logger.error(f"Failed to initialize RAG Agent: {e}")
-                    agent = None
-    return agent
+                    logger.error(f"Failed to initialize RAG Agent for tenant={tenant_id}, agent={agent_id}: {e}")
+                    _agents[key] = None
+    return _agents[key]
 
 # ========================
 # API Endpoints
@@ -1430,28 +1446,29 @@ async def global_exception_handler(request: Request, exc: Exception):
 @app.get("/health")
 async def health_check():
     """Detailed health check"""
-    if agent is None:
-        raise HTTPException(status_code=503, detail="RAG Agent not initialized")
+    # Try to initialize default agent if not already done
+    agent_instance = get_agent()
+    if agent_instance is None:
+        raise HTTPException(status_code=503, detail="RAG Agent failed to initialize")
     
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "chroma_db_path": Config.CHROMA_DB_PATH,
-        "collection_name": Config.COLLECTION_NAME,
+        "collection_name": agent_instance.collection.name if agent_instance else Config.COLLECTION_NAME,
         "model": Config.GROQ_MODEL
     }
-
-@app.post("/query", response_model=QueryResponse)
 async def query_endpoint(request: QueryRequest):
     """
     Main query endpoint for the RAG agent
     Supports both regular and streaming responses
     """
-    if agent is None:
-        raise HTTPException(status_code=503, detail="RAG Agent not initialized")
+    agent_instance = get_agent(request.tenant_id, request.agent_id)
+    if agent_instance is None:
+        raise HTTPException(status_code=503, detail="RAG Agent failed to initialize")
     
     start_time = time.time()
-    logger.info(f"Received query from user: {request.user_id} (stream={request.stream})")
+    logger.info(f"Received query from user: {request.user_id} (stream={request.stream}, tenant={request.tenant_id}, agent={request.agent_id})")
     
     # If streaming is requested, redirect to stream endpoint
     if request.stream:
@@ -1460,7 +1477,7 @@ async def query_endpoint(request: QueryRequest):
             detail="For streaming, use POST /query/stream endpoint"
         )
     
-    response = agent.process(request.query, request.user_id)
+    response = agent_instance.process(request.query, request.user_id)
     total_ms = int((time.time() - start_time) * 1000)
     try:
         # Log the interaction for API queries
@@ -1475,16 +1492,17 @@ async def query_stream_endpoint(request: QueryRequest):
     Streaming query endpoint - returns Server-Sent Events (SSE)
     Provides real-time streaming of the LLM response
     """
-    if agent is None:
-        raise HTTPException(status_code=503, detail="RAG Agent not initialized")
+    agent_instance = get_agent(request.tenant_id, request.agent_id)
+    if agent_instance is None:
+        raise HTTPException(status_code=503, detail="RAG Agent failed to initialize")
     
     start_time = time.time()
-    logger.info(f"Received streaming query from user: {request.user_id}")
+    logger.info(f"Received streaming query from user: {request.user_id} (tenant={request.tenant_id}, agent={request.agent_id})")
     
     async def event_generator():
         """Generate SSE events"""
         try:
-            async for chunk in agent.process_stream(request.query, request.user_id):
+            async for chunk in agent_instance.process_stream(request.query, request.user_id):
                 # Convert dict to JSON and send as SSE
                 yield {
                     "event": chunk["type"],
@@ -1519,8 +1537,9 @@ async def twilio_webhook(request: Request):
     Twilio-compatible webhook endpoint
     Accepts form data from Twilio and returns TwiML response
     """
-    if agent is None:
-        raise HTTPException(status_code=503, detail="RAG Agent not initialized")
+    agent_instance = get_agent()
+    if agent_instance is None:
+        raise HTTPException(status_code=503, detail="RAG Agent failed to initialize")
     
     try:
         # Parse form data from Twilio
@@ -1532,7 +1551,7 @@ async def twilio_webhook(request: Request):
         logger.info(f"Twilio webhook received from {from_number}: {message_body[:100]}")
         
         # Process the query
-        response = agent.process(message_body, from_number)
+        response = agent_instance.process(message_body, from_number)
         
         # Return TwiML response
         if response.success and response.answer:
@@ -1564,8 +1583,9 @@ async def twilio_webhook_json(request: Request):
     Alternative Twilio webhook endpoint that returns JSON instead of TwiML
     Useful for testing and debugging
     """
-    if agent is None:
-        raise HTTPException(status_code=503, detail="RAG Agent not initialized")
+    agent_instance = get_agent()
+    if agent_instance is None:
+        raise HTTPException(status_code=503, detail="RAG Agent failed to initialize")
     
     try:
         # Parse form data from Twilio
@@ -1576,7 +1596,7 @@ async def twilio_webhook_json(request: Request):
         logger.info(f"Twilio JSON webhook received from {from_number}")
         
         # Process the query
-        response = agent.process(message_body, from_number)
+        response = agent_instance.process(message_body, from_number)
         
         return response
         
@@ -1745,10 +1765,11 @@ async def twilio_voice_start(request: Request):
                                 transcript = bridge.queue.get_nowait()
                                 logger.info(f"Transcript from media stream: {transcript}")
                                 # Call agent in background so we continue processing audio
-                                if agent:
+                                agent_instance = get_agent()
+                                if agent_instance:
                                     async def process_and_respond(t, sid, ws=websocket):
                                         try:
-                                            resp = agent.process(t, user_id=sid)
+                                            resp = agent_instance.process(t, user_id=sid)
                                             answer = resp.answer if resp and resp.success else "I'm sorry, I don't have an answer for that."
                                             # Build TwiML that speaks the answer then redirects to stream_start
                                             safe_answer = _sanitize_reply_for_customer(answer, max_length=600).replace('&', 'and')
@@ -1873,10 +1894,14 @@ async def twilio_voice_result(request: Request):
 
         # Call the agent synchronously (agent.process is synchronous)
         try:
-            t0 = time.time()
-            response = agent.process(speech_text, user_id=caller)
-            t1 = time.time()
-            answer = response.answer if response and response.success else "I'm sorry, I don't have an answer for that."
+            agent_instance = get_agent()
+            if agent_instance is None:
+                answer = "I'm sorry, the agent is not available right now."
+            else:
+                t0 = time.time()
+                response = agent_instance.process(speech_text, user_id=caller)
+                t1 = time.time()
+                answer = response.answer if response and response.success else "I'm sorry, I don't have an answer for that."
             # Build small metadata for logging
             extra = {
                 "processing_ms": int((t1 - t0) * 1000)
@@ -1996,15 +2021,23 @@ async def websocket_query(websocket: WebSocket):
             if stream:
                 # Stream chunks from agent.process_stream
                 try:
-                    async for chunk in agent.process_stream(q, uid):
-                        await websocket.send_json({"type": chunk.get('type'), "data": chunk})
+                    agent_instance = get_agent()
+                    if agent_instance:
+                        async for chunk in agent_instance.process_stream(q, uid):
+                            await websocket.send_json({"type": chunk.get('type'), "data": chunk})
+                    else:
+                        await websocket.send_json({"type": "error", "error": "Agent not available"})
                 except Exception as e:
                     logger.error(f"Error streaming over websocket: {e}")
                     await websocket.send_json({"type": "error", "error": str(e)})
             else:
                 try:
-                    response = agent.process(q, uid)
-                    await websocket.send_json({"type": "response", "answer": response.answer if response else ""})
+                    agent_instance = get_agent()
+                    if agent_instance:
+                        response = agent_instance.process(q, uid)
+                        await websocket.send_json({"type": "response", "answer": response.answer if response else ""})
+                    else:
+                        await websocket.send_json({"type": "error", "error": "Agent not available"})
                 except Exception as e:
                     logger.error(f"Error processing websocket query: {e}")
                     await websocket.send_json({"type": "error", "error": str(e)})

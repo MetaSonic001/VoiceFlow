@@ -118,17 +118,25 @@ class FileDetector:
             return False
         
         text = text.strip()
+        logger.info(f"🔍 Checking if text is URL: '{text[:100]}{'...' if len(text) > 100 else ''}'")
         
         # Check with regex
         if self.url_pattern.match(text):
-            logger.info(f"Valid URL detected: {text}")
+            logger.info(f"✅ Valid URL detected via regex: {text}")
             return True
         
-        # Check if it starts with common URL patterns
-        if text.startswith(('http://', 'https://', 'www.')):
-            logger.info(f"URL-like pattern detected: {text}")
+        # Check if it starts with common URL patterns (more lenient)
+        url_starts = ['http://', 'https://', 'www.', 'ftp://', 'ftps://']
+        if any(text.lower().startswith(start) for start in url_starts):
+            logger.info(f"✅ URL-like pattern detected: {text}")
             return True
         
+        # Check for domain-like patterns (e.g., example.com, subdomain.example.com)
+        if re.match(r'^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*(\.[a-zA-Z]{2,})?$', text):
+            logger.info(f"✅ Domain-like pattern detected: {text}")
+            return True
+        
+        logger.info(f"❌ Not detected as URL: {text}")
         return False
     
     def validate_url(self, url: str) -> bool:

@@ -1,8 +1,11 @@
-from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks
+from __future__ import annotations
+
+from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, Request
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 from crewai import Agent, Task, Crew, Process
 from crewai.tools import BaseTool
+from sqlalchemy import text
 
 # Make imports work whether this file is run as a module or as a script.
 try:
@@ -45,6 +48,10 @@ import importlib
 # initialize logging early so guarded imports can use logger
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("agent-runner")
+
+def get_tenant_id(request: Request) -> Optional[str]:
+    """Extract tenant_id from X-Tenant-ID header."""
+    return request.headers.get('X-Tenant-ID')
 
 # Document-ingestion helpers are initialized lazily to avoid importing heavy
 # ML libraries at module import time. Call `init_doc_ingest()` from tools when
@@ -111,6 +118,7 @@ Base.metadata.create_all(bind=engine)
 class CreateAgentIn(BaseModel):
     name: str
     agent_type: str
+    tenant_id: Optional[str]
     config: Optional[Dict[str, Any]] = {}
 
 
@@ -296,7 +304,7 @@ class QATool(BaseTool):
 
 
 # Helper to materialize a crew agent from a PipelineAgent DB model
-def materialize_agent(db_agent: 'PipelineAgent'):
+def materialize_agent(db_agent):
     tools = []
     if db_agent.agent_type == "curator":
         tools = [CuratorTool()]
@@ -325,7 +333,7 @@ def materialize_agent(db_agent: 'PipelineAgent'):
     return agent
 
 
-def run_pipeline(db: Session, pipeline: 'Pipeline', context: Dict[str, Any]):
+def run_pipeline(db, pipeline, context: Dict[str, Any]):
     logger.info(f"Running pipeline {pipeline.id} - {pipeline.name}")
     for idx, stage in enumerate(pipeline.stages or []):
         agent_id = stage.get("agent_id")
@@ -363,7 +371,7 @@ def run_pipeline(db: Session, pipeline: 'Pipeline', context: Dict[str, Any]):
 
 @app.post("/agents", response_model=Dict[str, Any])
 def create_agent(inp: CreateAgentIn, db: Session = Depends(get_db)):
-    agent = PipelineAgent(name=inp.name, agent_type=inp.agent_type, config=inp.config or {})
+    agent = PipelineAgent(name=inp.name, agent_type=inp.agent_type, tenant_id=inp.tenant_id, config=inp.config or {})
     db.add(agent)
     db.commit()
     db.refresh(agent)
@@ -371,8 +379,12 @@ def create_agent(inp: CreateAgentIn, db: Session = Depends(get_db)):
 
 
 @app.get("/agents")
-def list_agents(db: Session = Depends(get_db)):
-    agents = db.query(PipelineAgent).all()
+def list_agents(request: Request, db: Session = Depends(get_db)):
+    tenant_id = get_tenant_id(request)
+    query = db.query(PipelineAgent)
+    if tenant_id:
+        query = query.filter(PipelineAgent.tenant_id == tenant_id)
+    agents = query.all()
     return [{"id": a.id, "name": a.name, "agent_type": a.agent_type, "config": a.config} for a in agents]
 
 
@@ -386,8 +398,12 @@ def create_pipeline(inp: CreatePipelineIn, db: Session = Depends(get_db)):
 
 
 @app.get("/pipelines")
-def list_pipelines(db: Session = Depends(get_db)):
-    pls = db.query(Pipeline).all()
+def list_pipelines(request: Request, db: Session = Depends(get_db)):
+    tenant_id = get_tenant_id(request)
+    query = db.query(Pipeline)
+    if tenant_id:
+        query = query.filter(Pipeline.tenant_id == tenant_id)
+    pls = query.all()
     return [{"id": p.id, "name": p.name, "tenant_id": p.tenant_id, "stages": p.stages} for p in pls]
 
 
@@ -405,6 +421,17 @@ def trigger_pipeline(pipeline_id: int, payload: Optional[Dict[str, Any]] = None,
     # schedule background execution
     background_tasks.add_task(run_pipeline, db, pipeline, context)
     return {"message": "Pipeline scheduled", "pipeline_id": pipeline.id}
+
+
+@app.get("/health")
+def health_check(db: Session = Depends(get_db)):
+    """Health check endpoint that verifies database connectivity."""
+    try:
+        # Simple database connectivity check
+        db.execute(text("SELECT 1"))
+        return {"status": "healthy", "database": "connected"}
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Database connection failed: {e}")
 
 
 if __name__ == "__main__":

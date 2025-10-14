@@ -68,64 +68,10 @@ async def lifespan(app: FastAPI):
     # running the sync in every process when uvicorn reload is enabled.
     # Use the /admin/sync endpoint or a CLI task to trigger sync manually.
 
-    # Attempt to flush any pending filesystem-stored documents into Postgres.
-    # This is safe to call at startup; the flush helper will no-op if Postgres
-    # is still unavailable. Controlled by FLUSH_PENDING_ON_STARTUP env var.
-    try:
-        flush_on_start = os.getenv('FLUSH_PENDING_ON_STARTUP', 'true').lower() in ('1', 'true', 'yes')
-        if flush_on_start:
-            batch = int(os.getenv('FLUSH_PENDING_BATCH_SIZE', '100'))
-            try:
-                # db_manager is initialized later in the module but will be available
-                # by the time the lifespan startup runs.
-                n = await db_manager.flush_pending_documents(batch_size=batch)
-                logger.info(f"Flushed {n} pending documents into Postgres on startup")
-            except Exception:
-                logger.exception("Failed to flush pending documents on startup")
-
-        # Optionally run a periodic background flush task which will attempt
-        # to flush pending documents every PERIODIC_FLUSH_INTERVAL seconds.
-        periodic = os.getenv('PERIODIC_FLUSH', 'false').lower() in ('1', 'true', 'yes')
-        flush_task = None
-        if periodic:
-            interval = int(os.getenv('PERIODIC_FLUSH_INTERVAL', '60'))
-            batch = int(os.getenv('FLUSH_PENDING_BATCH_SIZE', '100'))
-
-            async def _periodic_flush():
-                logger.info(f"Starting periodic pending-docs flush every {interval}s")
-                try:
-                    while True:
-                        await asyncio.sleep(interval)
-                        try:
-                            n = await db_manager.flush_pending_documents(batch_size=batch)
-                            if n:
-                                logger.info(f"Periodic flush inserted {n} pending documents")
-                        except Exception:
-                            logger.exception("Periodic flush failed")
-                except asyncio.CancelledError:
-                    logger.info("Periodic flush task cancelled")
-
-            flush_task = asyncio.create_task(_periodic_flush())
-            # Attach to app state so shutdown can cancel it
-            app.state._flush_task = flush_task
-
-    except Exception:
-        logger.exception("Exception during startup flush setup")
-
     yield  # Run app
     
     # Shutdown (optional)
-    # Cancel periodic flush task if present
-    try:
-        task = getattr(app.state, '_flush_task', None)
-        if task:
-            task.cancel()
-            try:
-                await task
-            except Exception:
-                pass
-    except Exception:
-        logger.exception("Failed to cancel periodic flush task on shutdown")
+    pass
 
     logger.info("Shutting down app...")
 
@@ -253,22 +199,28 @@ async def process_document(
 
         # Step 1: Extract text based on file type
         if file_type in ["image", "pdf"]:
-            logger.info(f"Processing {file_type} with OCR")
+            logger.info(f"🖼️ Processing {file_type} with OCR")
             # OCR processor supports either bytes or a file path
             if is_path:
                 extracted_text = await ocr_processor.process(content, file_type)
             else:
                 extracted_text = await ocr_processor.process(data_bytes, file_type)
-            logger.info(f"OCR completed. Extracted {len(extracted_text)} characters")
+            logger.info(f"✅ OCR completed. Extracted {len(extracted_text)} characters")
         
         elif file_type == "url":
             url = content.decode('utf-8') if not is_path else open(content, 'rb').read().decode('utf-8')
-            logger.info(f"Scraping URL: {url}")
+            logger.info(f"🕷️ Processing URL with web scraper: {url}")
             extracted_text = await web_scraper.scrape(url)
-            logger.info(f"Scraping completed. Extracted {len(extracted_text)} characters")
+            logger.info(f"✅ Web scraping completed. Extracted {len(extracted_text)} characters")
             metadata['url'] = url
         
+        elif file_type == "text":
+            logger.info(f"📄 Processing plain text file")
+            extracted_text = content.decode('utf-8') if not is_path else open(content, 'r').read()
+            logger.info(f"✅ Text extraction completed. Extracted {len(extracted_text)} characters")
+        
         else:
+            logger.error(f"❌ Unsupported file type: {file_type}")
             raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_type}")
         
         if not extracted_text or len(extracted_text.strip()) == 0:
@@ -393,24 +345,30 @@ async def ingest_document(
     Main ingestion endpoint for file uploads
     Accepts: images, PDFs, documents, or text files containing URLs
     """
-    logger.info(f"Ingestion request received for file: {file.filename}")
+    logger.info(f"📁 Ingestion request received for file: {file.filename}")
     
     try:
         # Read file content
         content = await file.read()
-        logger.info(f"File size: {len(content)} bytes")
+        logger.info(f"📊 File size: {len(content)} bytes")
         
         # Detect file type
         file_type = file_detector.detect_type(content, file.filename)
-        logger.info(f"Detected file type: {file_type}")
+        logger.info(f"🔍 Initial file type detection: {file_type}")
         
         # Check if it's a URL (text file containing URL)
         if file_type == "text":
             text_content = content.decode('utf-8').strip()
+            logger.info(f"📝 Text content preview: '{text_content[:200]}{'...' if len(text_content) > 200 else ''}'")
+            
             if file_detector.is_url(text_content):
                 file_type = "url"
                 content = text_content.encode('utf-8')
-                logger.info("Detected URL in text file")
+                logger.info("🔗 Detected URL in text file - reclassified as 'url' type")
+            else:
+                logger.info("❌ Text file does not contain valid URL")
+        
+        logger.info(f"🎯 Final file type for processing: {file_type}")
         
         # Process document
         metadata = {
@@ -425,7 +383,7 @@ async def ingest_document(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error in ingestion endpoint: {str(e)}", exc_info=True)
+        logger.error(f"💥 Error in ingestion endpoint: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Ingestion failed: {str(e)}")
 
 
