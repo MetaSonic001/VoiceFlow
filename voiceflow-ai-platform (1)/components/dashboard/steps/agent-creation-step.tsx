@@ -62,93 +62,119 @@ export function AgentCreationStep({ data, onDataChange, initialData }: AgentCrea
   const selectedRole = agentRoles.find(role => role.id === formData.agentRole)
 
   return (
-    <div className="space-y-6">
-      <div className="text-center space-y-2">
-        <h2 className="text-xl sm:text-2xl font-bold">Create your AI agent</h2>
-        <p className="text-sm sm:text-base text-muted-foreground">Give your agent a name and define its primary role</p>
-      </div>
-
-      <div className="space-y-6">
-        <div className="space-y-2">
-          <Label htmlFor="agentName">Agent Name</Label>
-          <div className="relative">
-            <Bot className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              id="agentName"
-              type="text"
-              value={formData.agentName}
-              onChange={(e) => handleInputChange('agentName', e.target.value)}
-              placeholder="e.g., Sarah, Alex, or CustomerBot"
-              className="pl-10"
-              required
-            />
-          </div>
+    <div className="w-full h-full max-w-4xl mx-auto">
+      <div className="space-y-8">
+        {/* Header */}
+        <div className="text-center space-y-3">
+          <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">Create your AI agent</h2>
+          <p className="text-base text-muted-foreground max-w-2xl mx-auto">
+            Give your agent a name and define its primary role
+          </p>
         </div>
 
-        <div className="space-y-4">
-          <Label>Agent Role</Label>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-            {agentRoles.map(role => {
-              const IconComponent = role.icon
-              return (
-                <Card
-                  key={role.id}
-                  className={`cursor-pointer transition-all hover:shadow-md ${
-                    formData.agentRole === role.id
-                      ? 'ring-2 ring-primary bg-primary/5'
-                      : 'hover:border-primary/50'
-                  }`}
-                  onClick={() => handleInputChange('agentRole', role.id)}
-                >
-                  <CardContent className="p-3 sm:p-4">
-                    <div className="flex items-start space-x-3">
-                      <div className={`p-2 rounded-lg flex-shrink-0 ${
-                        formData.agentRole === role.id 
-                          ? 'bg-primary text-primary-foreground' 
+        {/* Form Content */}
+        <div className="space-y-8">
+          {/* Agent Name Input */}
+          <div className="space-y-3">
+            <Label htmlFor="agentName" className="text-base font-medium">
+              Agent Name
+            </Label>
+            <div className="relative">
+              <Bot className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+              <Input
+                id="agentName"
+                type="text"
+                value={formData.agentName}
+                onChange={(e) => handleInputChange('agentName', e.target.value)}
+                placeholder="e.g., Sarah, Alex, or CustomerBot"
+                className="pl-11 h-12 text-base"
+                required
+              />
+            </div>
+          </div>
+
+          {/* Agent Role Selection */}
+          <div className="space-y-4">
+            <Label className="text-base font-medium">Agent Role</Label>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {agentRoles.map(role => {
+                const IconComponent = role.icon
+                const isSelected = formData.agentRole === role.id
+
+                return (
+                  <Card
+                    key={role.id}
+                    className={`cursor-pointer transition-all duration-200 hover:shadow-lg ${isSelected
+                      ? 'ring-2 ring-primary bg-primary/5 border-primary'
+                      : 'hover:border-primary/50 hover:bg-accent/5'
+                      }`}
+                    onClick={() => handleInputChange('agentRole', role.id)}
+                  >
+                    <CardContent className="p-5">
+                      <div className="flex items-start gap-4">
+                        <div className={`p-3 rounded-xl transition-colors ${isSelected
+                          ? 'bg-primary text-primary-foreground shadow-sm'
                           : 'bg-muted text-muted-foreground'
-                      }`}>
-                        <IconComponent className="h-4 w-4 sm:h-5 sm:w-5" />
+                          }`}>
+                          <IconComponent className="h-6 w-6" />
+                        </div>
+                        <div className="flex-1 min-w-0 space-y-1">
+                          <h3 className="font-semibold text-base leading-tight">
+                            {role.title}
+                          </h3>
+                          <p className="text-sm text-muted-foreground leading-relaxed">
+                            {role.description}
+                          </p>
+                        </div>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-semibold text-sm sm:text-base truncate">{role.title}</h3>
-                        <p className="text-xs sm:text-sm text-muted-foreground">{role.description}</p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              )
-            })}
+                    </CardContent>
+                  </Card>
+                )
+              })}
+            </div>
           </div>
-        </div>
 
-        {selectedRole && (
-          <Card className="bg-primary/5 border-primary/20">
-            <CardContent className="p-3 sm:p-4">
-              <div className="flex items-center space-x-3">
-                <div className="bg-primary text-primary-foreground p-2 rounded-lg flex-shrink-0">
-                  <selectedRole.icon className="h-4 w-4 sm:h-5 sm:w-5" />
+          {/* Selected Role Confirmation */}
+          {selectedRole && (
+            <Card className="bg-primary/5 border-primary/30 shadow-sm">
+              <CardContent className="p-5">
+                <div className="flex items-center gap-4">
+                  <div className="bg-primary text-primary-foreground p-3 rounded-xl shadow-sm">
+                    <selectedRole.icon className="h-6 w-6" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h4 className="font-semibold text-primary text-base mb-1">
+                      Selected: {selectedRole.title}
+                    </h4>
+                    <p className="text-sm text-primary/80 leading-relaxed">
+                      {selectedRole.description}
+                    </p>
+                  </div>
                 </div>
-                <div className="min-w-0">
-                  <h4 className="font-medium text-primary text-sm sm:text-base">{selectedRole.title}</h4>
-                  <p className="text-xs sm:text-sm text-primary/70">{selectedRole.description}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+              </CardContent>
+            </Card>
+          )}
 
-        <div className="space-y-2">
-          <Label htmlFor="agentDescription">Description (Optional)</Label>
-          <Textarea
-            id="agentDescription"
-            value={formData.agentDescription}
-            onChange={(e) => handleInputChange('agentDescription', e.target.value)}
-            placeholder="Describe what specific tasks this agent should handle..."
-            rows={3}
-            className="resize-none"
-          />
+          {/* Description Textarea */}
+          <div className="space-y-3">
+            <Label htmlFor="agentDescription" className="text-base font-medium">
+              Description <span className="text-muted-foreground font-normal">(Optional)</span>
+            </Label>
+            <Textarea
+              id="agentDescription"
+              value={formData.agentDescription}
+              onChange={(e) => handleInputChange('agentDescription', e.target.value)}
+              placeholder="Describe what specific tasks this agent should handle..."
+              rows={4}
+              className="resize-none text-base"
+            />
+            <p className="text-sm text-muted-foreground">
+              Add any specific requirements or tasks for your agent
+            </p>
+          </div>
         </div>
       </div>
     </div>
   )
 }
+
