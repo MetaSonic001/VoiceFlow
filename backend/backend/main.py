@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, BackgroundTasks, Security, Request
+from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, BackgroundTasks, Security, Request, Form
 from fastapi.responses import JSONResponse
 from fastapi import Request
 from pydantic import BaseModel
@@ -17,7 +17,9 @@ from fastapi.security.api_key import APIKeyHeader
 import sys
 import asyncio
 import io
+import json
 from sqlalchemy import text
+from datetime import datetime
 from .auth import create_access_token, get_current_user, require_role
 from .models import User, UserRole
 from passlib.context import CryptContext
@@ -285,11 +287,11 @@ async def create_tenant(payload: TenantCreate):
 @app.post('/agents')
 async def create_agent(payload: AgentCreate):
     async with get_session() as session:
-        a = Agent(name=payload.name, tenant_id=payload.tenant_id)
+        a = Agent(name=payload.name, tenant_id=uuid.UUID(payload.tenant_id))
         session.add(a)
         await session.commit()
         await session.refresh(a)
-        return JSONResponse({'id': str(a.id), 'name': a.name})
+        return JSONResponse({'id': str(a.id), 'agent_id': str(a.id), 'name': a.name, 'tenant_id': str(a.tenant_id)})
 
 
 @app.get('/agents')
@@ -368,6 +370,25 @@ async def list_agents(request: Request, user=Depends(get_current_user)):
         return {'agents': agents, 'total': total, 'page': page, 'limit': limit}
 
 
+@app.get('/test/agents')
+async def list_agents_test():
+    """Unauthenticated endpoint for testing - returns all agents."""
+    async with get_session() as session:
+        q = await session.execute(text('SELECT id, tenant_id, name FROM agents ORDER BY created_at DESC'))
+        rows = q.fetchall()
+        
+        agents = []
+        for r in rows:
+            aid, tid, name = r
+            agents.append({
+                'id': str(aid),
+                'tenant_id': str(tid),
+                'name': name,
+            })
+
+        return {'agents': agents}
+
+
 @app.get('/agents/{agent_id}')
 async def get_agent(agent_id: str, api_key=Depends(require_api_key)):
     async with get_session() as session:
@@ -443,6 +464,124 @@ async def activate_agent(agent_id: str, api_key=Depends(require_api_key)):
         return {'success': True}
 
 
+@app.post('/agent-config')
+async def save_agent_config(payload: dict):
+    """Save agent configuration for a specific agent."""
+    try:
+        agent_id = payload.get('agent_id')
+        if not agent_id:
+            raise HTTPException(400, 'Missing agent_id')
+            
+        async with get_session() as session:
+            # Verify agent exists
+            agent_res = await session.execute(text('SELECT id FROM agents WHERE id = :agent'), {'agent': agent_id})
+            if not agent_res.fetchone():
+                raise HTTPException(404, 'Agent not found')
+
+            # Get ChromaDB collection name for this agent
+            chroma_res = await session.execute(text('SELECT chroma_collection FROM agents WHERE id = :agent'), {'agent': agent_id})
+            chroma_row = chroma_res.fetchone()
+            chroma_collection = chroma_row[0] if chroma_row and chroma_row[0] else None
+
+            # Create or update agent configuration
+            from .models import AgentConfiguration
+            
+            # Check if configuration already exists
+            config_res = await session.execute(text('SELECT id FROM agent_configurations WHERE agent_id = :agent'), {'agent': agent_id})
+            config_row = config_res.fetchone()
+            
+            config_data = {
+                'agent_name': payload.get('agent_name'),
+                'agent_role': payload.get('agent_role'),
+                'agent_description': payload.get('agent_description'),
+                'personality_traits': payload.get('personality_traits'),
+                'communication_channels': payload.get('communication_channels'),
+                'preferred_response_style': payload.get('preferred_response_style'),
+                'response_tone': payload.get('response_tone'),
+                'company_name': payload.get('company_name'),
+                'industry': payload.get('industry'),
+                'primary_use_case': payload.get('primary_use_case'),
+                'brief_description': payload.get('brief_description'),
+                'behavior_rules': payload.get('behavior_rules'),
+                'escalation_triggers': payload.get('escalation_triggers'),
+                'knowledge_boundaries': payload.get('knowledge_boundaries'),
+                'chroma_collection_name': chroma_collection,
+                'max_response_length': payload.get('max_response_length', 500),
+                'confidence_threshold': payload.get('confidence_threshold', 0.7),
+            }
+            
+            if config_row:
+                # Update existing configuration
+                await session.execute(text('''
+                    UPDATE agent_configurations SET 
+                    agent_name = :agent_name,
+                    agent_role = :agent_role,
+                    agent_description = :agent_description,
+                    personality_traits = :personality_traits,
+                    communication_channels = :communication_channels,
+                    preferred_response_style = :preferred_response_style,
+                    response_tone = :response_tone,
+                    company_name = :company_name,
+                    industry = :industry,
+                    primary_use_case = :primary_use_case,
+                    brief_description = :brief_description,
+                    behavior_rules = :behavior_rules,
+                    escalation_triggers = :escalation_triggers,
+                    knowledge_boundaries = :knowledge_boundaries,
+                    chroma_collection_name = :chroma_collection_name,
+                    max_response_length = :max_response_length,
+                    confidence_threshold = :confidence_threshold,
+                    updated_at = now()
+                    WHERE agent_id = :agent_id
+                '''), {**config_data, 'agent_id': agent_id})
+            else:
+                # Create new configuration
+                config = AgentConfiguration(agent_id=agent_id, **config_data)
+                session.add(config)
+            
+            await session.commit()
+            
+            return {
+                'success': True, 
+                'message': 'Agent configuration saved successfully',
+                'agent_id': str(agent_id),
+                'chroma_collection': chroma_collection
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception('Error saving agent configuration')
+        raise HTTPException(500, f'Failed to save agent configuration: {str(e)}')
+
+
+@app.get('/agent-config/{agent_id}')
+async def get_agent_config(agent_id: str):
+    """Get agent configuration for a specific agent."""
+    try:
+        async with get_session() as session:
+            # Get configuration
+            config_res = await session.execute(text('SELECT * FROM agent_configurations WHERE agent_id = :agent'), {'agent': agent_id})
+            config_row = config_res.fetchone()
+            
+            if not config_row:
+                raise HTTPException(404, 'Agent configuration not found')
+            
+            # Convert row to dict
+            config_dict = dict(config_row._mapping)
+            # Convert UUIDs to strings
+            config_dict['agent_id'] = str(config_dict['agent_id'])
+            config_dict['id'] = str(config_dict['id'])
+            
+            return config_dict
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception('Error getting agent configuration')
+        raise HTTPException(500, f'Failed to get agent configuration: {str(e)}')
+
+
 @app.post('/admin/collections/ensure')
 async def api_ensure_collection(tenant_id: str, agent_id: str, api_key=Depends(require_api_key), user=Depends(require_role('admin'))):
     coll = ensure_collection(tenant_id, agent_id)
@@ -484,7 +623,7 @@ async def upload_document(tenant_id: str, agent_id: str, file: UploadFile = File
         from services.database import DatabaseManager
         dbm = DatabaseManager()
         # store_document returns the canonical document_id used by ingestion pipeline
-        document_id = await dbm.store_document(filename, content, file.content_type or 'application/octet-stream', {'tenant_id': tenant_id, 'agent_id': agent_id})
+        document_id = await dbm.store_document(filename, content, file.content_type or 'application/octet-stream', {'tenant_id': tenant_id, 'agent_id': agent_id}, tenant_id, agent_id)
     except Exception as e:
         # Fall back to backend-only behavior if ingestion manager isn't available
         document_id = None
@@ -584,15 +723,43 @@ async def clerk_sync(payload: dict, api_key=Depends(require_api_key)):
 
         # ensure user exists in DB (this endpoint requires a valid API key for server-to-server trust)
         async with get_session() as session:
-            res = await session.execute(text('SELECT id, email FROM users WHERE email = :email'), {'email': email})
+            # Check if user already exists
+            res = await session.execute(text('SELECT id, email, tenant_id, brand_id FROM users WHERE email = :email'), {'email': email})
             row = res.fetchone()
+
             if not row:
-                # create a new user record (no password; Clerk handles auth)
+                # User doesn't exist, create tenant and brand first
+                from .models import Tenant, Brand
+
+                # Create tenant
+                tenant_name = f"{email.split('@')[0]}'s Organization"
+                tenant = Tenant(name=tenant_name)
+                session.add(tenant)
+                await session.flush()  # Get the tenant ID
+
+                # Create first brand under the tenant
+                brand = Brand(tenant_id=tenant.id, name='Default Brand')
+                session.add(brand)
+                await session.flush()  # Get the brand ID
+
+                # Create user linked to tenant and brand
                 from .models import User as UserModel
-                u = UserModel(email=email, password_hash=None, role=UserRole.user)
+                u = UserModel(
+                    email=email,
+                    password_hash=None,
+                    role=UserRole.user,
+                    tenant_id=tenant.id,
+                    brand_id=brand.id
+                )
                 session.add(u)
                 await session.commit()
                 await session.refresh(u)
+
+                logger.info(f"Created new tenant {tenant.id} and brand {brand.id} for user {email}")
+            else:
+                # User exists, just refresh the session
+                await session.commit()
+
         # Issue backend JWT
         token = create_access_token(email, role=UserRole.user.value)
         return {'access_token': token, 'user': {'email': email}}
@@ -959,6 +1126,7 @@ async def trigger_ingest(document_id: str, background_tasks: BackgroundTasks):
             current['voice'] = payload
             await session.execute(text('UPDATE onboarding_progress SET data = :data WHERE user_email = :email'), {'data': current, 'email': user.get('email')})
             await session.commit()
+            
             # Also persist voice choices into the Agent record if present
             try:
                 res2 = await session.execute(text('SELECT agent_id FROM onboarding_progress WHERE user_email = :email'), {'email': user.get('email')})
@@ -977,9 +1145,44 @@ async def trigger_ingest(document_id: str, background_tasks: BackgroundTasks):
                     merged_channels = dict(existing or {})
                     merged_channels['voice'] = payload
                     await session.execute(text('UPDATE agents SET channels = :channels WHERE id = :agent'), {'channels': merged_channels, 'agent': aid})
+                    
+                    # Also save voice settings to AgentConfiguration table
+                    from .models import AgentConfiguration
+                    config_res = await session.execute(text('SELECT id FROM agent_configurations WHERE agent_id = :agent'), {'agent': aid})
+                    config_row = config_res.fetchone()
+                    
+                    voice_config = {
+                        'response_tone': payload.get('tone'),
+                        'preferred_response_style': payload.get('personality'),
+                        'personality_traits': payload.get('personality'),
+                    }
+                    
+                    if config_row:
+                        # Update existing configuration
+                        await session.execute(text('''
+                            UPDATE agent_configurations SET 
+                            response_tone = :response_tone,
+                            preferred_response_style = :preferred_response_style,
+                            personality_traits = :personality_traits,
+                            updated_at = now()
+                            WHERE agent_id = :agent_id
+                        '''), {**voice_config, 'agent_id': aid})
+                    else:
+                        # Create new configuration with voice data
+                        config = AgentConfiguration(
+                            agent_id=aid,
+                            response_tone=voice_config['response_tone'],
+                            preferred_response_style=voice_config['preferred_response_style'],
+                            personality_traits=voice_config['personality_traits']
+                        )
+                        session.add(config)
+                    
                     await session.commit()
-            except Exception:
+            except Exception as e:
+                logger.exception('Error saving voice configuration')
+                # Don't fail the request if config save fails
                 pass
+            
             return {'success': True}
 
     @app.post('/onboarding/channels')
@@ -1004,6 +1207,192 @@ async def trigger_ingest(document_id: str, background_tasks: BackgroundTasks):
             except Exception:
                 pass
             return {'success': True}
+
+    @app.post('/onboarding/agent-config')
+    async def save_agent_configuration(payload: dict, user=Depends(get_current_user)):
+        """Save agent configuration metadata from onboarding.
+        
+        This data defines agent behavior, personality, and business context.
+        NOT part of knowledge base but used by agent workflow.
+        """
+        try:
+            async with get_session() as session:
+                # Get agent_id from onboarding progress
+                res = await session.execute(text('SELECT agent_id, tenant_id FROM onboarding_progress WHERE user_email = :email'), {'email': user.get('email')})
+                row = res.fetchone()
+                if not row:
+                    raise HTTPException(400, 'No agent found in onboarding progress')
+                agent_id, tenant_id = row
+
+                # Get ChromaDB collection name for this agent
+                chroma_res = await session.execute(text('SELECT chroma_collection FROM agents WHERE id = :agent'), {'agent': agent_id})
+                chroma_row = chroma_res.fetchone()
+                chroma_collection = chroma_row[0] if chroma_row and chroma_row[0] else None
+
+                # Create or update agent configuration
+                from .models import AgentConfiguration
+                
+                # Check if configuration already exists
+                config_res = await session.execute(text('SELECT id FROM agent_configurations WHERE agent_id = :agent'), {'agent': agent_id})
+                config_row = config_res.fetchone()
+                
+                config_data = {
+                    'agent_name': payload.get('agent_name'),
+                    'agent_role': payload.get('agent_role'),
+                    'agent_description': payload.get('agent_description'),
+                    'personality_traits': payload.get('personality_traits'),
+                    'communication_channels': payload.get('communication_channels'),
+                    'preferred_response_style': payload.get('preferred_response_style'),
+                    'response_tone': payload.get('response_tone'),
+                    'company_name': payload.get('company_name'),
+                    'industry': payload.get('industry'),
+                    'primary_use_case': payload.get('primary_use_case'),
+                    'brief_description': payload.get('brief_description'),
+                    'behavior_rules': payload.get('behavior_rules'),
+                    'escalation_triggers': payload.get('escalation_triggers'),
+                    'knowledge_boundaries': payload.get('knowledge_boundaries'),
+                    'chroma_collection_name': chroma_collection,
+                    'max_response_length': payload.get('max_response_length', 500),
+                    'confidence_threshold': payload.get('confidence_threshold', 0.7),
+                }
+                
+                if config_row:
+                    # Update existing configuration
+                    await session.execute(text('''
+                        UPDATE agent_configurations SET 
+                        agent_name = :agent_name,
+                        agent_role = :agent_role,
+                        agent_description = :agent_description,
+                        personality_traits = :personality_traits,
+                        communication_channels = :communication_channels,
+                        preferred_response_style = :preferred_response_style,
+                        response_tone = :response_tone,
+                        company_name = :company_name,
+                        industry = :industry,
+                        primary_use_case = :primary_use_case,
+                        brief_description = :brief_description,
+                        behavior_rules = :behavior_rules,
+                        escalation_triggers = :escalation_triggers,
+                        knowledge_boundaries = :knowledge_boundaries,
+                        chroma_collection_name = :chroma_collection_name,
+                        max_response_length = :max_response_length,
+                        confidence_threshold = :confidence_threshold,
+                        updated_at = now()
+                        WHERE agent_id = :agent_id
+                    '''), {**config_data, 'agent_id': agent_id})
+                else:
+                    # Create new configuration
+                    config = AgentConfiguration(agent_id=agent_id, **config_data)
+                    session.add(config)
+                
+                await session.commit()
+                
+                return {
+                    'success': True, 
+                    'message': 'Agent configuration saved successfully',
+                    'agent_id': str(agent_id),
+                    'chroma_collection': chroma_collection
+                }
+                
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception('Error saving agent configuration')
+            raise HTTPException(500, f'Failed to save agent configuration: {str(e)}')
+
+    @app.post('/agent-config')
+    async def save_agent_config(payload: dict):
+        """Save agent configuration for testing purposes (no auth required)."""
+        try:
+            async with get_session() as session:
+                agent_id = payload.get('agent_id')
+                if not agent_id:
+                    raise HTTPException(400, 'Missing agent_id')
+
+                # Get ChromaDB collection name for this agent
+                chroma_res = await session.execute(text('SELECT chroma_collection FROM agents WHERE id = :agent'), {'agent': agent_id})
+                chroma_row = chroma_res.fetchone()
+                chroma_collection = chroma_row[0] if chroma_row and chroma_row[0] else None
+
+                # Create or update agent configuration
+                from .models import AgentConfiguration
+                
+                # Check if configuration already exists
+                config_res = await session.execute(text('SELECT id FROM agent_configurations WHERE agent_id = :agent'), {'agent': agent_id})
+                config_row = config_res.fetchone()
+                
+                config_data = {
+                    'agent_name': payload.get('agent_name'),
+                    'agent_role': payload.get('agent_role'),
+                    'agent_description': payload.get('agent_description'),
+                    'personality_traits': payload.get('personality_traits'),
+                    'communication_channels': payload.get('communication_channels'),
+                    'preferred_response_style': payload.get('preferred_response_style'),
+                    'response_tone': payload.get('response_tone'),
+                    'company_name': payload.get('company_name'),
+                    'industry': payload.get('industry'),
+                    'chroma_collection_name': chroma_collection,
+                }
+                
+                if config_row:
+                    # Update existing configuration
+                    await session.execute(text('''
+                        UPDATE agent_configurations SET 
+                        agent_name = :agent_name,
+                        agent_role = :agent_role,
+                        agent_description = :agent_description,
+                        personality_traits = :personality_traits,
+                        communication_channels = :communication_channels,
+                        preferred_response_style = :preferred_response_style,
+                        response_tone = :response_tone,
+                        company_name = :company_name,
+                        industry = :industry,
+                        chroma_collection_name = :chroma_collection_name,
+                        updated_at = now()
+                        WHERE agent_id = :agent_id
+                    '''), {**config_data, 'agent_id': agent_id})
+                else:
+                    # Create new configuration
+                    config = AgentConfiguration(agent_id=agent_id, **config_data)
+                    session.add(config)
+                
+                await session.commit()
+                
+                return {
+                    'success': True, 
+                    'message': 'Agent configuration saved successfully',
+                    'agent_id': str(agent_id),
+                    'chroma_collection': chroma_collection
+                }
+                
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception('Error saving agent configuration')
+            raise HTTPException(500, f'Failed to save agent configuration: {str(e)}')
+
+    @app.get('/agent-config/{agent_id}')
+    async def get_agent_config(agent_id: str):
+        """Get agent configuration for testing purposes (no auth required)."""
+        async with get_session() as session:
+            config_res = await session.execute(text('SELECT * FROM agent_configurations WHERE agent_id = :agent'), {'agent': agent_id})
+            config_row = config_res.fetchone()
+            if not config_row:
+                raise HTTPException(404, 'Agent configuration not found')
+            
+            return {
+                'agent_id': str(config_row[1]),  # agent_id
+                'agent_name': config_row[2],     # agent_name
+                'agent_role': config_row[3],     # agent_role
+                'agent_description': config_row[4],  # agent_description
+                'personality_traits': config_row[5],  # personality_traits
+                'communication_channels': config_row[6],  # communication_channels
+                'preferred_response_style': config_row[7],  # preferred_response_style
+                'response_tone': config_row[8],     # response_tone
+                'company_name': config_row[9],     # company_name
+                'industry': config_row[10],        # industry
+                'chroma_collection_name': config_row[11],  # chroma_collection_name
+            }
 
     @app.post('/onboarding/deploy')
     async def deploy_agent(request: Request, payload: dict, user=Depends(get_current_user)):
@@ -1089,6 +1478,84 @@ async def trigger_ingest(document_id: str, background_tasks: BackgroundTasks):
             await session.commit()
             
             return {'success': True, 'phone_number': phone}
+
+
+    @app.get('/twilio/numbers')
+    async def get_twilio_numbers(user=Depends(get_current_user)):
+        """Get available Twilio phone numbers for agent deployment."""
+        try:
+            account_sid = os.getenv('TWILIO_ACCOUNT_SID')
+            auth_token = os.getenv('TWILIO_AUTH_TOKEN')
+            
+            if not account_sid or not auth_token:
+                raise HTTPException(500, 'Twilio credentials not configured')
+            
+            from twilio.rest import Client as TwilioRestClient
+            client = TwilioRestClient(account_sid, auth_token)
+            
+            # Get available phone numbers (US numbers for now)
+            available_numbers = client.available_phone_numbers('US').local.list(limit=20)
+            
+            numbers = []
+            for number in available_numbers:
+                numbers.append({
+                    'phone_number': number.phone_number,
+                    'friendly_name': number.friendly_name,
+                    'region': number.region,
+                    'locality': number.locality,
+                    'capabilities': {
+                        'voice': number.capabilities.get('voice', False),
+                        'sms': number.capabilities.get('sms', False),
+                        'mms': number.capabilities.get('mms', False)
+                    }
+                })
+            
+            return {'numbers': numbers}
+            
+        except Exception as e:
+            logger.exception('Error fetching Twilio numbers')
+            raise HTTPException(500, f'Failed to fetch Twilio numbers: {str(e)}')
+
+
+    @app.post('/twilio/purchase-number')
+    async def purchase_twilio_number(payload: dict, user=Depends(get_current_user)):
+        """Purchase a Twilio phone number for an agent."""
+        try:
+            phone_number = payload.get('phone_number')
+            agent_id = payload.get('agent_id')
+            
+            if not phone_number or not agent_id:
+                raise HTTPException(400, 'Missing phone_number or agent_id')
+            
+            account_sid = os.getenv('TWILIO_ACCOUNT_SID')
+            auth_token = os.getenv('TWILIO_AUTH_TOKEN')
+            
+            if not account_sid or not auth_token:
+                raise HTTPException(500, 'Twilio credentials not configured')
+            
+            from twilio.rest import Client as TwilioRestClient
+            client = TwilioRestClient(account_sid, auth_token)
+            
+            # Purchase the number
+            incoming_phone_number = client.incoming_phone_numbers.create(phone_number=phone_number)
+            
+            # Update the agent with the purchased number
+            async with get_session() as session:
+                await session.execute(
+                    text('UPDATE agents SET phone_number = :phone WHERE id = :agent'),
+                    {'phone': phone_number, 'agent': agent_id}
+                )
+                await session.commit()
+            
+            return {
+                'success': True,
+                'phone_number': phone_number,
+                'sid': incoming_phone_number.sid
+            }
+            
+        except Exception as e:
+            logger.exception('Error purchasing Twilio number')
+            raise HTTPException(500, f'Failed to purchase Twilio number: {str(e)}')
 
 
     @app.get('/runner/pipelines')
@@ -1206,6 +1673,348 @@ async def trigger_ingest(document_id: str, background_tasks: BackgroundTasks):
     @app.get('/runner/metrics')
     async def runner_metrics(request: Request, user=Depends(get_current_user)):
         return await _forward_to_runner_with_tenant(request, 'GET', '/metrics', user=user)
+
+
+### Standalone Document Ingestion Endpoints (No Agent/Tenant Required)
+@app.post('/ingest/document')
+async def ingest_document_standalone(
+    file: UploadFile = File(...),
+    metadata: str = Form(None),
+    background_tasks: BackgroundTasks = None
+):
+    """Standalone document ingestion - process any document without agent context."""
+    try:
+        # Read file content
+        content = await file.read()
+
+        # Store in ingestion database
+        repo_root = pathlib.Path(__file__).resolve().parents[2]
+        ingestion_path = repo_root / 'document-ingestion'
+        if str(ingestion_path) not in sys.path and ingestion_path.exists():
+            sys.path.insert(0, str(ingestion_path))
+
+        from services.database import DatabaseManager
+        from services.file_detector import FileDetector
+        from services.ocr_processor import OCRProcessor
+        from services.embedder import TextEmbedder
+        from services.vector_store import VectorStore
+
+        # Detect file type
+        fd = FileDetector()
+        file_type = fd.detect_type(content, file.filename)
+
+        # Initialize services
+        dbm = DatabaseManager()
+        embedder = TextEmbedder()
+        vs = VectorStore()
+
+        # Parse metadata if provided
+        parsed_metadata = {}
+        if metadata:
+            try:
+                parsed_metadata = json.loads(metadata)
+            except json.JSONDecodeError:
+                raise HTTPException(400, 'Invalid metadata JSON')
+
+        # Store document in ingestion DB
+        document_id = await dbm.store_document(
+            file.filename,
+            content,
+            file.content_type or file_type,
+            parsed_metadata,
+            tenant_id='standalone',  # Standalone documents
+            agent_id='documents'     # Standalone collection
+        )
+
+        # Extract text based on type
+        extracted_text = ""
+        if file_type in ['image', 'pdf']:
+            ocr = OCRProcessor()
+            extracted_text = await ocr.process(content, file_type)
+        else:
+            try:
+                extracted_text = content.decode('utf-8')
+            except UnicodeDecodeError:
+                extracted_text = str(content)
+
+        if extracted_text.strip():
+            # Chunk and embed
+            chunks = embedder.chunk_text(extracted_text)
+            if chunks:
+                embeddings = await embedder.embed_chunks(chunks)
+
+                # Store in a default collection for standalone documents
+                collection_metadata = {
+                    'source': 'standalone_ingestion',
+                    'original_filename': file.filename,
+                    'ingested_at': datetime.now().isoformat(),
+                    'tenant_id': 'standalone',
+                    'agent_id': 'documents',
+                    **parsed_metadata
+                }
+
+                await vs.store_embeddings(
+                    str(document_id),
+                    chunks,
+                    embeddings,
+                    collection_metadata
+                )
+
+                # Mark as completed
+                await dbm.update_document_status(document_id, 'completed')
+
+        return {
+            'success': True,
+            'document_id': str(document_id),
+            'filename': file.filename,
+            'file_type': file_type,
+            'extracted_text_length': len(extracted_text)
+        }
+
+    except Exception as e:
+        logger.exception('Error in standalone document ingestion')
+        raise HTTPException(500, f'Document ingestion failed: {str(e)}')
+
+
+@app.post('/ingest/website')
+async def ingest_website_standalone(
+    payload: dict,
+    background_tasks: BackgroundTasks = None
+):
+    """Standalone website scraping and ingestion."""
+    try:
+        url = payload.get('url')
+        metadata = payload.get('metadata', {})
+
+        if not url:
+            raise HTTPException(400, 'URL is required')
+
+        # Import ingestion services
+        repo_root = pathlib.Path(__file__).resolve().parents[2]
+        ingestion_path = repo_root / 'document-ingestion'
+        if str(ingestion_path) not in sys.path and ingestion_path.exists():
+            sys.path.insert(0, str(ingestion_path))
+
+        from services.database import DatabaseManager
+        from services.web_scraper import WebScraper
+        from services.embedder import TextEmbedder
+        from services.vector_store import VectorStore
+
+        # Initialize services
+        dbm = DatabaseManager()
+        ws = WebScraper()
+        embedder = TextEmbedder()
+        vs = VectorStore()
+
+        # Scrape website
+        scraped_text = await ws.scrape(url)
+
+        if not scraped_text.strip():
+            raise HTTPException(400, 'No content could be extracted from the website')
+
+        # Store in ingestion database
+        document_id = await dbm.store_document(
+            f"website:{url}",
+            scraped_text.encode('utf-8'),
+            'website',
+            {'url': url, **metadata},
+            tenant_id='standalone',
+            agent_id='documents'
+        )
+
+        # Chunk and embed
+        chunks = embedder.chunk_text(scraped_text)
+        if chunks:
+            embeddings = await embedder.embed_chunks(chunks)
+
+            collection_metadata = {
+                'source': 'standalone_website_scraping',
+                'url': url,
+                'scraped_at': datetime.now().isoformat(),
+                'tenant_id': 'standalone',
+                'agent_id': 'documents',
+                **metadata
+            }
+
+            await vs.store_embeddings(
+                str(document_id),
+                chunks,
+                embeddings,
+                collection_metadata
+            )
+
+            # Mark as completed
+            await dbm.update_document_status(document_id, 'completed')
+
+        return {
+            'success': True,
+            'document_id': str(document_id),
+            'url': url,
+            'extracted_text_length': len(scraped_text)
+        }
+
+    except Exception as e:
+        logger.exception('Error in standalone website ingestion')
+        raise HTTPException(500, f'Website ingestion failed: {str(e)}')
+
+
+@app.post('/ingest/faq')
+async def ingest_faq_standalone(
+    payload: dict,
+    background_tasks: BackgroundTasks = None
+):
+    """Standalone FAQ ingestion."""
+    try:
+        content = payload.get('content')
+        metadata = payload.get('metadata', {})
+
+        if not content or not content.strip():
+            raise HTTPException(400, 'FAQ content is required')
+
+        # Import ingestion services
+        repo_root = pathlib.Path(__file__).resolve().parents[2]
+        ingestion_path = repo_root / 'document-ingestion'
+        if str(ingestion_path) not in sys.path and ingestion_path.exists():
+            sys.path.insert(0, str(ingestion_path))
+
+        from services.database import DatabaseManager
+        from services.embedder import TextEmbedder
+        from services.vector_store import VectorStore
+
+        # Initialize services
+        dbm = DatabaseManager()
+        embedder = TextEmbedder()
+        vs = VectorStore()
+
+        # Store in ingestion database
+        document_id = await dbm.store_document(
+            'faq.txt',
+            content.encode('utf-8'),
+            'text',
+            {'content_type': 'faq', **metadata},
+            tenant_id='standalone',
+            agent_id='documents'
+        )
+
+        # Chunk and embed
+        chunks = embedder.chunk_text(content)
+        if chunks:
+            embeddings = await embedder.embed_chunks(chunks)
+
+            collection_metadata = {
+                'source': 'standalone_faq_ingestion',
+                'content_type': 'faq',
+                'ingested_at': datetime.now().isoformat(),
+                'tenant_id': 'standalone',
+                'agent_id': 'documents',
+                **metadata
+            }
+
+            await vs.store_embeddings(
+                str(document_id),
+                chunks,
+                embeddings,
+                collection_metadata
+            )
+
+            # Mark as completed
+            await dbm.update_document_status(document_id, 'completed')
+
+        return {
+            'success': True,
+            'document_id': str(document_id),
+            'content_type': 'faq',
+            'extracted_text_length': len(content)
+        }
+
+    except Exception as e:
+        logger.exception('Error in standalone FAQ ingestion')
+        raise HTTPException(500, f'FAQ ingestion failed: {str(e)}')
+
+
+@app.get('/ingest/documents')
+async def list_ingested_documents(
+    source: str = None,
+    limit: int = 50,
+    offset: int = 0
+):
+    """List all ingested documents (standalone or agent-associated)."""
+    try:
+        repo_root = pathlib.Path(__file__).resolve().parents[2]
+        ingestion_path = repo_root / 'document-ingestion'
+        if str(ingestion_path) not in sys.path and ingestion_path.exists():
+            sys.path.insert(0, str(ingestion_path))
+
+        from services.database import DatabaseManager
+        dbm = DatabaseManager()
+
+        # Get documents from ingestion database
+        documents = await dbm.list_documents(limit=limit, offset=offset)
+
+        # Filter by source if specified
+        if source:
+            documents = [d for d in documents if d.get('metadata', {}).get('source') == source]
+
+        return {
+            'documents': documents,
+            'total': len(documents),
+            'limit': limit,
+            'offset': offset
+        }
+
+    except Exception as e:
+        logger.exception('Error listing ingested documents')
+        raise HTTPException(500, f'Failed to list documents: {str(e)}')
+
+
+@app.post('/ingest/search')
+async def search_ingested_documents(payload: dict):
+    """Search across all ingested documents."""
+    try:
+        query = payload.get('query')
+        limit = payload.get('limit', 10)
+        source_filter = payload.get('source')
+
+        if not query:
+            raise HTTPException(400, 'Query is required')
+
+        # Import services
+        repo_root = pathlib.Path(__file__).resolve().parents[2]
+        ingestion_path = repo_root / 'document-ingestion'
+        if str(ingestion_path) not in sys.path and ingestion_path.exists():
+            sys.path.insert(0, str(ingestion_path))
+
+        from services.embedder import TextEmbedder
+        from services.vector_store import VectorStore
+
+        # Initialize services
+        embedder = TextEmbedder()
+        vs = VectorStore()
+
+        # Generate embedding for query
+        query_embedding = await embedder.embed_text(query)
+
+        # Search in standalone documents collection
+        results = await vs.search(
+            query_embedding=query_embedding,
+            limit=limit,
+            tenant_id='standalone',
+            agent_id='documents'
+        )
+
+        # Filter by source if specified
+        if source_filter:
+            results = [r for r in results if r.get('metadata', {}).get('source') == source_filter]
+
+        return {
+            'query': query,
+            'results': results,
+            'total': len(results)
+        }
+
+    except Exception as e:
+        logger.exception('Error searching ingested documents')
+        raise HTTPException(500, f'Search failed: {str(e)}')
 
 
 class PipelineAgentCreate(BaseModel):

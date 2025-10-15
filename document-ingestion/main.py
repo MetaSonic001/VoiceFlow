@@ -3,7 +3,7 @@ FastAPI Ingestion Service
 Handles document upload, OCR, web scraping, embedding, and storage
 """
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks
+from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Form
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, HttpUrl
@@ -138,6 +138,22 @@ async def trigger_sync(background_tasks: BackgroundTasks):
 # Request/Response Models
 class URLUploadRequest(BaseModel):
     url: HttpUrl
+    tenant_id: str
+    agent_id: str
+    metadata: Optional[Dict[str, Any]] = {}
+
+
+class OnboardingInfoRequest(BaseModel):
+    tenant_id: str
+    agent_id: str
+    company_name: str
+    industry: str
+    primary_use_case: str
+    brief_description: Optional[str] = None
+    agent_name: str
+    agent_role: str
+    agent_description: str
+    communication_channels: List[str]
     metadata: Optional[Dict[str, Any]] = {}
 
 
@@ -177,13 +193,19 @@ async def process_document(
     content,
     filename: str,
     file_type: str,
-    metadata: Dict[str, Any]
+    metadata: Dict[str, Any],
+    tenant_id: str,
+    agent_id: str
 ) -> IngestionResponse:
     """
     Main processing pipeline for documents
     """
     start_time = datetime.now()
     logger.info(f"Starting processing for {filename} of type {file_type}")
+    
+    # Add tenant and agent context to metadata
+    metadata['tenant_id'] = tenant_id
+    metadata['agent_id'] = agent_id
     
     try:
         extracted_text = ""
@@ -241,7 +263,7 @@ async def process_document(
             logger.exception('Failed to compute document summary')
             metadata['document_summary'] = ''
 
-        # Step 2: Store original document in Postgres
+        # Store original document in Postgres
         logger.info("Storing original document in database")
         # For store_document we prefer to pass bytes when available; if caller provided a file path,
         # read its bytes for storing the raw content. If file is too large this may be slow; consider
@@ -254,11 +276,17 @@ async def process_document(
             except Exception:
                 store_content = b''
 
+        # Add tenant and agent info to metadata
+        metadata['tenant_id'] = tenant_id
+        metadata['agent_id'] = agent_id
+
         document_id = await db_manager.store_document(
             filename=filename,
             content=store_content,
             file_type=file_type,
-            metadata=metadata
+            metadata=metadata,
+            tenant_id=tenant_id,
+            agent_id=agent_id
         )
         logger.info(f"Document stored with ID: {document_id}")
         
@@ -339,6 +367,8 @@ async def health_check():
 @app.post("/ingest", response_model=IngestionResponse)
 async def ingest_document(
     file: UploadFile = File(...),
+    tenant_id: str = Form(...),
+    agent_id: str = Form(...),
     background_tasks: BackgroundTasks = None
 ):
     """
@@ -377,7 +407,7 @@ async def ingest_document(
             "uploaded_at": datetime.now().isoformat()
         }
         
-        result = await process_document(content, file.filename, file_type, metadata)
+        result = await process_document(content, file.filename, file_type, metadata, tenant_id, agent_id)
         return result
     
     except HTTPException:
@@ -412,7 +442,9 @@ async def ingest_url(request: URLUploadRequest):
             content=url_str.encode('utf-8'),
             filename=f"url_{datetime.now().timestamp()}",
             file_type="url",
-            metadata=metadata
+            metadata=metadata,
+            tenant_id=request.tenant_id,
+            agent_id=request.agent_id
         )
         return result
     
@@ -421,6 +453,86 @@ async def ingest_url(request: URLUploadRequest):
     except Exception as e:
         logger.error(f"Error in URL ingestion: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"URL ingestion failed: {str(e)}")
+
+
+@app.post("/ingest/onboarding-info", response_model=IngestionResponse)
+async def ingest_onboarding_info(request: OnboardingInfoRequest):
+    """
+    Dedicated endpoint for ingesting onboarding information as knowledge base content
+    """
+    logger.info(f"Onboarding info ingestion request received for agent: {request.agent_id}")
+    
+    try:
+        # Create structured text content from onboarding information for knowledge base
+        # This creates comprehensive context about the company and agent for RAG
+        onboarding_sections = []
+        
+        # Company Overview Section
+        company_section = f"""COMPANY OVERVIEW
+
+Company Name: {request.company_name}
+Industry: {request.industry}
+Primary Use Case: {request.primary_use_case}"""
+        if request.brief_description:
+            company_section += f"\nBrief Description: {request.brief_description}"
+        onboarding_sections.append(company_section)
+        
+        # Agent Profile Section
+        agent_section = f"""AGENT PROFILE
+
+Agent Name: {request.agent_name}
+Agent Role: {request.agent_role}
+Agent Description: {request.agent_description}
+
+Communication Channels: {', '.join(request.communication_channels)}
+
+This agent handles: {request.primary_use_case}
+The agent is designed to: {request.agent_description}
+Customers can interact with this agent through: {', '.join(request.communication_channels)}"""
+        onboarding_sections.append(agent_section)
+        
+        # Business Context Section
+        business_context = f"""BUSINESS CONTEXT
+
+{request.company_name} is a {request.industry} company.
+Their primary need is: {request.primary_use_case}.
+They have deployed an AI agent named {request.agent_name} who serves as a {request.agent_role}.
+
+The agent provides support through multiple channels including {', '.join(request.communication_channels)}."""
+        onboarding_sections.append(business_context)
+        
+        # Combine all sections with clear separators
+        onboarding_text = "\n\n" + "="*80 + "\n\n".join(onboarding_sections) + "\n\n" + "="*80
+        
+        # Add structured metadata for better retrieval
+        metadata = {
+            "content_type": "onboarding_info",
+            "company_name": request.company_name,
+            "industry": request.industry,
+            "primary_use_case": request.primary_use_case,
+            "agent_name": request.agent_name,
+            "agent_role": request.agent_role,
+            "communication_channels": request.communication_channels,
+            "uploaded_at": datetime.now().isoformat(),
+            **request.metadata
+        }
+        
+        # Process as text content for knowledge base
+        result = await process_document(
+            content=onboarding_text.encode('utf-8'),
+            filename=f"onboarding_info_{request.agent_id}_{datetime.now().timestamp()}",
+            file_type="text",
+            metadata=metadata,
+            tenant_id=request.tenant_id,
+            agent_id=request.agent_id
+        )
+        return result
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in onboarding info ingestion: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Onboarding info ingestion failed: {str(e)}")
 
 
 @app.post("/webhook/upload", response_model=IngestionResponse)
@@ -661,11 +773,12 @@ async def root():
             "health": "/health",
             "ingest_file": "/ingest",
             "ingest_url": "/ingest/url",
+            "ingest_onboarding_info": "/ingest/onboarding-info",
             "webhook": "/webhook/upload",
             "get_document": "/documents/{document_id}",
             "delete_document": "/documents/{document_id}",
-            "bulk_delete_documents": "/documents/bulk-delete",  # Add this line
-            "list_documents": "/documents",  # Add this line
+            "bulk_delete_documents": "/documents/bulk-delete",
+            "list_documents": "/documents",
             "search": "/search"
         }
     }

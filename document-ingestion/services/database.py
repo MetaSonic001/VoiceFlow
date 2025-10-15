@@ -31,13 +31,13 @@ class DatabaseManager:
     async def check_connection(self) -> bool:
         return write_document_to_backend is not None
 
-    async def store_document(self, filename: str, content: bytes, file_type: str, metadata: Dict[str, Any]) -> str:
+    async def store_document(self, filename: str, content: bytes, file_type: str, metadata: Dict[str, Any], tenant_id: str, agent_id: str) -> str:
         document_id = str(uuid.uuid4())
         now = datetime.utcnow()
 
         if write_document_to_backend:
             try:
-                ok = await write_document_to_backend(document_id, filename, content, file_type, metadata, status='processing')
+                ok = await write_document_to_backend(document_id, filename, content, file_type, metadata, tenant_id, agent_id, status='processing')
                 if ok:
                     logger.info(f"Wrote document {document_id} to backend DB via adapter")
                     return document_id
@@ -173,13 +173,13 @@ class DatabaseManager:
     async def check_connection(self) -> bool:
         return write_document_to_backend is not None
 
-    async def store_document(self, filename: str, content: bytes, file_type: str, metadata: Dict[str, Any]) -> str:
+    async def store_document(self, filename: str, content: bytes, file_type: str, metadata: Dict[str, Any], tenant_id: Optional[str] = None, agent_id: Optional[str] = None) -> str:
         document_id = str(uuid.uuid4())
         now = datetime.utcnow()
 
         if write_document_to_backend:
             try:
-                ok = await write_document_to_backend(document_id, filename, content, file_type, metadata, status='processing')
+                ok = await write_document_to_backend(document_id, filename, content, file_type, metadata, tenant_id, agent_id, status='processing')
                 if ok:
                     logger.info(f"Wrote document {document_id} to backend DB via adapter")
                     return document_id
@@ -415,13 +415,13 @@ class DatabaseManager:
     async def check_connection(self) -> bool:
         return write_document_to_backend is not None
 
-    async def store_document(self, filename: str, content: bytes, file_type: str, metadata: Dict[str, Any]) -> str:
+    async def store_document(self, filename: str, content: bytes, file_type: str, metadata: Dict[str, Any], tenant_id: Optional[str] = None, agent_id: Optional[str] = None) -> str:
         document_id = str(uuid.uuid4())
         now = datetime.utcnow()
 
         if write_document_to_backend:
             try:
-                ok = await write_document_to_backend(document_id, filename, content, file_type, metadata, status='processing')
+                ok = await write_document_to_backend(document_id, filename, content, file_type, metadata, tenant_id, agent_id, status='processing')
                 if ok:
                     logger.info(f"Wrote document {document_id} to backend DB via adapter")
                     return document_id

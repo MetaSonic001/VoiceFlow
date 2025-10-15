@@ -65,10 +65,10 @@ export function OnboardingFlow() {
         let agentId = (merged as any).agent_id || ''
 
         // Step 1: company profile
-        if (currentStep === 1 && stepData.company) {
-          await apiClient.saveCompanyProfile({ company_name: stepData.company.companyName, industry: stepData.company.industry, use_case: stepData.company.useCase })
-          try { await apiClient.saveOnboardingProgress({ current_step: currentStep, data: { company: stepData.company } }) } catch (e) {}
-        }
+                if (currentStep === 1 && stepData.company) {
+                  await apiClient.saveCompanyProfile({ company_name: stepData.company.companyName, industry: stepData.company.industry, use_case: stepData.company.useCase })
+                  try { await apiClient.saveOnboardingProgress({ current_step: currentStep, data: { company: stepData.company } }) } catch (e) {}
+                }
 
         // Step 2: create agent
         if (currentStep === 2 && stepData.agent) {
@@ -90,9 +90,30 @@ export function OnboardingFlow() {
         }
 
         // Step 4: voice configuration
-        if (currentStep === 4 && stepData.voice) {
-          await apiClient.configureVoice({ voice: stepData.voice.voice, tone: stepData.voice.tone, language: stepData.voice.language })
-          try { await apiClient.saveOnboardingProgress({ current_step: currentStep, data: { voice: stepData.voice } }) } catch (e) {}
+        if (currentStep === 4 && stepData.voicePersonality) {
+          await apiClient.configureVoice({ voice: stepData.voicePersonality.voice, tone: stepData.voicePersonality.tone, language: stepData.voicePersonality.language, personality: stepData.voicePersonality.personality })
+          
+          // Also save complete agent configuration to database
+          const agentConfigData = {
+            agent_name: (merged as any).agent?.agentName,
+            agent_role: (merged as any).agent?.role,
+            agent_description: (merged as any).agent?.description,
+            personality_traits: [stepData.voicePersonality.personality],
+            communication_channels: (merged as any).agent?.channels,
+            preferred_response_style: stepData.voicePersonality.personality,
+            response_tone: stepData.voicePersonality.tone,
+            company_name: (merged as any).company?.companyName,
+            industry: (merged as any).company?.industry,
+            primary_use_case: (merged as any).company?.useCase,
+          }
+          try {
+            await apiClient.saveAgentConfiguration(agentConfigData)
+            toast({ title: 'Configuration saved', description: 'Agent personality and voice settings saved.' })
+          } catch (e) {
+            console.warn('Failed to save agent configuration', e)
+          }
+          
+          try { await apiClient.saveOnboardingProgress({ current_step: currentStep, data: { voicePersonality: stepData.voicePersonality } }) } catch (e) {}
         }
 
         // Step 5: channels

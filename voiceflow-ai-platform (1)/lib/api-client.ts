@@ -16,9 +16,26 @@ export class ApiError extends Error {
 
 class ApiClient {
   private baseUrl: string
+  private tenantId: string | null = null
 
   constructor(baseUrl: string = API_BASE_URL) {
     this.baseUrl = baseUrl
+    // Try to get tenant ID from localStorage on initialization
+    if (typeof window !== 'undefined') {
+      const user = localStorage.getItem('auth_user')
+      if (user) {
+        try {
+          const userData = JSON.parse(user)
+          this.tenantId = userData.tenantId
+        } catch (e) {
+          console.warn('Failed to parse user data for tenant ID')
+        }
+      }
+    }
+  }
+
+  setTenantId(tenantId: string) {
+    this.tenantId = tenantId
   }
 
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
@@ -30,6 +47,14 @@ class ApiClient {
         ...options.headers,
       },
       ...options,
+    }
+
+    // Add tenant ID header for multi-tenant isolation
+    if (this.tenantId) {
+      config.headers = {
+        ...config.headers,
+        'x-tenant-id': this.tenantId,
+      }
     }
 
     // Add auth token if available
@@ -70,7 +95,13 @@ class ApiClient {
   // Auth helpers that persist token + user locally
   private persistAuth(token: string, user: any) {
     if (token) localStorage.setItem('auth_token', token)
-    if (user) localStorage.setItem('auth_user', JSON.stringify(user))
+    if (user) {
+      localStorage.setItem('auth_user', JSON.stringify(user))
+      // Set tenant ID for API requests
+      if (user.tenantId) {
+        this.setTenantId(user.tenantId)
+      }
+    }
   }
 
   async login(email: string, password: string) {
@@ -162,6 +193,18 @@ class ApiClient {
 
   async setupChannels(data: ChannelSetupData) {
     return this.request<{ success: boolean }>("/onboarding/channels", {
+      method: "POST",
+      body: JSON.stringify(data),
+    })
+  }
+
+  async saveAgentConfiguration(data: AgentConfigurationData) {
+    return this.request<{
+      success: boolean;
+      message: string;
+      agent_id: string;
+      chroma_collection: string;
+    }>("/onboarding/agent-config", {
       method: "POST",
       body: JSON.stringify(data),
     })
@@ -473,7 +516,7 @@ export interface KnowledgeUploadData {
 export interface VoicePersonalityData {
   voice: string
   tone: string
-  personality?: string
+  personality: string[]
   language: string
 }
 
@@ -653,4 +696,51 @@ export interface ConversationTranscript {
 export interface HealthCheckResponse {
   status: string
   timestamp: string
+}
+
+// Onboarding types
+export interface CompanyProfile {
+  name: string
+  industry: string
+  useCase: string
+  description?: string
+}
+
+export interface AgentCreationData {
+  name: string
+}
+
+export interface KnowledgeUploadData {
+  files?: File[]
+  websites?: string[]
+  faqText?: string
+}
+
+export interface VoicePersonalityData {
+  voice: string
+  personality: string[]
+}
+
+export interface ChannelSetupData {
+  channels: string[]
+  phone_number?: string
+}
+
+export interface AgentConfigurationData {
+  agent_name?: string
+  agent_role?: string
+  agent_description?: string
+  personality_traits?: string[]
+  communication_channels?: string[]
+  preferred_response_style?: string
+  response_tone?: string
+  company_name?: string
+  industry?: string
+  primary_use_case?: string
+  brief_description?: string
+  behavior_rules?: any
+  escalation_triggers?: any
+  knowledge_boundaries?: any
+  max_response_length?: number
+  confidence_threshold?: number
 }

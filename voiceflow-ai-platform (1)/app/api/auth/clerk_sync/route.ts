@@ -82,12 +82,65 @@ export async function POST(req: NextRequest) {
 
     // Determine onboarding status locally and include it in the response so the client can redirect immediately
     try {
-      const progress = await prisma.onboardingProgress.findUnique({ where: { userEmail: email } })
-      const needs_onboarding = !progress
+      // Check if user exists and handle tenant/brand creation
+      let user = await prisma.user.findUnique({
+        where: { email },
+        include: {
+          tenant: true,
+          brand: true,
+        },
+      });
 
-      // Attach the flag to the backend response payload and return
-      const combined = Object.assign({}, body, { needs_onboarding })
-      return NextResponse.json(combined)
+      let needs_onboarding = !user;
+
+      // If user doesn't exist, create tenant and brand
+      if (!user) {
+        // Create tenant
+        const tenant = await prisma.tenant.create({
+          data: {
+            name: `${email.split('@')[0]}'s Organization`,
+          },
+        });
+
+        // Create first brand under the tenant
+        const brand = await prisma.brand.create({
+          data: {
+            tenantId: tenant.id,
+            name: 'Default Brand',
+          },
+        });
+
+        // Create user linked to tenant and brand
+        user = await prisma.user.create({
+          data: {
+            email,
+            tenantId: tenant.id,
+            brandId: brand.id,
+          },
+          include: {
+            tenant: true,
+            brand: true,
+          },
+        });
+
+        console.log(`Created new tenant ${tenant.id} and brand ${brand.id} for user ${email}`);
+      }
+
+      const progress = await prisma.onboardingProgress.findUnique({ where: { userEmail: email } });
+
+      // Attach tenant and brand info to the response
+      const combined = Object.assign({}, body, {
+        needs_onboarding,
+        user: {
+          id: user.id,
+          email: user.email,
+          tenantId: user.tenantId,
+          brandId: user.brandId,
+          tenant: user.tenant,
+          brand: user.brand,
+        },
+      });
+      return NextResponse.json(combined);
     } catch (e) {
       // If Prisma check fails, still return backend response but note the error
       const combined = Object.assign({}, body, { needs_onboarding: null, onboarding_error: String(e) })

@@ -40,7 +40,7 @@ export function CompanySetup({ onComplete }: CompanySetupProps) {
     e.preventDefault()
     ;(async () => {
       try {
-        await (await import('@/lib/api-client')).apiClient.saveCompanyProfile({ company_name: formData.companyName, industry: formData.industry, use_case: formData.useCase })
+        await (await import('@/lib/api-client')).apiClient.saveCompanyProfile({ name: formData.companyName, industry: formData.industry, useCase: formData.useCase })
         try { await (await import('@/lib/api-client')).apiClient.saveOnboardingProgress({ current_step: 1, data: { company: formData } }) } catch (e) {}
         toast({ title: 'Saved', description: 'Company profile saved' })
       } catch (e) {

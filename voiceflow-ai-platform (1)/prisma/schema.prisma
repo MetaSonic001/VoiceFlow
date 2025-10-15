@@ -14,20 +14,39 @@ model User {
   id          String   @id @default(uuid())
   email       String   @unique
   role        String   @default("user")
+  tenantId    String?
+  brandId     String?
   createdAt   DateTime @default(now())
   onboarding  OnboardingProgress?
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id])
+  brand  Brand?  @relation(fields: [brandId], references: [id])
 }
 
 model Tenant {
   id        String   @id @default(uuid())
   name      String
   createdAt DateTime @default(now())
+  users     User[]
+  brands    Brand[]
   agents    Agent[]
+}
+
+model Brand {
+  id        String   @id @default(uuid())
+  tenantId  String
+  name      String
+  createdAt DateTime @default(now())
+  users     User[]
+  agents    Agent[]
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
 }
 
 model Agent {
   id               String   @id @default(uuid())
   tenantId         String
+  brandId          String?
   name             String
   status           String?  @default("active")
   description      String?
@@ -42,6 +61,34 @@ model Agent {
   createdAt        DateTime @default(now())
 
   tenant Tenant @relation(fields: [tenantId], references: [id])
+  brand  Brand?  @relation(fields: [brandId], references: [id])
+  configuration AgentConfiguration?
+}
+
+model AgentConfiguration {
+  id                    String   @id @default(uuid())
+  agentId               String   @unique
+  agentName             String?
+  agentRole             String?
+  agentDescription      String?
+  personalityTraits     Json?
+  communicationChannels Json?
+  preferredResponseStyle String?
+  responseTone          String?
+  companyName           String?
+  industry              String?
+  primaryUseCase        String?
+  briefDescription      String?
+  behaviorRules         Json?
+  escalationTriggers    Json?
+  knowledgeBoundaries   Json?
+  chromaCollectionName  String?
+  maxResponseLength     Int?     @default(500)
+  confidenceThreshold   Float?   @default(0.7)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  agent Agent @relation(fields: [agentId], references: [id])
 }
 
 model OnboardingProgress {

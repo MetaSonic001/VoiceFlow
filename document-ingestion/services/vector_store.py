@@ -199,7 +199,17 @@ class VectorStore:
             coll_name = _collection_name(filter_metadata["tenant_id"], filter_metadata["agent_id"])
             coll = self.client.get_collection(coll_name)
 
-            results = coll.query(query_embeddings=[query_embedding], n_results=limit, where=filter_metadata)
+            # Construct where clause for ChromaDB
+            where_clause = {}
+            if len(filter_metadata) == 1:
+                # Single condition
+                key, value = next(iter(filter_metadata.items()))
+                where_clause = {key: value}
+            else:
+                # Multiple conditions - use $and
+                where_clause = {"$and": [{key: value} for key, value in filter_metadata.items()]}
+
+            results = coll.query(query_embeddings=[query_embedding], n_results=limit, where=where_clause)
 
             formatted_results: List[Dict[str, Any]] = []
             if results.get("ids") and len(results["ids"]) > 0:

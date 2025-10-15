@@ -152,8 +152,29 @@ processed_cache_lock = asyncio.Lock()
 # ========================
 class Config:
     # Default to the shared ingestion chroma path so all services use the same vector store
-    CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", os.path.join("..", "document-ingestion", "chroma_db"))
+    # Use absolute path based on this script's location to work from any directory
+    _script_dir = os.path.dirname(os.path.abspath(__file__))
+    _project_root = os.path.dirname(_script_dir)  # Go up one level from agent-workflow
+    CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", os.path.join(_project_root, "document-ingestion", "chroma_db"))
     GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+    COLLECTION_NAME = os.getenv("COLLECTION_NAME", "documents")
+    GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-70b-versatile")
+    MAX_RESULTS = int(os.getenv("MAX_RESULTS", "3"))
+    SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.3"))
+    # When the top retrieval similarity is at or above this threshold,
+    # we will nudge the LLM to use the retrieved context and avoid
+    # returning the canned 'I don't have enough information' reply.
+    RETRIEVAL_CONFIDENCE_THRESHOLD = float(os.getenv("RETRIEVAL_CONFIDENCE_THRESHOLD", "0.5"))
+    # How many of the top-ranked documents to summarize (lazy summarization)
+    SUMMARIZE_TOP_K = int(os.getenv("SUMMARIZE_TOP_K", "3"))
+    # Maximum number of candidates to rerank (keeps latency bounded)
+    MAX_RERANK_CANDIDATES = int(os.getenv("MAX_RERANK_CANDIDATES", "10"))
+    # Dense embedding model to use for fast retrieval
+    # Default upgraded to all-mpnet-base-v2 for better semantic quality
+    # Default to a 384-dim MiniLM model to match existing Chroma collections
+    DENSE_EMBEDDING_MODEL = os.getenv("DENSE_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+    # Cross-encoder reranker model (optional - toggled via USE_CROSS_RERANK)
+    CROSS_RERANK_MODEL = os.getenv("CROSS_RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
     COLLECTION_NAME = os.getenv("COLLECTION_NAME", "documents")
     GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-70b-versatile")
     MAX_RESULTS = int(os.getenv("MAX_RESULTS", "3"))
