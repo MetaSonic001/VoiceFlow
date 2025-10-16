@@ -4,21 +4,25 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import MotionWrapper from '@/components/ui/MotionWrapper'
 import { Badge } from "@/components/ui/badge"
-import { Brain, Bot, BarChart3, Settings, HelpCircle, LogOut, Users, Phone } from "lucide-react"
+import { Brain, Bot, BarChart3, Settings, HelpCircle, LogOut, Users, Phone, Activity, FileText, BookOpen, Code, Database } from "lucide-react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 
 export function DashboardSidebar() {
   const [activeItem, setActiveItem] = useState("agents")
   const [isLoggingOut, setIsLoggingOut] = useState(false)
-  const router: Router= useRouter()
+  const router = useRouter()
 
   const menuItems = [
     { id: "agents", label: "AI Agents", icon: Bot, badge: "3", href: "/dashboard" },
     { id: "analytics", label: "Analytics", icon: BarChart3, href: "/dashboard/analytics" },
     { id: "calls", label: "Call Logs", icon: Phone, href: "/dashboard/calls" },
-    { id: "team", label: "Team", icon: Users },
-    { id: "settings", label: "Settings", icon: Settings },
+    { id: "system", label: "System Health", icon: Activity, href: "/dashboard/system" },
+    { id: "reports", label: "Reports", icon: FileText, href: "/dashboard/reports" },
+    { id: "knowledge", label: "Knowledge Base", icon: Database, href: "/dashboard/knowledge" },
+    { id: "api-docs", label: "API Docs", icon: Code, href: "/dashboard/api-docs" },
+    { id: "team", label: "Team", icon: Users, href: "/dashboard/users" },
+    { id: "settings", label: "Settings", icon: Settings, href: "/dashboard/settings" },
   ]
 
   const handleLogout = async () => {
