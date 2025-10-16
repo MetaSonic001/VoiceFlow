@@ -15,6 +15,7 @@
   "description": "Multi-tenant RAG backend with Express.js",
   "dependencies": {
     "@prisma/client": "^6.17.1",
+    "@types/minio": "^7.1.1",
     "axios": "^1.12.2",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.5",
@@ -26,6 +27,7 @@
     "ioredis": "^5.8.1",
     "joi": "^18.0.1",
     "jsonwebtoken": "^9.0.2",
+    "minio": "^8.0.6",
     "multer": "^2.0.2",
     "node-wav": "^0.0.2",
     "prisma": "^6.17.1",

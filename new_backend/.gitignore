@@ -1,0 +1,44 @@
+# Node.js
+node_modules/
+dist/
+.env
+.env.*
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# TypeScript
+*.tsbuildinfo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Prisma
+prisma/migrations/
+
+# Redis/MinIO/Chroma
+*.rdb
+*.sqlite3
+
+# Docker
+*.pid
+
+# Misc
+coverage/
+
+# Ignore test output
+/test-results/
+
+# Ignore uploads
+uploads/
+
+# Ignore generated files
+*.generated.*

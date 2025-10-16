@@ -46,8 +46,20 @@ const validateTenantAccess = (req: Request, res: Response, next: NextFunction) =
   if (!tenantId || typeof tenantId !== 'string') {
     return res.status(400).json({ error: 'Tenant ID required' });
   }
-  req.tenantId = tenantId;
-  next();
+
+  // Verify tenant exists and is active
+  const prisma = req.app.get('prisma') as PrismaClient;
+  prisma.tenant.findUnique({
+    where: { id: tenantId, isActive: true }
+  }).then(tenant => {
+    if (!tenant) {
+      return res.status(403).json({ error: 'Invalid or inactive tenant' });
+    }
+    req.tenantId = tenantId;
+    next();
+  }).catch(() => {
+    res.status(500).json({ error: 'Tenant validation failed' });
+  });
 };
 
 // Get all documents for an agent
@@ -64,7 +76,7 @@ router.get('/', validateTenantAccess, async (req: Request, res: Response) => {
     const agent = await prisma.agent.findFirst({
       where: {
         id: agentId,
-        user: { id: req.tenantId }
+        tenantId: req.tenantId
       }
     });
 
@@ -93,9 +105,7 @@ router.get('/:id', validateTenantAccess, async (req: Request, res: Response) => 
     const document = await prisma.document.findFirst({
       where: {
         id: id,
-        agent: {
-          user: { id: req.tenantId }
-        }
+        tenantId: req.tenantId
       }
     });
 
@@ -125,7 +135,7 @@ router.post('/', validateTenantAccess, async (req: Request, res: Response) => {
     const agent = await prisma.agent.findFirst({
       where: {
         id: agentId,
-        user: { id: req.tenantId }
+        tenantId: req.tenantId
       }
     });
 
@@ -137,6 +147,7 @@ router.post('/', validateTenantAccess, async (req: Request, res: Response) => {
       data: {
         url: url,
         agentId: agentId,
+        tenantId: req.tenantId,
         status: 'pending'
       }
     });
@@ -176,9 +187,7 @@ router.put('/:id', validateTenantAccess, async (req: Request, res: Response) => 
     const existingDocument = await prisma.document.findFirst({
       where: {
         id: id,
-        agent: {
-          user: { id: req.tenantId }
-        }
+        tenantId: req.tenantId
       }
     });
 
@@ -208,9 +217,7 @@ router.delete('/:id', validateTenantAccess, async (req: Request, res: Response) 
     const document = await prisma.document.findFirst({
       where: {
         id: id,
-        agent: {
-          user: { id: req.tenantId }
-        }
+        tenantId: req.tenantId
       }
     });
 

@@ -52,7 +52,7 @@ router.post('/chat', validateTenantAccess, async (req: Request, res: Response) =
     const agent = await prisma.agent.findFirst({
       where: {
         id: agentId,
-        user: { id: req.tenantId }
+        tenantId: req.tenantId
       }
     });
 
@@ -89,7 +89,7 @@ router.get('/agent/:agentId', validateTenantAccess, async (req: Request, res: Re
     const agent = await prisma.agent.findFirst({
       where: {
         id: agentId,
-        user: { id: req.tenantId }
+        tenantId: req.tenantId
       },
       select: {
         id: true,
@@ -130,7 +130,7 @@ router.get('/agents', validateTenantAccess, async (req: Request, res: Response) 
     const agents = await prisma.agent.findMany({
       where: {
         userId: userId,
-        user: { id: req.tenantId }
+        tenantId: req.tenantId
       },
       select: {
         id: true,

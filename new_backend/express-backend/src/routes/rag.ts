@@ -33,8 +33,20 @@ const validateTenantAccess = (req: Request, res: Response, next: NextFunction) =
   if (!tenantId || typeof tenantId !== 'string') {
     return res.status(400).json({ error: 'Tenant ID required' });
   }
-  req.tenantId = tenantId;
-  next();
+
+  // Verify tenant exists and is active
+  const prisma = req.app.get('prisma') as PrismaClient;
+  prisma.tenant.findUnique({
+    where: { id: tenantId, isActive: true }
+  }).then(tenant => {
+    if (!tenant) {
+      return res.status(403).json({ error: 'Invalid or inactive tenant' });
+    }
+    req.tenantId = tenantId;
+    next();
+  }).catch(() => {
+    res.status(500).json({ error: 'Tenant validation failed' });
+  });
 };
 
 // Query agent with RAG
@@ -52,7 +64,7 @@ router.post('/query', validateTenantAccess, async (req: Request, res: Response) 
     const agent = await prisma.agent.findFirst({
       where: {
         id: agentId,
-        user: { id: req.tenantId }
+        tenantId: req.tenantId
       }
     });
 
@@ -96,7 +108,7 @@ router.get('/conversation/:sessionId', validateTenantAccess, async (req: Request
     const agent = await prisma.agent.findFirst({
       where: {
         id: agentId,
-        user: { id: req.tenantId }
+        tenantId: req.tenantId
       }
     });
 
@@ -134,7 +146,7 @@ router.delete('/conversation/:sessionId', validateTenantAccess, async (req: Requ
     const agent = await prisma.agent.findFirst({
       where: {
         id: agentId,
-        user: { id: req.tenantId }
+        tenantId: req.tenantId
       }
     });
 

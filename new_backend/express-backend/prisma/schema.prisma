@@ -10,10 +10,29 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model Tenant {
+  id          String   @id @default(cuid())
+  name        String
+  domain      String?  @unique
+  apiKey      String   @unique @default(cuid())
+  settings    Json?    // tenant-specific settings
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users    User[]
+  agents   Agent[]
+  documents Document[]
+
+  @@map("tenants")
+}
+
 model User {
   id        String   @id @default(cuid())
   email     String   @unique
   name      String?
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -30,6 +49,8 @@ model Agent {
   llmPreferences Json?    // e.g., { model: "grok", temperature: 0.7 }
   tokenLimit     Int?     @default(4096)
   contextWindowStrategy String? @default("condense")
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   userId         String
   user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt      DateTime @default(now())
@@ -48,6 +69,8 @@ model Document {
   title       String?
   content     String?
   metadata    Json?    // extracted metadata
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   agentId     String
   agent       Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
   createdAt   DateTime @default(now())

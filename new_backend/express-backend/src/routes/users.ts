@@ -28,10 +28,11 @@ router.get('/:id', validateTenantAccess, async (req: Request, res: Response) => 
     const prisma: PrismaClient = req.app.get('prisma');
     const { id } = req.params;
 
-    // Ensure user can only access their own data
+    // Ensure user can only access users within their tenant
     const user = await prisma.user.findFirst({
       where: {
-        id: id
+        id: id,
+        tenantId: req.tenantId
       },
       select: {
         id: true,

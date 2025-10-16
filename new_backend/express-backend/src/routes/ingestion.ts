@@ -53,7 +53,7 @@ router.post('/start', validateTenantAccess, async (req: Request, res: Response) 
     const agent = await prisma.agent.findFirst({
       where: {
         id: agentId,
-        user: { id: req.tenantId }
+        tenantId: req.tenantId
       }
     });
 
@@ -135,7 +135,7 @@ router.get('/jobs', validateTenantAccess, async (req: Request, res: Response) =>
     const agent = await prisma.agent.findFirst({
       where: {
         id: agentId,
-        user: { id: req.tenantId }
+        tenantId: req.tenantId
       }
     });
 
