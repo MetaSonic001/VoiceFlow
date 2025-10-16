@@ -1,9 +1,9 @@
-import express, { Request, Response, NextFunction } from 'express';
+import express, { Request, Response, NextFunction, Router } from 'express';
 import Joi from 'joi';
 import axios from 'axios';
 import { PrismaClient } from '@prisma/client';
 
-const router = express.Router();
+const router: Router = express.Router();
 
 // Extend Request interface
 declare global {

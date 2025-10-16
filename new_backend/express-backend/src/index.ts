@@ -8,6 +8,20 @@ import { Server as SocketIOServer, Socket } from 'socket.io';
 import { PrismaClient } from '@prisma/client';
 import Redis from 'ioredis';
 
+// Route imports
+const agentsRouter = require('./routes/agents');
+const documentsRouter = require('./routes/documents');
+const ragRouter = require('./routes/rag');
+const ingestionRouter = require('./routes/ingestion');
+const runnerRouter = require('./routes/runner');
+const usersRouter = require('./routes/users');
+
+// Middleware imports
+const { createTenantRateLimit } = require('./middleware/rateLimit');
+const { createClerkAuth } = require('./middleware/clerkAuth');
+import { swaggerUi, specs } from './utils/swagger';
+import { errorHandler, requestLogger, healthCheckErrorHandler } from './middleware/errorHandler';
+
 // Interfaces
 interface SocketData {
   tenantId: string;
@@ -28,10 +42,10 @@ interface TwilioResponse {
   audio: string;
 }
 
-// Extend Socket interface
+// Extend Socket interface for our custom data
 declare module 'socket.io' {
   interface Socket {
-    data: SocketData;
+    customData: SocketData;
   }
 }
 
@@ -49,7 +63,6 @@ const io: SocketIOServer = new SocketIOServer(server, {
 const prisma = new PrismaClient();
 
 // Initialize Clerk auth
-const { createClerkAuth } = require('./middleware/clerkAuth');
 const clerkAuth = createClerkAuth(prisma);
 
 // Middleware
@@ -64,25 +77,23 @@ app.set('prisma', prisma);
 // Initialize Redis
 const redis = new Redis({
   host: process.env.REDIS_HOST || 'localhost',
-  port: parseInt(process.env.REDIS_PORT || '6379')
+  port: parseInt(process.env.REDIS_PORT || '6379', 10)
 });
 app.set('redis', redis);
 
 // Rate limiting
-const { createTenantRateLimit } = require('./middleware/rateLimit');
 app.use(createTenantRateLimit(redis));
 
 // Routes
-app.use('/api/agents', clerkAuth.authenticate, require('./routes/agents'));
-app.use('/api/documents', clerkAuth.authenticate, require('./routes/documents'));
-app.use('/api/rag', clerkAuth.authenticate, require('./routes/rag'));
-app.use('/api/ingestion', clerkAuth.authenticate, require('./routes/ingestion'));
-app.use('/api/runner', clerkAuth.authenticate, require('./routes/runner'));
-app.use('/api/users', clerkAuth.authenticate, require('./routes/users'));
+app.use('/api/agents', clerkAuth.authenticate, agentsRouter);
+app.use('/api/documents', clerkAuth.authenticate, documentsRouter);
+app.use('/api/rag', clerkAuth.authenticate, ragRouter);
+app.use('/api/ingestion', clerkAuth.authenticate, ingestionRouter);
+app.use('/api/runner', clerkAuth.authenticate, runnerRouter);
+app.use('/api/users', clerkAuth.authenticate, usersRouter);
 
 // API Documentation
-const { swaggerUi, specs } = require('./utils/swagger');
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs));
+// app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs));
 
 // Health check
 app.get('/health', (req: Request, res: Response) => {
@@ -90,7 +101,6 @@ app.get('/health', (req: Request, res: Response) => {
 });
 
 // Error handling middleware (must be last)
-const { errorHandler, requestLogger, healthCheckErrorHandler } = require('./middleware/errorHandler');
 app.use(requestLogger);
 app.use(healthCheckErrorHandler);
 app.use(errorHandler);
@@ -101,7 +111,7 @@ io.on('connection', (socket: Socket) => {
 
   socket.on('start', async (data: SocketData) => {
     console.log('Twilio stream started:', data);
-    socket.data = {
+    socket.customData = {
       ...data,
       conversation: [],
       audioBuffer: Buffer.alloc(0)
@@ -115,16 +125,16 @@ io.on('connection', (socket: Socket) => {
 
       // Decode base64 audio
       const audioChunk = Buffer.from(data.media.payload, 'base64');
-      socket.data.audioBuffer = Buffer.concat([socket.data.audioBuffer, audioChunk]);
+      socket.customData.audioBuffer = Buffer.concat([socket.customData.audioBuffer, audioChunk]);
 
       // Process audio when we have enough data
-      if (socket.data.audioBuffer.length >= 32000) {
-        const transcript = await voiceService.transcribeAudio(socket.data.audioBuffer);
+      if (socket.customData.audioBuffer.length >= 32000) {
+        const transcript = await voiceService.transcribeAudio(socket.customData.audioBuffer);
 
         if (transcript && transcript.trim()) {
           console.log('Transcript:', transcript);
 
-          const { tenantId, agentId } = socket.data;
+          const { tenantId, agentId } = socket.customData;
           const agent = await prisma.agent.findFirst({
             where: {
               id: agentId,
@@ -133,17 +143,17 @@ io.on('connection', (socket: Socket) => {
           });
 
           if (agent) {
-            socket.data.conversation.push({ role: 'user', content: transcript });
+            socket.customData.conversation.push({ role: 'user', content: transcript });
 
             const response = await ragService.processQuery(
               tenantId,
               agentId,
               transcript,
               agent,
-              socket.data.conversation
+              socket.customData.conversation
             );
 
-            socket.data.conversation.push({ role: 'assistant', content: response });
+            socket.customData.conversation.push({ role: 'assistant', content: response });
 
             const audioResponse = await voiceService.generateSpeech(
               response,
@@ -158,7 +168,7 @@ io.on('connection', (socket: Socket) => {
           }
         }
 
-        socket.data.audioBuffer = Buffer.alloc(0);
+        socket.customData.audioBuffer = Buffer.alloc(0);
       }
     } catch (error) {
       console.error('Error processing media:', error);
@@ -167,7 +177,7 @@ io.on('connection', (socket: Socket) => {
 
   socket.on('stop', () => {
     console.log('Twilio stream stopped');
-    socket.data = null as any;
+    socket.customData = null as any;
   });
 
   socket.on('disconnect', () => {

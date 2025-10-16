@@ -1,8 +1,8 @@
-import express, { Request, Response, NextFunction } from 'express';
+import express, { Request, Response, NextFunction, Router } from 'express';
 import Joi from 'joi';
 import { PrismaClient } from '@prisma/client';
 
-const router = express.Router();
+const router: Router = express.Router();
 
 // Extend Request interface
 declare global {
@@ -29,7 +29,7 @@ const querySchema = Joi.object({
 });
 
 // Middleware to validate tenant access
-const validateTenantAccess = (req: Request, res: Response, next: NextFunction) => {
+const validateTenantAccess = async (req: Request, res: Response, next: NextFunction) => {
   const tenantId = req.headers['x-tenant-id'] || req.query.tenantId;
   if (!tenantId || typeof tenantId !== 'string') {
     return res.status(400).json({ error: 'Tenant ID required' });
@@ -37,15 +37,17 @@ const validateTenantAccess = (req: Request, res: Response, next: NextFunction) =
 
   // Verify tenant exists and is active
   const prisma = req.app.get('prisma') as PrismaClient;
-  prisma.tenant.findUnique({
+  const tenant = await prisma.tenant.findUnique({
     where: { id: tenantId, isActive: true }
-  }).then(tenant => {
-    if (!tenant) {
-      return res.status(403).json({ error: 'Invalid or inactive tenant' });
-    }
-    req.tenantId = tenantId;
-    next();
-});
+  });
+
+  if (!tenant) {
+    return res.status(403).json({ error: 'Invalid or inactive tenant' });
+  }
+
+  req.tenantId = tenantId;
+  next();
+};
 
 // Query agent with RAG
 router.post('/query', async (req: Request, res: Response) => {

@@ -7,7 +7,7 @@ import { apiClient } from '@/lib/api-client'
 
 export default function ClerkSync() {
   const { isSignedIn, user, getToken } = useUser() as any
-  const router = useRouter()
+  const router: Router= useRouter()
 
   useEffect(() => {
     if (!isSignedIn) return

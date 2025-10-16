@@ -10,7 +10,7 @@ import { useClerk } from '@clerk/nextjs'
 
 export default function HomePage() {
   // Clerk handles sign-in / sign-up UI. No local fallback modal is used.
-  const router = useRouter()
+  const router: Router= useRouter()
   const clerk = useClerk() as any
 
   const handleGetStarted = () => {

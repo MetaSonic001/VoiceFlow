@@ -38,6 +38,24 @@ class ApiClient {
     this.tenantId = tenantId
   }
 
+  setClerkToken(token: string) {
+    ;(globalThis as any).clerkToken = token
+    localStorage.setItem("clerk_token", token)
+  }
+
+  private async getClerkToken(): Promise<string | null> {
+    try {
+      // Import Clerk dynamically to avoid SSR issues
+      const { useAuth } = await import('@clerk/nextjs')
+      // This is a workaround since we can't use hooks in class methods
+      // We'll need to pass the token from components
+      return null
+    } catch (error) {
+      console.warn('Clerk not available:', error)
+      return null
+    }
+  }
+
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`
 
@@ -57,13 +75,19 @@ class ApiClient {
       }
     }
 
-    // Add auth token if available
-    const token = localStorage.getItem("auth_token")
-    if (token) {
-      config.headers = {
-        ...config.headers,
-        Authorization: `Bearer ${token}`,
+    // Add Clerk JWT token
+    try {
+      // For client-side, we'll need to get the token from Clerk
+      // This will be set by components using the apiClient
+      const token = (globalThis as any).clerkToken || localStorage.getItem("clerk_token")
+      if (token) {
+        config.headers = {
+          ...config.headers,
+          Authorization: `Bearer ${token}`,
+        }
       }
+    } catch (error) {
+      console.warn('Failed to get Clerk token:', error)
     }
 
     try {

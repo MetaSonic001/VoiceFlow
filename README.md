@@ -1,26 +1,33 @@
-# VoiceFlow Multi-Tenant RAG System
+# VoiceFlow Multi-Tenant RAG Backend
 
-A multi-tenant RAG (Retrieval-Augmented Generation) system with real-time voice capabilities using Twilio Media Streams.
+A comprehensive multi-tenant RAG (Retrieval-Augmented Generation) backend system with voice capabilities, built with TypeScript/Express.js, FastAPI, and Next.js.
 
 ## Architecture
 
 - **Frontend**: Next.js with Clerk authentication
-- **API Gateway**: NestJS (TypeScript)
+- **Backend API**: Express.js with TypeScript
+- **Ingestion Service**: FastAPI with Chroma vector database
 - **Database**: PostgreSQL with Prisma ORM
-- **Vector DB**: Chroma (one collection per tenant)
-- **Ingestion Service**: FastAPI (Python) for document processing
-- **Object Storage**: MinIO (S3-compatible)
 - **Cache/Queue**: Redis
-- **LLM**: Groq Cloud
-- **Voice**: Twilio Media Streams with Vosk/Coqui TTS
+- **File Storage**: MinIO S3-compatible storage
+- **Authentication**: Clerk JWT
+- **LLM**: Groq API
+- **Voice**: Vosk ASR + Mozilla/Coqui TTS
 
 ## Features
 
-- Multi-tenant architecture (users can create multiple agents)
-- Document ingestion from URLs and PDFs
-- Real-time voice conversations via Twilio
-- RAG with context-aware responses
-- Configurable embeddings and LLM settings per agent
+- ✅ Multi-tenant architecture with tenant isolation
+- ✅ Clerk authentication integration
+- ✅ MinIO S3 file storage with tenant isolation
+- ✅ PII protection and data sanitization
+- ✅ Rate limiting with Redis
+- ✅ Comprehensive error handling and logging
+- ✅ Swagger API documentation
+- ✅ Voice transcription (Whisper API)
+- ✅ Text-to-speech (Mozilla TTS)
+- ✅ Real-time WebSocket communication
+- ✅ Document ingestion and processing
+- ✅ RAG with Chroma vector search
 
 ## Setup
 
@@ -30,95 +37,245 @@ A multi-tenant RAG (Retrieval-Augmented Generation) system with real-time voice 
 
 ## Services
 
-- NestJS Backend: http://localhost:8000
+- Express Backend: http://localhost:8000
+- API Documentation: http://localhost:8000/api-docs
 - Ingestion Service: http://localhost:8001
-- Chroma: http://localhost:8000
-- MinIO: http://localhost:9001
+- MinIO Console: http://localhost:9001
 - PostgreSQL: localhost:5432
 - Redis: localhost:6379
+- Next.js Frontend: http://localhost:3000
 
 ## API Endpoints
 
+### Authentication
+All endpoints require Clerk JWT authentication.
+
 ### Agents
-- `POST /agents` - Create agent
-- `GET /agents?userId=...` - List user agents
-- `PUT /agents/:id` - Update agent
+- `GET /api/agents` - List agents
+- `POST /api/agents` - Create agent
+- `GET /api/agents/:id` - Get agent details
+- `PUT /api/agents/:id` - Update agent
+- `DELETE /api/agents/:id` - Delete agent
 
 ### Documents
-- `POST /documents` - Create document
-- `GET /documents?agentId=...` - List agent documents
+- `GET /api/documents` - List documents
+- `POST /api/documents/upload` - Upload document file
+- `GET /api/documents/:id` - Get document
+- `DELETE /api/documents/:id` - Delete document
 
-### RAG
-- `POST /rag/query` - Query agent with RAG
+### Voice/Chat
+- `POST /api/runner/chat` - Chat with agent
+- `GET /api/runner/agent/:id` - Get agent info
 
 ### Ingestion
-- `POST /ingest` - Ingest documents (FastAPI service)
+- `POST /api/ingestion` - Start document ingestion
 
-## Voice Integration
+## Prerequisites
 
-1. Set up Twilio account
-2. Configure webhook to point to your NestJS WebSocket endpoint
-3. Call the Twilio number to start voice conversation
+- Node.js 18+
+- Python 3.8+
+- PostgreSQL
+- Redis
+- MinIO (or compatible S3 service)
+- Clerk account
+- Groq API key
+- OpenAI API key (for Whisper)
 
-## Environment Variables
+## Quick Start
 
-See `.env.example` for all required variables.
-
-## Development
+### 1. Clone and Setup
 
 ```bash
-# Backend
-cd nestjs-backend
-npm install
-npm run start:dev
+git clone <repository-url>
+cd voiceflow-backend
+```
 
-# Ingestion
-cd ingestion-service
+### 2. Environment Configuration
+
+Copy the example environment file and configure:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` with your actual values:
+- Database connection string
+- Clerk keys
+- API keys (Groq, OpenAI)
+- MinIO/S3 credentials
+- Redis connection
+
+### 3. Database Setup
+
+```bash
+# Install dependencies
+npm install
+
+# Generate Prisma client
+npx prisma generate
+
+# Run database migrations
+npx prisma db push
+
+# Seed initial data
+npm run db:seed
+```
+
+### 4. Start Services
+
+#### Option A: Docker Compose (Recommended)
+
+```bash
+docker-compose up -d
+```
+
+#### Option B: Manual Setup
+
+Start each service individually:
+
+```bash
+# Start PostgreSQL
+# Start Redis
+# Start MinIO
+
+# Start Express backend
+npm run dev
+
+# Start FastAPI ingestion service
+cd ../document-ingestion
 pip install -r requirements.txt
 python main.py
 
-# Frontend (existing)
-cd voiceflow-ai-platform
+# Start Next.js frontend
+cd ../voiceflow-ai-platform
+npm install
 npm run dev
 ```
 
-## Testing
+### 5. Access the Application
 
-Run tests for NestJS:
-```bash
-cd nestjs-backend
-npm run test
+- **Frontend**: http://localhost:3000
+- **API Documentation**: http://localhost:8000/api-docs
+- **MinIO Console**: http://localhost:9001
+
+## Development
+
+### Project Structure
+
+```
+├── express-backend/          # Main API server
+│   ├── src/
+│   │   ├── middleware/       # Auth, rate limiting, error handling
+│   │   ├── routes/          # API route handlers
+│   │   ├── services/        # Business logic (MinIO, voice, RAG)
+│   │   ├── utils/           # Helpers (PII, swagger)
+│   │   └── index.ts         # Server entry point
+│   ├── prisma/              # Database schema and seeds
+│   └── docker-compose.yml
+├── document-ingestion/       # FastAPI ingestion service
+├── voiceflow-ai-platform/    # Next.js frontend
+└── docker-compose.yml        # Full system orchestration
 ```
 
-## Testing Ingestion Service
+### Key Components
 
-To test the scraping and Chroma DB storage:
+#### Multi-Tenant Architecture
+- Tenant isolation in all database queries
+- Separate file storage per tenant in MinIO
+- Rate limiting per tenant
+- Clerk user synchronization
 
-1. Start the services: `docker-compose up --build`
-2. Run the test script:
-   ```bash
-   cd ingestion-service
-   python test_ingestion.py
-   ```
+#### Voice Processing
+- ASR: OpenAI Whisper API integration
+- TTS: Mozilla TTS with espeak-ng fallback
+- Real-time audio processing via WebSocket
 
-This will:
-- Scrape common URLs (Wikipedia, BBC, GitHub)
-- Process and chunk the content
-- Generate embeddings
-- Store in Chroma collection `tenant_test-tenant-123`
-- Show progress and completion status
+#### Security
+- JWT authentication via Clerk
+- PII detection and redaction
+- Rate limiting and request validation
+- CORS and helmet security headers
 
-### Verify Storage
+### Testing
 
-After testing, check Chroma DB persistence:
-- Collection `tenant_test-tenant-123` should exist
-- Documents should be stored with metadata (agentId, source, etc.)
-- Data persists across container restarts
+```bash
+# Backend tests
+npm test
 
-### Test URLs Used
-- https://en.wikipedia.org/wiki/Artificial_intelligence
-- https://www.bbc.com/news
-- https://github.com/microsoft/vscode
+# Ingestion service tests
+cd ../document-ingestion
+pytest
+
+# Frontend tests
+cd ../voiceflow-ai-platform
+npm test
+```
+
+### Deployment
+
+#### Production Checklist
+- [ ] Set `NODE_ENV=production`
+- [ ] Configure production database
+- [ ] Set up Redis cluster
+- [ ] Configure MinIO/S3 bucket
+- [ ] Set up monitoring (Sentry, etc.)
+- [ ] Configure load balancer
+- [ ] Set up SSL certificates
+
+#### Docker Deployment
+
+```bash
+# Build all services
+docker-compose -f docker-compose.prod.yml build
+
+# Deploy
+docker-compose -f docker-compose.prod.yml up -d
+```
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Clerk Authentication Issues**
+   - Verify `CLERK_SECRET_KEY` in environment
+   - Check Clerk application configuration
+
+2. **Database Connection**
+   - Ensure PostgreSQL is running
+   - Verify `DATABASE_URL` format
+
+3. **MinIO Connection**
+   - Check MinIO credentials
+   - Verify bucket creation
+
+4. **Voice Services**
+   - Ensure OpenAI API key for Whisper
+   - Check espeak-ng installation for TTS fallback
+
+### Logs
+
+Check logs for each service:
+```bash
+# Express backend
+docker logs voiceflow-backend
+
+# FastAPI ingestion
+docker logs document-ingestion
+
+# Next.js frontend
+docker logs voiceflow-frontend
+```
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make changes with tests
+4. Submit a pull request
+
+## License
+
+MIT License - see LICENSE file for details.
 
 ## Deployment
 

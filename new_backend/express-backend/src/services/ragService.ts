@@ -37,7 +37,7 @@ class RagService {
     this.groqBaseUrl = 'https://api.groq.com/openai/v1';
     this.redis = new Redis({
       host: process.env.REDIS_HOST || 'localhost',
-      port: process.env.REDIS_PORT || 6379
+      port: parseInt(process.env.REDIS_PORT || '6379', 10)
     });
   }
 

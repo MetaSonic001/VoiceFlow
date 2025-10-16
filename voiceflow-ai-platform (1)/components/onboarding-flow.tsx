@@ -49,7 +49,7 @@ export function OnboardingFlow() {
       }
     })()
   }, [])
-  const router = useRouter()
+  const router: Router= useRouter()
 
   const progress = ((currentStep - 1) / (STEPS.length - 1)) * 100
 

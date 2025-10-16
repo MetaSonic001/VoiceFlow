@@ -45,6 +45,10 @@ class IngestResponse(BaseModel):
     job_id: str
     status: str
 
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy", "service": "ingestion-service", "timestamp": datetime.now().isoformat()}
+
 @app.post("/ingest", response_model=IngestResponse)
 async def ingest_documents(request: IngestRequest, background_tasks: BackgroundTasks):
     job_id = str(uuid.uuid4())

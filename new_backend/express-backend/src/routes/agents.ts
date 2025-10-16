@@ -1,8 +1,8 @@
-import express, { Request, Response, NextFunction } from 'express';
+import express, { Request, Response, NextFunction, Router } from 'express';
 import Joi from 'joi';
 import { PrismaClient } from '@prisma/client';
 
-const router = express.Router();
+const router: Router = express.Router();
 
 // Extend Request interface
 declare global {
@@ -55,10 +55,10 @@ const updateAgentSchema = Joi.object({
 router.get('/', async (req: Request, res: Response) => {
   try {
     const prisma: PrismaClient = req.app.get('prisma');
-    const { userId } = req.query;
+    const userId = req.userId; // Get from authenticated request
 
-    if (!userId || typeof userId !== 'string') {
-      return res.status(400).json({ error: 'User ID required' });
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
     }
 
     const agents = await prisma.agent.findMany({

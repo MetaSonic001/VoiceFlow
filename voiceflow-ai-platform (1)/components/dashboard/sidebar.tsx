@@ -11,7 +11,7 @@ import { useRouter } from "next/navigation"
 export function DashboardSidebar() {
   const [activeItem, setActiveItem] = useState("agents")
   const [isLoggingOut, setIsLoggingOut] = useState(false)
-  const router = useRouter()
+  const router: Router= useRouter()
 
   const menuItems = [
     { id: "agents", label: "AI Agents", icon: Bot, badge: "3", href: "/dashboard" },

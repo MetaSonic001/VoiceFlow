@@ -25,7 +25,7 @@ export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps
     useCase: "",
   })
   const [loading, setLoading] = useState(false)
-  const router = useRouter()
+  const router: Router= useRouter()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

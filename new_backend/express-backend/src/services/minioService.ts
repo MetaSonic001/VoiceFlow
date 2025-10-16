@@ -58,6 +58,30 @@ export class MinioService {
     }
   }
 
+  async uploadBuffer(
+    tenantId: string,
+    buffer: Buffer,
+    fileName: string,
+    contentType: string
+  ): Promise<string> {
+    try {
+      const objectName = `${tenantId}/${Date.now()}-${fileName}`;
+
+      await this.client.putObject(
+        this.bucketName,
+        objectName,
+        buffer,
+        buffer.length,
+        { 'Content-Type': contentType }
+      );
+
+      return objectName;
+    } catch (error) {
+      console.error('Error uploading buffer to MinIO:', error);
+      throw new Error('Failed to upload file');
+    }
+  }
+
   async downloadFile(tenantId: string, objectName: string): Promise<Readable> {
     try {
       return await this.client.getObject(this.bucketName, `${tenantId}/${objectName}`);
@@ -91,8 +115,19 @@ export class MinioService {
 
   async listTenantFiles(tenantId: string): Promise<string[]> {
     try {
-      const objects = await this.client.listObjects(this.bucketName, `${tenantId}/`, true);
-      return objects.map(obj => obj.name || '').filter(name => name.startsWith(`${tenantId}/`));
+      const objects: any[] = [];
+      const stream = this.client.listObjects(this.bucketName, `${tenantId}/`, true);
+      return new Promise((resolve, reject) => {
+        stream.on('data', (obj) => objects.push(obj));
+        stream.on('end', () => {
+          const fileNames = objects.map(obj => obj.name || '').filter(name => name.startsWith(`${tenantId}/`));
+          resolve(fileNames);
+        });
+        stream.on('error', (error) => {
+          console.error('Error listing tenant files:', error);
+          reject(new Error('Failed to list files'));
+        });
+      });
     } catch (error) {
       console.error('Error listing tenant files:', error);
       throw new Error('Failed to list files');
@@ -110,4 +145,16 @@ export class MinioService {
   }
 }
 
-export default MinioService;
+// Create singleton instance
+const minioConfig: MinIOConfig = {
+  endPoint: process.env.MINIO_ENDPOINT || 'localhost',
+  port: parseInt(process.env.MINIO_PORT || '9000'),
+  useSSL: process.env.MINIO_USE_SSL === 'true',
+  accessKey: process.env.MINIO_ACCESS_KEY || 'minioadmin',
+  secretKey: process.env.MINIO_SECRET_KEY || 'minioadmin',
+  region: process.env.MINIO_REGION
+};
+
+const minioService = new MinioService(minioConfig);
+
+export default minioService;

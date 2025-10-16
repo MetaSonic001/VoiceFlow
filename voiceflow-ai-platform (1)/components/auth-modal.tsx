@@ -25,7 +25,7 @@ export function AuthModal({ open, onOpenChange, mode, onModeChange }: AuthModalP
   const [companyName, setCompanyName] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
-  const router = useRouter()
+  const router: Router= useRouter()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

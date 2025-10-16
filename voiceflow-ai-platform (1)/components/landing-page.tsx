@@ -41,7 +41,7 @@ export function LandingPage() {
   const [authMode, setAuthMode] = useState<"login" | "signup">("signup")
   const [showHelpFlow, setShowHelpFlow] = useState(false)
   const [currentTestimonial, setCurrentTestimonial] = useState(0)
-  const router = useRouter()
+  const router: Router= useRouter()
 
   const testimonials = [
     {

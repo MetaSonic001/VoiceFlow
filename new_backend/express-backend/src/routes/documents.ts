@@ -1,9 +1,34 @@
-import express, { Request, Response, NextFunction } from 'express';
+import express, { Request, Response, NextFunction, Router } from 'express';
 import Joi from 'joi';
 import axios from 'axios';
+import multer from 'multer';
 import { PrismaClient } from '@prisma/client';
+import MinioService from '../services/minioService';
 
-const router = express.Router();
+const router: Router = express.Router();
+
+// Configure multer for file uploads
+const upload = multer({
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    // Allow common document types
+    const allowedTypes = [
+      'application/pdf',
+      'text/plain',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'text/csv',
+      'application/json'
+    ];
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type'));
+    }
+  }
+});
 
 // Extend Request interface
 declare global {
@@ -58,7 +83,8 @@ const validateTenantAccess = (req: Request, res: Response, next: NextFunction) =
     }
     req.tenantId = tenantId;
     next();
-});
+  });
+}
 
 // Get all documents for an agent
 router.get('/', async (req: Request, res: Response) => {
@@ -230,6 +256,80 @@ router.delete('/:id', async (req: Request, res: Response) => {
     res.status(204).send();
   } catch (error) {
     console.error('Error deleting document:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Upload document file
+router.post('/upload', upload.single('file'), async (req: Request, res: Response) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    const agentId = req.body.agentId;
+    if (!agentId) {
+      return res.status(400).json({ error: 'Agent ID required' });
+    }
+
+    const prisma: PrismaClient = req.app.get('prisma');
+
+    // Verify agent belongs to tenant
+    const agent = await prisma.agent.findFirst({
+      where: {
+        id: agentId,
+        tenantId: req.tenantId
+      }
+    });
+
+    if (!agent) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // Upload file to MinIO
+    const fileName = `${Date.now()}_${req.file.originalname}`;
+    const s3Path = await MinioService.uploadBuffer(
+      req.tenantId,
+      req.file.buffer,
+      fileName,
+      req.file.mimetype
+    );
+
+    // Create document record
+    const document = await prisma.document.create({
+      data: {
+        s3Path: s3Path,
+        agentId: agentId,
+        tenantId: req.tenantId,
+        status: 'pending',
+        title: req.file.originalname
+      }
+    });
+
+    // Trigger ingestion service
+    const ingestionServiceUrl = process.env.FASTAPI_URL || 'http://localhost:8001';
+    try {
+      await axios.post(`${ingestionServiceUrl}/ingest`, {
+        tenantId: req.tenantId,
+        agentId: agentId,
+        s3_urls: [s3Path]
+      });
+    } catch (ingestionError) {
+      console.warn('Failed to trigger ingestion service:', ingestionError);
+      // Don't fail the upload if ingestion fails
+    }
+
+    res.status(201).json({
+      document: {
+        id: document.id,
+        s3Path: document.s3Path,
+        title: document.title,
+        status: document.status,
+        createdAt: document.createdAt
+      }
+    });
+  } catch (error) {
+    console.error('Error uploading document:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

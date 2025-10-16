@@ -4,14 +4,21 @@ services:
   postgres:
     image: postgres:15
     environment:
-      POSTGRES_DB: voiceflow_prod
-      POSTGRES_USER: vf_admin
-      POSTGRES_PASSWORD: vf_secure_2025!
+      - POSTGRES_DB=voiceflow_prod
+      - POSTGRES_USER=vf_admin
+      - POSTGRES_PASSWORD=vf_secure_2025!
     ports:
       - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./init-postgres.sql:/docker-entrypoint-initdb.d/init-postgres.sql
+    networks:
+      - voiceflow-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vf_admin -d voiceflow_prod"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   minio:
     image: minio/minio
@@ -24,6 +31,13 @@ services:
     volumes:
       - minio_data:/data
     command: server /data --console-address ":9001"
+    networks:
+      - voiceflow-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
 
   chroma:
     image: chromadb/chroma:latest
@@ -31,6 +45,11 @@ services:
       - "8002:8000"
     volumes:
       - chroma_data:/chroma/chroma
+    networks:
+      - voiceflow-network
+    environment:
+      - CHROMA_SERVER_HOST=0.0.0.0
+      - CHROMA_SERVER_HTTP_PORT=8000
 
   redis:
     image: redis:7-alpine
@@ -39,9 +58,74 @@ services:
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes
+    networks:
+      - voiceflow-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  express-backend:
+    build:
+      context: ./express-backend
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      chroma:
+        condition: service_started
+    networks:
+      - voiceflow-network
+    volumes:
+      - ./express-backend:/app
+      - /app/node_modules
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  ingestion-service:
+    build:
+      context: ./ingestion-service
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "8001:8001"
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      chroma:
+        condition: service_started
+    networks:
+      - voiceflow-network
+    volumes:
+      - ./ingestion-service:/app
+      - chroma_data:/app/chroma_db
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/docs"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 volumes:
   postgres_data:
   minio_data:
   chroma_data:
   redis_data:
+
+networks:
+  voiceflow-network:
+    driver: bridge

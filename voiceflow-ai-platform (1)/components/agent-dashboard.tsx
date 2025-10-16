@@ -16,8 +16,9 @@ import { LiveActivityFeed } from "@/components/dashboard/live-activity-feed"
 import { RealtimeMetrics } from "@/components/dashboard/realtime-metrics"
 import { LiveConversations } from "@/components/dashboard/live-conversations"
 import { QuickActions } from "@/components/dashboard/quick-actions"
-import { Search, Plus, Filter, Activity, Phone, MessageCircle, Users, TrendingUp } from "lucide-react"
+import { Search, Plus, Filter, Activity, Phone, MessageCircle, Users, TrendingUp, Loader2 } from "lucide-react"
 import { apiClient } from '@/lib/api-client'
+import { useClerk } from '@clerk/nextjs'
 
 const mockAgents = [
   {
@@ -78,12 +79,28 @@ export function AgentDashboard() {
   const [searchQuery, setSearchQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
   const [showCreateDialog, setShowCreateDialog] = useState(false)
-  const [agents, setAgents] = useState(mockAgents)
-  const [loading, setLoading] = useState(false)
+  const [agents, setAgents] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [page, setPage] = useState(1)
   const [limit, setLimit] = useState(12)
   const [total, setTotal] = useState<number | null>(null)
+  const clerk = useClerk()
+
+  // Set Clerk token for API calls
+  useEffect(() => {
+    const setToken = async () => {
+      try {
+        const token = await clerk.getToken()
+        if (token) {
+          apiClient.setClerkToken(token)
+        }
+      } catch (error) {
+        console.warn('Failed to get Clerk token:', error)
+      }
+    }
+    setToken()
+  }, [clerk])
 
   // Mock realtime metrics since we removed the backend dependency
   const realtimeMetrics = {
@@ -96,36 +113,36 @@ export function AgentDashboard() {
   }
   const isConnected = true
 
-  useEffect(() => {
-    loadAgents()
-    checkOnboardingStatus()
-  }, [])
-
-  const loadAgents = async () => {
+  const fetchAgents = async () => {
     try {
       setLoading(true)
       setError(null)
-      const res = await apiClient.getAgents({ page, limit, search: searchQuery, status: statusFilter === 'all' ? '' : statusFilter })
-      if (res && Array.isArray((res as any).agents)) {
-        setAgents((res as any).agents)
-        setTotal((res as any).total ?? null)
-      } else {
-        // fallback to demo if unexpected response
-        setAgents(mockAgents)
-        setTotal(null)
-      }
+      const response = await apiClient.getAgents({
+        page,
+        limit,
+        search: searchQuery || undefined,
+        status: statusFilter !== 'all' ? statusFilter : undefined
+      })
+      setAgents(response.agents)
+      setTotal(response.total)
     } catch (err) {
-      console.error("[v0] Failed to load agents:", err)
-      setError("Failed to load agents. Using demo data.")
-      // Keep using mock data on error
+      console.error('Failed to fetch agents:', err)
+      setError(apiClient.safeParseError(err))
+      // Fallback to mock data if API fails
       setAgents(mockAgents)
     } finally {
       setLoading(false)
     }
   }
 
-  // reload when pagination or filters change
-  useEffect(() => { loadAgents() }, [page, limit, searchQuery, statusFilter])
+  useEffect(() => {
+    fetchAgents()
+    checkOnboardingStatus()
+  }, [page, searchQuery, statusFilter])
+
+  const loadAgents = async () => {
+    await fetchAgents()
+  }
 
   const [showResumeBanner, setShowResumeBanner] = useState(false)
   const [resumeAgentName, setResumeAgentName] = useState<string | null>(null)
