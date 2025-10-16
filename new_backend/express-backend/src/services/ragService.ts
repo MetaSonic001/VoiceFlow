@@ -1,7 +1,36 @@
-const axios = require('axios');
-const Redis = require('ioredis');
+import axios, { AxiosResponse } from 'axios';
+import Redis from 'ioredis';
+
+interface Agent {
+  systemPrompt?: string;
+  tokenLimit?: number;
+}
+
+interface ConversationMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+interface ChromaQueryResponse {
+  results: Array<{
+    documents: string[];
+  }>;
+}
+
+interface GroqResponse {
+  choices: Array<{
+    message: {
+      content: string;
+    };
+  }>;
+}
 
 class RagService {
+  private chromaBaseUrl: string;
+  private groqApiKey: string;
+  private groqBaseUrl: string;
+  private redis: Redis;
+
   constructor() {
     this.chromaBaseUrl = process.env.CHROMA_URL || 'http://localhost:8002';
     this.groqApiKey = process.env.GROQ_API_KEY || '';
@@ -12,10 +41,10 @@ class RagService {
     });
   }
 
-  async queryDocuments(tenantId, agentId, query, topK = 5) {
+  async queryDocuments(tenantId: string, agentId: string, query: string, topK: number = 5): Promise<string[]> {
     try {
       const collectionName = `tenant_${tenantId}`;
-      const response = await axios.post(`${this.chromaBaseUrl}/api/v1/collections/${collectionName}/query`, {
+      const response: AxiosResponse<ChromaQueryResponse> = await axios.post(`${this.chromaBaseUrl}/api/v1/collections/${collectionName}/query`, {
         query_texts: [query],
         n_results: topK,
         where: { agentId },
@@ -28,7 +57,7 @@ class RagService {
     }
   }
 
-  async generateResponse(systemPrompt, context, userQuery, tokenLimit = 4096) {
+  async generateResponse(systemPrompt: string, context: string[], userQuery: string, tokenLimit: number = 4096): Promise<string> {
     try {
       // Estimate token count and condense if needed
       const estimatedTokens = this.estimateTokens(systemPrompt + context.join(' ') + userQuery);
@@ -44,7 +73,7 @@ class RagService {
         { role: 'user', content: `Context:\n${contextText}\n\n${userQuery}` },
       ];
 
-      const response = await axios.post(
+      const response: AxiosResponse<GroqResponse> = await axios.post(
         `${this.groqBaseUrl}/chat/completions`,
         {
           model: 'grok-beta',
@@ -68,11 +97,11 @@ class RagService {
     }
   }
 
-  async processQuery(tenantId, agentId, query, agent, sessionId = 'default') {
+  async processQuery(tenantId: string, agentId: string, query: string, agent: Agent, sessionId: string = 'default'): Promise<string> {
     try {
       // Get conversation history from Redis
       const conversationKey = `conversation:${tenantId}:${agentId}:${sessionId}`;
-      let conversation = [];
+      let conversation: ConversationMessage[] = [];
 
       try {
         const conversationData = await this.redis.get(conversationKey);
@@ -119,12 +148,12 @@ class RagService {
     }
   }
 
-  estimateTokens(text) {
+  private estimateTokens(text: string): number {
     // Rough estimation: 1 token ≈ 4 characters for English text
     return Math.ceil(text.length / 4);
   }
 
-  async condenseContext(context, query, maxTokens) {
+  private async condenseContext(context: string[], query: string, maxTokens: number): Promise<string[]> {
     try {
       // Simple condensation: keep most relevant chunks
       const queryWords = query.toLowerCase().split(/\s+/);
@@ -139,7 +168,7 @@ class RagService {
       // Sort by relevance and keep top chunks within token limit
       scoredContexts.sort((a, b) => b.score - a.score);
 
-      let condensed = [];
+      let condensed: string[] = [];
       let totalTokens = 0;
 
       for (const item of scoredContexts) {
@@ -159,11 +188,11 @@ class RagService {
     }
   }
 
-  async cleanup() {
+  async cleanup(): Promise<void> {
     if (this.redis) {
       await this.redis.quit();
     }
   }
 }
 
-module.exports = new RagService();
+export default new RagService();

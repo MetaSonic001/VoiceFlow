@@ -1,7 +1,25 @@
-const express = require('express');
+import express, { Request, Response, NextFunction } from 'express';
+import Joi from 'joi';
+import axios from 'axios';
+import { PrismaClient } from '@prisma/client';
+
 const router = express.Router();
-const Joi = require('joi');
-const axios = require('axios');
+
+// Extend Request interface
+declare global {
+  namespace Express {
+    interface Request {
+      tenantId: string;
+    }
+  }
+}
+
+// Interfaces
+interface StartIngestionBody {
+  agentId: string;
+  urls?: string[];
+  s3Urls?: string[];
+}
 
 // Validation schemas
 const startIngestionSchema = Joi.object({
@@ -11,9 +29,9 @@ const startIngestionSchema = Joi.object({
 });
 
 // Middleware to validate tenant access
-const validateTenantAccess = (req, res, next) => {
+const validateTenantAccess = (req: Request, res: Response, next: NextFunction) => {
   const tenantId = req.headers['x-tenant-id'] || req.query.tenantId;
-  if (!tenantId) {
+  if (!tenantId || typeof tenantId !== 'string') {
     return res.status(400).json({ error: 'Tenant ID required' });
   }
   req.tenantId = tenantId;
@@ -21,15 +39,15 @@ const validateTenantAccess = (req, res, next) => {
 };
 
 // Start document ingestion
-router.post('/start', validateTenantAccess, async (req, res) => {
+router.post('/start', validateTenantAccess, async (req: Request, res: Response) => {
   try {
     const { error, value } = startIngestionSchema.validate(req.body);
     if (error) {
       return res.status(400).json({ error: error.details[0].message });
     }
 
-    const prisma = req.app.get('prisma');
-    const { agentId, urls, s3Urls } = value;
+    const prisma: PrismaClient = req.app.get('prisma');
+    const { agentId, urls, s3Urls } = value as StartIngestionBody;
 
     // Verify agent belongs to tenant
     const agent = await prisma.agent.findFirst({
@@ -45,7 +63,7 @@ router.post('/start', validateTenantAccess, async (req, res) => {
 
     // Create documents in database
     const documents = [];
-    for (const url of urls) {
+    for (const url of urls || []) {
       const doc = await prisma.document.create({
         data: {
           url: url,
@@ -56,7 +74,7 @@ router.post('/start', validateTenantAccess, async (req, res) => {
       documents.push(doc);
     }
 
-    for (const s3Url of s3Urls) {
+    for (const s3Url of s3Urls || []) {
       const doc = await prisma.document.create({
         data: {
           s3Path: s3Url,
@@ -88,7 +106,7 @@ router.post('/start', validateTenantAccess, async (req, res) => {
 });
 
 // Check ingestion status
-router.get('/status/:jobId', validateTenantAccess, async (req, res) => {
+router.get('/status/:jobId', validateTenantAccess, async (req: Request, res: Response) => {
   try {
     const { jobId } = req.params;
 
@@ -103,15 +121,15 @@ router.get('/status/:jobId', validateTenantAccess, async (req, res) => {
 });
 
 // Get ingestion jobs for agent
-router.get('/jobs', validateTenantAccess, async (req, res) => {
+router.get('/jobs', validateTenantAccess, async (req: Request, res: Response) => {
   try {
     const { agentId } = req.query;
 
-    if (!agentId) {
+    if (!agentId || typeof agentId !== 'string') {
       return res.status(400).json({ error: 'Agent ID required' });
     }
 
-    const prisma = req.app.get('prisma');
+    const prisma: PrismaClient = req.app.get('prisma');
 
     // Verify agent belongs to tenant
     const agent = await prisma.agent.findFirst({
@@ -149,4 +167,4 @@ router.get('/jobs', validateTenantAccess, async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;

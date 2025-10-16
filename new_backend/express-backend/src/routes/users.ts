@@ -1,10 +1,21 @@
-const express = require('express');
+import express, { Request, Response, NextFunction } from 'express';
+import { PrismaClient } from '@prisma/client';
+
 const router = express.Router();
 
+// Extend Request interface
+declare global {
+  namespace Express {
+    interface Request {
+      tenantId: string;
+    }
+  }
+}
+
 // Middleware to validate tenant access
-const validateTenantAccess = (req, res, next) => {
+const validateTenantAccess = (req: Request, res: Response, next: NextFunction) => {
   const tenantId = req.headers['x-tenant-id'] || req.query.tenantId;
-  if (!tenantId) {
+  if (!tenantId || typeof tenantId !== 'string') {
     return res.status(400).json({ error: 'Tenant ID required' });
   }
   req.tenantId = tenantId;
@@ -12,16 +23,15 @@ const validateTenantAccess = (req, res, next) => {
 };
 
 // Get user by ID
-router.get('/:id', validateTenantAccess, async (req, res) => {
+router.get('/:id', validateTenantAccess, async (req: Request, res: Response) => {
   try {
-    const prisma = req.app.get('prisma');
+    const prisma: PrismaClient = req.app.get('prisma');
     const { id } = req.params;
 
-    // Ensure user can only access their own data or tenant admin can access tenant users
+    // Ensure user can only access their own data
     const user = await prisma.user.findFirst({
       where: {
-        id: id,
-        id: req.tenantId // For now, users can only access their own data
+        id: id
       },
       select: {
         id: true,
@@ -43,4 +53,4 @@ router.get('/:id', validateTenantAccess, async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;

@@ -1,7 +1,31 @@
-const express = require('express');
+import express, { Request, Response, NextFunction } from 'express';
+import Joi from 'joi';
+import axios from 'axios';
+import { PrismaClient } from '@prisma/client';
+
 const router = express.Router();
-const Joi = require('joi');
-const axios = require('axios');
+
+// Extend Request interface
+declare global {
+  namespace Express {
+    interface Request {
+      tenantId: string;
+    }
+  }
+}
+
+// Interfaces
+interface CreateDocumentBody {
+  url?: string;
+  agentId: string;
+}
+
+interface UpdateDocumentBody {
+  status?: 'pending' | 'processing' | 'completed' | 'failed';
+  title?: string;
+  content?: string;
+  metadata?: any;
+}
 
 // Validation schemas
 const createDocumentSchema = Joi.object({
@@ -17,9 +41,9 @@ const updateDocumentSchema = Joi.object({
 });
 
 // Middleware to validate tenant access
-const validateTenantAccess = (req, res, next) => {
+const validateTenantAccess = (req: Request, res: Response, next: NextFunction) => {
   const tenantId = req.headers['x-tenant-id'] || req.query.tenantId;
-  if (!tenantId) {
+  if (!tenantId || typeof tenantId !== 'string') {
     return res.status(400).json({ error: 'Tenant ID required' });
   }
   req.tenantId = tenantId;
@@ -27,12 +51,12 @@ const validateTenantAccess = (req, res, next) => {
 };
 
 // Get all documents for an agent
-router.get('/', validateTenantAccess, async (req, res) => {
+router.get('/', validateTenantAccess, async (req: Request, res: Response) => {
   try {
-    const prisma = req.app.get('prisma');
+    const prisma: PrismaClient = req.app.get('prisma');
     const { agentId } = req.query;
 
-    if (!agentId) {
+    if (!agentId || typeof agentId !== 'string') {
       return res.status(400).json({ error: 'Agent ID required' });
     }
 
@@ -61,9 +85,9 @@ router.get('/', validateTenantAccess, async (req, res) => {
 });
 
 // Get document by ID
-router.get('/:id', validateTenantAccess, async (req, res) => {
+router.get('/:id', validateTenantAccess, async (req: Request, res: Response) => {
   try {
-    const prisma = req.app.get('prisma');
+    const prisma: PrismaClient = req.app.get('prisma');
     const { id } = req.params;
 
     const document = await prisma.document.findFirst({
@@ -87,15 +111,15 @@ router.get('/:id', validateTenantAccess, async (req, res) => {
 });
 
 // Create new document (URL-based)
-router.post('/', validateTenantAccess, async (req, res) => {
+router.post('/', validateTenantAccess, async (req: Request, res: Response) => {
   try {
     const { error, value } = createDocumentSchema.validate(req.body);
     if (error) {
       return res.status(400).json({ error: error.details[0].message });
     }
 
-    const prisma = req.app.get('prisma');
-    const { agentId, url } = value;
+    const prisma: PrismaClient = req.app.get('prisma');
+    const { agentId, url } = value as CreateDocumentBody;
 
     // Verify agent belongs to tenant
     const agent = await prisma.agent.findFirst({
@@ -138,14 +162,14 @@ router.post('/', validateTenantAccess, async (req, res) => {
 });
 
 // Update document
-router.put('/:id', validateTenantAccess, async (req, res) => {
+router.put('/:id', validateTenantAccess, async (req: Request, res: Response) => {
   try {
     const { error, value } = updateDocumentSchema.validate(req.body);
     if (error) {
       return res.status(400).json({ error: error.details[0].message });
     }
 
-    const prisma = req.app.get('prisma');
+    const prisma: PrismaClient = req.app.get('prisma');
     const { id } = req.params;
 
     // Verify document belongs to tenant
@@ -164,7 +188,7 @@ router.put('/:id', validateTenantAccess, async (req, res) => {
 
     const document = await prisma.document.update({
       where: { id: id },
-      data: value
+      data: value as UpdateDocumentBody
     });
 
     res.json(document);
@@ -175,9 +199,9 @@ router.put('/:id', validateTenantAccess, async (req, res) => {
 });
 
 // Delete document
-router.delete('/:id', validateTenantAccess, async (req, res) => {
+router.delete('/:id', validateTenantAccess, async (req: Request, res: Response) => {
   try {
-    const prisma = req.app.get('prisma');
+    const prisma: PrismaClient = req.app.get('prisma');
     const { id } = req.params;
 
     // Verify document belongs to tenant
@@ -205,4 +229,4 @@ router.delete('/:id', validateTenantAccess, async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;

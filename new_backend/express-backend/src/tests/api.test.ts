@@ -1,17 +1,19 @@
-const request = require('supertest');
-const { PrismaClient } = require('@prisma/client');
-const Redis = require('ioredis');
+import request from 'supertest';
+import { PrismaClient } from '@prisma/client';
+import Redis from 'ioredis';
+import { Application } from 'express';
+import { Server } from 'http';
 
 const prisma = new PrismaClient();
 const redis = new Redis();
 
 describe('Express Backend API Tests', () => {
-  let app;
-  let server;
+  let app: Application;
+  let server: Server | undefined;
 
   beforeAll(async () => {
     // Import the app
-    app = require('./src/index');
+    app = require('../index.ts');
 
     // Wait for services to be ready
     await new Promise(resolve => setTimeout(resolve, 1000));
@@ -35,7 +37,7 @@ describe('Express Backend API Tests', () => {
 
   describe('Agent Management', () => {
     const tenantId = 'test-tenant-123';
-    let agentId;
+    let agentId: string | undefined;
 
     test('POST /api/agents should create agent', async () => {
       const response = await request(app)
@@ -63,6 +65,10 @@ describe('Express Backend API Tests', () => {
     });
 
     test('GET /api/agents/:id should return agent', async () => {
+      if (!agentId) {
+        throw new Error('Agent ID not set from previous test');
+      }
+
       const response = await request(app)
         .get(`/api/agents/${agentId}`)
         .set('x-tenant-id', tenantId);
@@ -72,6 +78,10 @@ describe('Express Backend API Tests', () => {
     });
 
     test('PUT /api/agents/:id should update agent', async () => {
+      if (!agentId) {
+        throw new Error('Agent ID not set from previous test');
+      }
+
       const response = await request(app)
         .put(`/api/agents/${agentId}`)
         .set('x-tenant-id', tenantId)

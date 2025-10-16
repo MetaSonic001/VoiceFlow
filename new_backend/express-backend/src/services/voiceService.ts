@@ -1,12 +1,24 @@
-const vosk = require('vosk');
-const wav = require('node-wav');
-const fs = require('fs');
-const path = require('path');
-const { exec } = require('child_process');
-const util = require('util');
-const execAsync = util.promisify(exec);
+import vosk from 'vosk';
+import * as wav from 'node-wav';
+import * as fs from 'fs';
+import * as path from 'path';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
+
+interface AudioBuffer {
+  length: number;
+  readInt16LE(offset: number): number;
+  writeInt16LE(value: number, offset: number): void;
+}
 
 class VoiceService {
+  private asrEngine: string;
+  private ttsEngine: string;
+  private voskModel?: vosk.Model;
+  private voskRecognizer?: vosk.Recognizer;
+
   constructor() {
     this.asrEngine = process.env.ASR_ENGINE || 'vosk'; // vosk or whisper
     this.ttsEngine = process.env.TTS_ENGINE || 'coqui'; // coqui or mozilla
@@ -23,7 +35,7 @@ class VoiceService {
     }
   }
 
-  async transcribeAudio(audioBuffer) {
+  async transcribeAudio(audioBuffer: Buffer): Promise<string> {
     try {
       if (this.asrEngine === 'vosk' && this.voskRecognizer) {
         // Convert audio buffer to the format Vosk expects (16kHz, 16-bit PCM)
@@ -46,7 +58,7 @@ class VoiceService {
     }
   }
 
-  async generateSpeech(text, voiceType = 'female') {
+  async generateSpeech(text: string, voiceType: string = 'female'): Promise<Buffer> {
     try {
       if (this.ttsEngine === 'coqui') {
         return await this.generateCoquiSpeech(text, voiceType);
@@ -62,7 +74,7 @@ class VoiceService {
     }
   }
 
-  convertAudioForVosk(audioBuffer) {
+  private convertAudioForVosk(audioBuffer: Buffer): Int16Array {
     try {
       // Assuming input is 16-bit PCM at 16kHz
       // Convert to the format Vosk expects
@@ -77,7 +89,7 @@ class VoiceService {
     }
   }
 
-  async generateCoquiSpeech(text, voiceType) {
+  private async generateCoquiSpeech(text: string, voiceType: string): Promise<Buffer> {
     try {
       // This is a placeholder implementation
       // In a real implementation, you would use the Coqui TTS library
@@ -102,7 +114,7 @@ class VoiceService {
     }
   }
 
-  async generateMozillaSpeech(text, voiceType) {
+  private async generateMozillaSpeech(text: string, voiceType: string): Promise<Buffer> {
     try {
       // Placeholder for Mozilla TTS implementation
       console.log('Mozilla TTS not yet fully implemented');
@@ -115,7 +127,7 @@ class VoiceService {
     }
   }
 
-  async cleanup() {
+  async cleanup(): Promise<void> {
     if (this.voskRecognizer) {
       this.voskRecognizer.free();
     }
@@ -125,4 +137,4 @@ class VoiceService {
   }
 }
 
-module.exports = new VoiceService();
+export default new VoiceService();

@@ -1,6 +1,24 @@
-const express = require('express');
+import express, { Request, Response, NextFunction } from 'express';
+import Joi from 'joi';
+import { PrismaClient } from '@prisma/client';
+
 const router = express.Router();
-const Joi = require('joi');
+
+// Extend Request interface
+declare global {
+  namespace Express {
+    interface Request {
+      tenantId: string;
+    }
+  }
+}
+
+// Interfaces
+interface QueryBody {
+  query: string;
+  agentId: string;
+  sessionId?: string;
+}
 
 // Validation schemas
 const querySchema = Joi.object({
@@ -10,9 +28,9 @@ const querySchema = Joi.object({
 });
 
 // Middleware to validate tenant access
-const validateTenantAccess = (req, res, next) => {
+const validateTenantAccess = (req: Request, res: Response, next: NextFunction) => {
   const tenantId = req.headers['x-tenant-id'] || req.query.tenantId;
-  if (!tenantId) {
+  if (!tenantId || typeof tenantId !== 'string') {
     return res.status(400).json({ error: 'Tenant ID required' });
   }
   req.tenantId = tenantId;
@@ -20,15 +38,15 @@ const validateTenantAccess = (req, res, next) => {
 };
 
 // Query agent with RAG
-router.post('/query', validateTenantAccess, async (req, res) => {
+router.post('/query', validateTenantAccess, async (req: Request, res: Response) => {
   try {
     const { error, value } = querySchema.validate(req.body);
     if (error) {
       return res.status(400).json({ error: error.details[0].message });
     }
 
-    const prisma = req.app.get('prisma');
-    const { query, agentId, sessionId } = value;
+    const prisma: PrismaClient = req.app.get('prisma');
+    const { query, agentId, sessionId } = value as QueryBody;
 
     // Verify agent belongs to tenant
     const agent = await prisma.agent.findFirst({
@@ -63,16 +81,16 @@ router.post('/query', validateTenantAccess, async (req, res) => {
 });
 
 // Get conversation history
-router.get('/conversation/:sessionId', validateTenantAccess, async (req, res) => {
+router.get('/conversation/:sessionId', validateTenantAccess, async (req: Request, res: Response) => {
   try {
     const { sessionId } = req.params;
     const { agentId } = req.query;
 
-    if (!agentId) {
+    if (!agentId || typeof agentId !== 'string') {
       return res.status(400).json({ error: 'Agent ID required' });
     }
 
-    const prisma = req.app.get('prisma');
+    const prisma: PrismaClient = req.app.get('prisma');
 
     // Verify agent belongs to tenant
     const agent = await prisma.agent.findFirst({
@@ -101,16 +119,16 @@ router.get('/conversation/:sessionId', validateTenantAccess, async (req, res) =>
 });
 
 // Clear conversation history
-router.delete('/conversation/:sessionId', validateTenantAccess, async (req, res) => {
+router.delete('/conversation/:sessionId', validateTenantAccess, async (req: Request, res: Response) => {
   try {
     const { sessionId } = req.params;
     const { agentId } = req.query;
 
-    if (!agentId) {
+    if (!agentId || typeof agentId !== 'string') {
       return res.status(400).json({ error: 'Agent ID required' });
     }
 
-    const prisma = req.app.get('prisma');
+    const prisma: PrismaClient = req.app.get('prisma');
 
     // Verify agent belongs to tenant
     const agent = await prisma.agent.findFirst({
@@ -135,4 +153,4 @@ router.delete('/conversation/:sessionId', validateTenantAccess, async (req, res)
   }
 });
 
-module.exports = router;
+export default router;

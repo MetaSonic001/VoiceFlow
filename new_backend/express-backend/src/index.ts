@@ -1,15 +1,44 @@
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
-const { createServer } = require('http');
-const { Server } = require('socket.io');
-const { PrismaClient } = require('@prisma/client');
+import 'dotenv/config';
+import express, { Request, Response, Application } from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+import { createServer, Server as HTTPServer } from 'http';
+import { Server as SocketIOServer, Socket } from 'socket.io';
+import { PrismaClient } from '@prisma/client';
+import Redis from 'ioredis';
 
-const app = express();
-const server = createServer(app);
-const io = new Server(server, {
+// Interfaces
+interface SocketData {
+  tenantId: string;
+  agentId: string;
+  streamSid: string;
+  conversation: Array<{ role: string; content: string }>;
+  audioBuffer: Buffer;
+}
+
+interface MediaData {
+  media: {
+    payload: string;
+  };
+}
+
+interface TwilioResponse {
+  text: string;
+  audio: string;
+}
+
+// Extend Socket interface
+declare module 'socket.io' {
+  interface Socket {
+    data: SocketData;
+  }
+}
+
+// Initialize Express app
+const app: Application = express();
+const server: HTTPServer = createServer(app);
+const io: SocketIOServer = new SocketIOServer(server, {
   cors: {
     origin: process.env.FRONTEND_URL || "http://localhost:3000",
     methods: ["GET", "POST"]
@@ -36,10 +65,9 @@ app.use(limiter);
 app.set('prisma', prisma);
 
 // Initialize Redis
-const Redis = require('ioredis');
 const redis = new Redis({
   host: process.env.REDIS_HOST || 'localhost',
-  port: process.env.REDIS_PORT || 6379
+  port: parseInt(process.env.REDIS_PORT || '6379')
 });
 app.set('redis', redis);
 
@@ -52,15 +80,15 @@ app.use('/api/runner', require('./routes/runner'));
 app.use('/api/users', require('./routes/users'));
 
 // Health check
-app.get('/health', (req, res) => {
+app.get('/health', (req: Request, res: Response) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 // Socket.IO for Twilio Media Streams
-io.on('connection', (socket) => {
+io.on('connection', (socket: Socket) => {
   console.log('Client connected:', socket.id);
 
-  socket.on('start', async (data) => {
+  socket.on('start', async (data: SocketData) => {
     console.log('Twilio stream started:', data);
     socket.data = {
       ...data,
@@ -69,7 +97,7 @@ io.on('connection', (socket) => {
     };
   });
 
-  socket.on('media', async (data) => {
+  socket.on('media', async (data: MediaData) => {
     try {
       const voiceService = require('./services/voiceService');
       const ragService = require('./services/ragService');
@@ -115,7 +143,7 @@ io.on('connection', (socket) => {
             socket.emit('response', {
               text: response,
               audio: audioBase64
-            });
+            } as TwilioResponse);
           }
         }
 
@@ -128,7 +156,7 @@ io.on('connection', (socket) => {
 
   socket.on('stop', () => {
     console.log('Twilio stream stopped');
-    socket.data = null;
+    socket.data = null as any;
   });
 
   socket.on('disconnect', () => {
