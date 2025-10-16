@@ -1,5 +1,5 @@
 // API Client Configuration and Utilities
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001"
 // Runner requests are proxied through the backend orchestrator
 const AGENT_RUNNER_URL = undefined
 
