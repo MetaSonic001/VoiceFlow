@@ -1,6 +1,6 @@
 # VoiceFlow Backend
 
-Complete multi-tenant RAG system with NestJS backend and FastAPI ingestion service.
+Complete multi-tenant RAG system with Express.js backend and FastAPI ingestion service.
 
 ## Quick Start
 
@@ -17,28 +17,28 @@ Complete multi-tenant RAG system with NestJS backend and FastAPI ingestion servi
 
    Or manually:
    ```bash
-   # Install NestJS dependencies
-   cd nestjs-backend && npm install && cd ..
+   # Install Express backend dependencies
+   cd express-backend && npm install && cd ..
 
    # Install FastAPI dependencies
    cd ingestion-service && pip install -r requirements.txt && cd ..
 
    # Run database migrations
-   cd nestjs-backend && npx prisma migrate dev --name init && cd ..
+   cd express-backend && npx prisma migrate dev --name init && cd ..
    ```
 
 3. **Start applications in separate terminals:**
 
-   **Terminal 1 - NestJS Backend:**
+   **Terminal 1:**
    ```bash
-   start_nestjs.bat
+   start_express.bat
    ```
    Or manually:
    ```bash
-   cd nestjs-backend && npm run start:dev
+   cd express-backend && npm run dev
    ```
 
-   **Terminal 2 - FastAPI Ingestion:**
+   **Terminal 2:**
    ```bash
    start_fastapi.bat
    ```
@@ -49,7 +49,7 @@ Complete multi-tenant RAG system with NestJS backend and FastAPI ingestion servi
 
 ## Services
 
-- **NestJS Backend**: http://localhost:8000 (run locally)
+- **Express Backend**: http://localhost:8000 (run locally)
 - **FastAPI Ingestion**: http://localhost:8001 (run locally)
 - **PostgreSQL**: localhost:5432 (Docker)
 - **MinIO**: http://localhost:9000 (Docker)
@@ -105,8 +105,8 @@ redis-server
 
 ### Backend Tests
 ```bash
-cd nestjs-backend
-npm run test
+cd express-backend
+npm test
 ```
 
 ### Scraping Test

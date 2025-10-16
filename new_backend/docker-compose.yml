@@ -4,13 +4,14 @@ services:
   postgres:
     image: postgres:15
     environment:
-      POSTGRES_DB: voiceflow
-      POSTGRES_USER: voiceflow_user
-      POSTGRES_PASSWORD: voiceflow_pass
+      POSTGRES_DB: voiceflow_prod
+      POSTGRES_USER: vf_admin
+      POSTGRES_PASSWORD: vf_secure_2025!
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./init-postgres.sql:/docker-entrypoint-initdb.d/init-postgres.sql
 
   minio:
     image: minio/minio

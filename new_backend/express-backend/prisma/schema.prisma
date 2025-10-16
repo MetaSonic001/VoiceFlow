@@ -1,0 +1,57 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  agents Agent[]
+
+  @@map("users")
+}
+
+model Agent {
+  id             String   @id @default(cuid())
+  name           String
+  systemPrompt   String?
+  voiceType      String?  @default("female")
+  llmPreferences Json?    // e.g., { model: "grok", temperature: 0.7 }
+  tokenLimit     Int?     @default(4096)
+  contextWindowStrategy String? @default("condense")
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  documents Document[]
+
+  @@map("agents")
+}
+
+model Document {
+  id          String   @id @default(cuid())
+  url         String?
+  s3Path      String?
+  status      String   @default("pending") // pending, processing, completed, failed
+  title       String?
+  content     String?
+  metadata    Json?    // extracted metadata
+  agentId     String
+  agent       Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("documents")
+}
