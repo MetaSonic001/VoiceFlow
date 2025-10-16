@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+pydantic
+httpx
+chromadb
+sentence-transformers
+crawl4ai
+playwright
+pdfminer.six
+redis
+boto3
+python-multipart
+aiofiles
+celery
+groq
+beautifulsoup4
+trafilatura
