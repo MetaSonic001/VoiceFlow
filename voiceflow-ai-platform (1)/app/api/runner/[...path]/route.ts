@@ -7,9 +7,9 @@ export async function handler(req: Request, { params }: { params: { path: string
   const session: any = auth()
   if (!session?.userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
-  const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000'
+  const backendUrl = process.env.NEW_BACKEND_URL || 'http://localhost:3001'
   const path = params.path.join('/')
-  const url = `${backendUrl.replace(/\/$/, '')}/runner/${path}`
+  const url = `${backendUrl.replace(/\/$/, '')}/api/runner/${path}`
 
   const headers: Record<string, string> = {}
   req.headers.forEach((v, k) => {
@@ -17,6 +17,9 @@ export async function handler(req: Request, { params }: { params: { path: string
   })
   // add api-key for server-to-server
   if (process.env.BACKEND_API_KEY) headers['X-API-Key'] = process.env.BACKEND_API_KEY
+  // add tenant and user headers
+  headers['x-tenant-id'] = 'default-tenant'
+  headers['x-user-id'] = session.userId
 
   const res = await fetch(url, { method: req.method, headers, body: req.body })
   const text = await res.text()

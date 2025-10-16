@@ -146,10 +146,30 @@ export class MinioService {
 }
 
 // Create singleton instance
+const minioEndpoint = process.env.MINIO_ENDPOINT || 'localhost';
+const minioPort = process.env.MINIO_PORT || '9000';
+
+// Parse endpoint to handle URLs with protocol
+let endPoint = minioEndpoint;
+let useSSL = process.env.MINIO_USE_SSL === 'true';
+
+if (minioEndpoint.startsWith('http://')) {
+  endPoint = minioEndpoint.replace('http://', '');
+  useSSL = false;
+} else if (minioEndpoint.startsWith('https://')) {
+  endPoint = minioEndpoint.replace('https://', '');
+  useSSL = true;
+}
+
+// Remove port from endpoint if it exists
+if (endPoint.includes(':')) {
+  endPoint = endPoint.split(':')[0];
+}
+
 const minioConfig: MinIOConfig = {
-  endPoint: process.env.MINIO_ENDPOINT || 'localhost',
-  port: parseInt(process.env.MINIO_PORT || '9000'),
-  useSSL: process.env.MINIO_USE_SSL === 'true',
+  endPoint,
+  port: parseInt(minioPort),
+  useSSL,
   accessKey: process.env.MINIO_ACCESS_KEY || 'minioadmin',
   secretKey: process.env.MINIO_SECRET_KEY || 'minioadmin',
   region: process.env.MINIO_REGION

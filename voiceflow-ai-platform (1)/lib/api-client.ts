@@ -444,6 +444,14 @@ class ApiClient {
     return this.request<PerformanceData>(`/analytics/performance?${params}`)
   }
 
+  async getMetricsChart(timeRange = "7d", agentId?: string) {
+    const params = new URLSearchParams({ time_range: timeRange })
+    if (agentId && agentId !== "all") {
+      params.append("agent_id", agentId)
+    }
+    return this.request<MetricsChartData>(`/analytics/metrics-chart?${params}`)
+  }
+
   async getAgentComparison() {
     return this.request<AgentComparisonData>("/analytics/agents/comparison")
   }
@@ -463,7 +471,7 @@ class ApiClient {
     if (params.type) searchParams.append("type", params.type)
     if (params.agent_id) searchParams.append("agent_id", params.agent_id)
 
-    return this.request<CallLogsResponse>(`/calls/logs?${searchParams}`)
+    return this.request<CallLogsResponse>(`/analytics/calls?${searchParams}`)
   }
 
   async getCallDetails(callId: string) {
@@ -632,6 +640,16 @@ export interface AgentComparisonData {
     success_rate: number
     avg_response_time: number
     status: string
+  }>
+}
+
+export interface MetricsChartData {
+  labels: string[]
+  datasets: Array<{
+    label: string
+    data: number[]
+    borderColor: string
+    backgroundColor: string
   }>
 }
 

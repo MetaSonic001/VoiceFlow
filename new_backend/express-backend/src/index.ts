@@ -9,16 +9,21 @@ import { PrismaClient } from '@prisma/client';
 import Redis from 'ioredis';
 
 // Route imports
-const agentsRouter = require('./routes/agents');
-const documentsRouter = require('./routes/documents');
-const ragRouter = require('./routes/rag');
-const ingestionRouter = require('./routes/ingestion');
-const runnerRouter = require('./routes/runner');
-const usersRouter = require('./routes/users');
+import adminRouter from './routes/admin';
+import agentsRouter from './routes/agents';
+import analyticsRouter from './routes/analytics';
+import authRouter from './routes/auth';
+import documentsRouter from './routes/documents';
+import onboardingRouter from './routes/onboarding';
+import ragRouter from './routes/rag';
+import ingestionRouter from './routes/ingestion';
+import runnerRouter from './routes/runner';
+import twilioRouter from './routes/twilio';
+import usersRouter from './routes/users';
 
 // Middleware imports
-const { createTenantRateLimit } = require('./middleware/rateLimit');
-const { createClerkAuth } = require('./middleware/clerkAuth');
+import { createTenantRateLimit } from './middleware/rateLimit';
+import { createClerkAuth } from './middleware/clerkAuth';
 import { swaggerUi, specs } from './utils/swagger';
 import { errorHandler, requestLogger, healthCheckErrorHandler } from './middleware/errorHandler';
 
@@ -85,6 +90,11 @@ app.set('redis', redis);
 app.use(createTenantRateLimit(redis));
 
 // Routes
+app.use('/admin', clerkAuth.authenticate, adminRouter);
+app.use('/analytics', clerkAuth.authenticate, analyticsRouter);
+app.use('/auth', authRouter);
+app.use('/onboarding', clerkAuth.authenticate, onboardingRouter);
+app.use('/twilio', clerkAuth.authenticate, twilioRouter);
 app.use('/api/agents', clerkAuth.authenticate, agentsRouter);
 app.use('/api/documents', clerkAuth.authenticate, documentsRouter);
 app.use('/api/rag', clerkAuth.authenticate, ragRouter);
@@ -185,6 +195,9 @@ io.on('connection', (socket: Socket) => {
   });
 });
 
+import 'dotenv/config';
+
+// Start server
 const PORT = process.env.PORT || 8000;
 
 server.listen(PORT, () => {

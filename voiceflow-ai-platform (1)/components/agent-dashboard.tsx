@@ -91,7 +91,7 @@ export function AgentDashboard() {
   useEffect(() => {
     const setToken = async () => {
       try {
-        const token = await clerk.getToken()
+        const token = await clerk.session?.getToken()
         if (token) {
           apiClient.setClerkToken(token)
         }

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Button } from "@/components/ui/button"
@@ -10,25 +10,85 @@ import { MetricsChart } from "@/components/analytics/metrics-chart"
 import { PerformanceChart } from "@/components/analytics/performance-chart"
 import { AgentComparison } from "@/components/analytics/agent-comparison"
 import { RealtimeMetrics } from "@/components/analytics/realtime-metrics"
-import { TrendingUp, TrendingDown, Phone, MessageSquare, Clock, Users, Download } from "lucide-react"
+import { TrendingUp, TrendingDown, Phone, MessageSquare, Clock, Users, Download, Loader2 } from "lucide-react"
+import { apiClient } from "@/lib/api-client"
 
 export function AnalyticsDashboard() {
   const [timeRange, setTimeRange] = useState("7d")
   const [selectedAgent, setSelectedAgent] = useState("all")
+  const [analyticsData, setAnalyticsData] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  // Mock analytics data
-  const overviewMetrics = [
+  useEffect(() => {
+    const fetchAnalyticsData = async () => {
+      try {
+        setLoading(true)
+        setError(null)
+        const data = await apiClient.getAnalyticsOverview(timeRange, selectedAgent)
+        setAnalyticsData(data)
+      } catch (err) {
+        console.error('Error fetching analytics data:', err)
+        setError('Failed to load analytics data')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchAnalyticsData()
+  }, [timeRange, selectedAgent])
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background">
+        <div className="flex">
+          <DashboardSidebar />
+          <div className="flex-1 ml-64">
+            <div className="p-6">
+              <div className="flex items-center justify-center h-64">
+                <Loader2 className="w-8 h-8 animate-spin" />
+                <span className="ml-2">Loading analytics data...</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-background">
+        <div className="flex">
+          <DashboardSidebar />
+          <div className="flex-1 ml-64">
+            <div className="p-6">
+              <div className="flex items-center justify-center h-64">
+                <div className="text-center">
+                  <p className="text-red-600 mb-2">{error}</p>
+                  <Button onClick={() => window.location.reload()}>Retry</Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Transform API data to component format
+  const overviewMetrics = analyticsData ? [
     {
       title: "Total Interactions",
-      value: "12,847",
-      change: "+15.2%",
+      value: analyticsData.totalInteractions?.toLocaleString() || "0",
+      change: "+15.2%", // This would come from API comparison
       trend: "up",
       icon: Users,
       description: "Calls and chats combined",
     },
     {
       title: "Success Rate",
-      value: "94.2%",
+      value: `${analyticsData.successRate || 0}%`,
       change: "+2.1%",
       trend: "up",
       icon: TrendingUp,
@@ -36,7 +96,7 @@ export function AnalyticsDashboard() {
     },
     {
       title: "Avg Response Time",
-      value: "2.1s",
+      value: `${analyticsData.avgResponseTime || 0}s`,
       change: "-0.3s",
       trend: "up",
       icon: Clock,
@@ -44,21 +104,15 @@ export function AnalyticsDashboard() {
     },
     {
       title: "Customer Satisfaction",
-      value: "4.7/5",
+      value: `${analyticsData.customerSatisfaction || 0}/5`,
       change: "+0.2",
       trend: "up",
       icon: TrendingUp,
       description: "Based on post-interaction surveys",
     },
-  ]
+  ] : []
 
-  const topIssues = [
-    { issue: "Password Reset", count: 234, percentage: 18.2 },
-    { issue: "Billing Questions", count: 189, percentage: 14.7 },
-    { issue: "Product Information", count: 156, percentage: 12.1 },
-    { issue: "Technical Support", count: 134, percentage: 10.4 },
-    { issue: "Account Setup", count: 98, percentage: 7.6 },
-  ]
+  const topIssues = analyticsData?.topIssues || []
 
   return (
     <div className="min-h-screen bg-background">
@@ -137,7 +191,7 @@ export function AnalyticsDashboard() {
             <div className="grid lg:grid-cols-3 gap-6 mb-6">
               {/* Interaction Volume Chart */}
               <div className="lg:col-span-2">
-                <MetricsChart timeRange={timeRange} />
+                <MetricsChart timeRange={timeRange} agentId={selectedAgent} />
               </div>
 
               {/* Top Issues */}
@@ -147,7 +201,7 @@ export function AnalyticsDashboard() {
                   <CardDescription>Most common customer queries</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  {topIssues.map((issue, index) => (
+                  {topIssues.map((issue: any, index: number) => (
                     <div key={issue.issue} className="flex items-center justify-between">
                       <div className="flex items-center space-x-2">
                         <div className="w-6 h-6 bg-accent text-accent-foreground rounded text-xs flex items-center justify-center">
@@ -167,7 +221,7 @@ export function AnalyticsDashboard() {
 
             <div className="grid lg:grid-cols-2 gap-6 mb-6">
               {/* Performance Trends */}
-              <PerformanceChart timeRange={timeRange} />
+              <PerformanceChart timeRange={timeRange} agentId={selectedAgent} />
 
               {/* Agent Comparison */}
               <AgentComparison />
@@ -181,33 +235,37 @@ export function AnalyticsDashboard() {
               </CardHeader>
               <CardContent>
                 <div className="grid md:grid-cols-3 gap-6">
-                  <div className="text-center">
-                    <Phone className="w-8 h-8 text-accent mx-auto mb-2" />
-                    <h3 className="font-medium">Phone Calls</h3>
-                    <div className="text-2xl font-bold mt-1">8,234</div>
-                    <div className="text-sm text-muted-foreground">Avg duration: 4m 32s</div>
-                    <Badge variant="secondary" className="mt-2">
-                      96% success rate
-                    </Badge>
-                  </div>
-                  <div className="text-center">
-                    <MessageSquare className="w-8 h-8 text-accent mx-auto mb-2" />
-                    <h3 className="font-medium">Website Chat</h3>
-                    <div className="text-2xl font-bold mt-1">4,613</div>
-                    <div className="text-sm text-muted-foreground">Avg duration: 2m 18s</div>
-                    <Badge variant="secondary" className="mt-2">
-                      92% success rate
-                    </Badge>
-                  </div>
-                  <div className="text-center">
-                    <MessageSquare className="w-8 h-8 text-accent mx-auto mb-2" />
-                    <h3 className="font-medium">WhatsApp</h3>
-                    <div className="text-2xl font-bold mt-1">1,456</div>
-                    <div className="text-sm text-muted-foreground">Avg duration: 3m 45s</div>
-                    <Badge variant="secondary" className="mt-2">
-                      89% success rate
-                    </Badge>
-                  </div>
+                  {analyticsData?.channelPerformance && (
+                    <>
+                      <div className="text-center">
+                        <Phone className="w-8 h-8 text-accent mx-auto mb-2" />
+                        <h3 className="font-medium">Phone Calls</h3>
+                        <div className="text-2xl font-bold mt-1">{analyticsData.channelPerformance.phone?.count?.toLocaleString() || 0}</div>
+                        <div className="text-sm text-muted-foreground">Avg duration: {analyticsData.channelPerformance.phone?.avgDuration || "0m 0s"}</div>
+                        <Badge variant="secondary" className="mt-2">
+                          {analyticsData.channelPerformance.phone?.successRate || 0}% success rate
+                        </Badge>
+                      </div>
+                      <div className="text-center">
+                        <MessageSquare className="w-8 h-8 text-accent mx-auto mb-2" />
+                        <h3 className="font-medium">Website Chat</h3>
+                        <div className="text-2xl font-bold mt-1">{analyticsData.channelPerformance.chat?.count?.toLocaleString() || 0}</div>
+                        <div className="text-sm text-muted-foreground">Avg duration: {analyticsData.channelPerformance.chat?.avgDuration || "0m 0s"}</div>
+                        <Badge variant="secondary" className="mt-2">
+                          {analyticsData.channelPerformance.chat?.successRate || 0}% success rate
+                        </Badge>
+                      </div>
+                      <div className="text-center">
+                        <MessageSquare className="w-8 h-8 text-accent mx-auto mb-2" />
+                        <h3 className="font-medium">WhatsApp</h3>
+                        <div className="text-2xl font-bold mt-1">{analyticsData.channelPerformance.whatsapp?.count?.toLocaleString() || 0}</div>
+                        <div className="text-sm text-muted-foreground">Avg duration: {analyticsData.channelPerformance.whatsapp?.avgDuration || "0m 0s"}</div>
+                        <Badge variant="secondary" className="mt-2">
+                          {analyticsData.channelPerformance.whatsapp?.successRate || 0}% success rate
+                        </Badge>
+                      </div>
+                    </>
+                  )}
                 </div>
               </CardContent>
             </Card>

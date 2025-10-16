@@ -14,32 +14,34 @@ export async function GET(req: Request) {
   const status = url.searchParams.get('status') || ''
 
   try {
-    // Call the backend /agents endpoint directly
-    const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000'
+    // Call the new backend /api/agents endpoint
+    const backendUrl = process.env.NEW_BACKEND_URL || 'http://localhost:3001'
     const backendKey = process.env.BACKEND_API_KEY || ''
-    
-    const backendReqUrl = new URL(`${backendUrl.replace(/\/$/, '')}/agents`)
+
+    const backendReqUrl = new URL(`${backendUrl.replace(/\/$/, '')}/api/agents`)
     if (page) backendReqUrl.searchParams.set('page', String(page))
     if (limit) backendReqUrl.searchParams.set('limit', String(limit))
     if (search) backendReqUrl.searchParams.set('search', search)
     if (status) backendReqUrl.searchParams.set('status', status)
-    
-    const r = await fetch(backendReqUrl.toString(), { 
-      headers: { 
+
+    const r = await fetch(backendReqUrl.toString(), {
+      headers: {
         'X-API-Key': backendKey,
-        'Authorization': req.headers.get('authorization') || ''
-      } 
+        'Authorization': req.headers.get('authorization') || '',
+        'x-tenant-id': 'default-tenant', // Add tenant header
+        'x-user-id': userId
+      }
     })
-    
+
     if (r.ok) {
       const data = await r.json()
       return NextResponse.json(data)
     } else {
-      console.error('Backend agents request failed:', r.status, await r.text())
+      console.error('New backend agents request failed:', r.status, await r.text())
       return NextResponse.json({ agents: [], total: 0, page, limit })
     }
   } catch (err) {
-    console.error('Failed to fetch agents from backend:', err)
+    console.error('Failed to fetch agents from new backend:', err)
     return NextResponse.json({ agents: [], total: 0, page, limit })
   }
 }
