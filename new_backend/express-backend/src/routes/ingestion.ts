@@ -10,6 +10,7 @@ declare global {
   namespace Express {
     interface Request {
       tenantId: string;
+      userId: string;
     }
   }
 }
@@ -68,6 +69,7 @@ router.post('/start', validateTenantAccess, async (req: Request, res: Response) 
         data: {
           url: url,
           agentId: agentId,
+          tenantId: req.user.tenantId,
           status: 'pending'
         }
       });
@@ -79,6 +81,7 @@ router.post('/start', validateTenantAccess, async (req: Request, res: Response) 
         data: {
           s3Path: s3Url,
           agentId: agentId,
+          tenantId: req.user.tenantId,
           status: 'pending'
         }
       });

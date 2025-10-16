@@ -10,6 +10,7 @@ declare global {
   namespace Express {
     interface Request {
       tenantId: string;
+      userId: string;
     }
   }
 }
@@ -57,13 +58,10 @@ const validateTenantAccess = (req: Request, res: Response, next: NextFunction) =
     }
     req.tenantId = tenantId;
     next();
-  }).catch(() => {
-    res.status(500).json({ error: 'Tenant validation failed' });
-  });
-};
+});
 
 // Get all documents for an agent
-router.get('/', validateTenantAccess, async (req: Request, res: Response) => {
+router.get('/', async (req: Request, res: Response) => {
   try {
     const prisma: PrismaClient = req.app.get('prisma');
     const { agentId } = req.query;
@@ -97,7 +95,7 @@ router.get('/', validateTenantAccess, async (req: Request, res: Response) => {
 });
 
 // Get document by ID
-router.get('/:id', validateTenantAccess, async (req: Request, res: Response) => {
+router.get('/:id', async (req: Request, res: Response) => {
   try {
     const prisma: PrismaClient = req.app.get('prisma');
     const { id } = req.params;
@@ -121,7 +119,7 @@ router.get('/:id', validateTenantAccess, async (req: Request, res: Response) => 
 });
 
 // Create new document (URL-based)
-router.post('/', validateTenantAccess, async (req: Request, res: Response) => {
+router.post('/', async (req: Request, res: Response) => {
   try {
     const { error, value } = createDocumentSchema.validate(req.body);
     if (error) {
@@ -173,7 +171,7 @@ router.post('/', validateTenantAccess, async (req: Request, res: Response) => {
 });
 
 // Update document
-router.put('/:id', validateTenantAccess, async (req: Request, res: Response) => {
+router.put('/:id', async (req: Request, res: Response) => {
   try {
     const { error, value } = updateDocumentSchema.validate(req.body);
     if (error) {
@@ -208,7 +206,7 @@ router.put('/:id', validateTenantAccess, async (req: Request, res: Response) => 
 });
 
 // Delete document
-router.delete('/:id', validateTenantAccess, async (req: Request, res: Response) => {
+router.delete('/:id', async (req: Request, res: Response) => {
   try {
     const prisma: PrismaClient = req.app.get('prisma');
     const { id } = req.params;

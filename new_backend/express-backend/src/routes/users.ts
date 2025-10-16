@@ -8,22 +8,13 @@ declare global {
   namespace Express {
     interface Request {
       tenantId: string;
+      userId: string;
     }
   }
 }
 
-// Middleware to validate tenant access
-const validateTenantAccess = (req: Request, res: Response, next: NextFunction) => {
-  const tenantId = req.headers['x-tenant-id'] || req.query.tenantId;
-  if (!tenantId || typeof tenantId !== 'string') {
-    return res.status(400).json({ error: 'Tenant ID required' });
-  }
-  req.tenantId = tenantId;
-  next();
-};
-
 // Get user by ID
-router.get('/:id', validateTenantAccess, async (req: Request, res: Response) => {
+router.get('/:id', async (req: Request, res: Response) => {
   try {
     const prisma: PrismaClient = req.app.get('prisma');
     const { id } = req.params;

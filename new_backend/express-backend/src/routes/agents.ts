@@ -9,6 +9,7 @@ declare global {
   namespace Express {
     interface Request {
       tenantId: string;
+      userId: string;
     }
   }
 }
@@ -50,30 +51,8 @@ const updateAgentSchema = Joi.object({
   contextWindowStrategy: Joi.string().valid('condense', 'truncate')
 });
 
-// Middleware to validate tenant access
-const validateTenantAccess = (req: Request, res: Response, next: NextFunction) => {
-  const tenantId = req.headers['x-tenant-id'] || req.query.tenantId;
-  if (!tenantId || typeof tenantId !== 'string') {
-    return res.status(400).json({ error: 'Tenant ID required' });
-  }
-
-  // Verify tenant exists and is active
-  const prisma = req.app.get('prisma') as PrismaClient;
-  prisma.tenant.findUnique({
-    where: { id: tenantId, isActive: true }
-  }).then(tenant => {
-    if (!tenant) {
-      return res.status(403).json({ error: 'Invalid or inactive tenant' });
-    }
-    req.tenantId = tenantId;
-    next();
-  }).catch(() => {
-    res.status(500).json({ error: 'Tenant validation failed' });
-  });
-};
-
 // Get all agents for a user
-router.get('/', validateTenantAccess, async (req: Request, res: Response) => {
+router.get('/', async (req: Request, res: Response) => {
   try {
     const prisma: PrismaClient = req.app.get('prisma');
     const { userId } = req.query;
@@ -102,7 +81,7 @@ router.get('/', validateTenantAccess, async (req: Request, res: Response) => {
 });
 
 // Get agent by ID
-router.get('/:id', validateTenantAccess, async (req: Request, res: Response) => {
+router.get('/:id', async (req: Request, res: Response) => {
   try {
     const prisma: PrismaClient = req.app.get('prisma');
     const { id } = req.params;
@@ -141,7 +120,7 @@ router.get('/:id', validateTenantAccess, async (req: Request, res: Response) => 
 });
 
 // Create new agent
-router.post('/', validateTenantAccess, async (req: Request, res: Response) => {
+router.post('/', async (req: Request, res: Response) => {
   try {
     const { error, value } = createAgentSchema.validate(req.body);
     if (error) {
@@ -183,7 +162,7 @@ router.post('/', validateTenantAccess, async (req: Request, res: Response) => {
 });
 
 // Update agent
-router.put('/:id', validateTenantAccess, async (req: Request, res: Response) => {
+router.put('/:id', async (req: Request, res: Response) => {
   try {
     const { error, value } = updateAgentSchema.validate(req.body);
     if (error) {
@@ -218,7 +197,7 @@ router.put('/:id', validateTenantAccess, async (req: Request, res: Response) => 
 });
 
 // Delete agent
-router.delete('/:id', validateTenantAccess, async (req: Request, res: Response) => {
+router.delete('/:id', async (req: Request, res: Response) => {
   try {
     const prisma: PrismaClient = req.app.get('prisma');
     const { id } = req.params;

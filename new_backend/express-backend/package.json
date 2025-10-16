@@ -7,13 +7,15 @@
     "start": "node dist/index.js",
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "test": "jest",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "db:seed": "ts-node prisma/seed.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "description": "Multi-tenant RAG backend with Express.js",
   "dependencies": {
+    "@clerk/clerk-sdk-node": "^5.1.6",
     "@prisma/client": "^6.17.1",
     "@types/minio": "^7.1.1",
     "axios": "^1.12.2",
@@ -33,6 +35,8 @@
     "prisma": "^6.17.1",
     "redis": "^5.8.3",
     "socket.io": "^4.8.1",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1",
     "uuid": "^13.0.0",
     "vosk": "^0.3.39",
     "ws": "^8.18.3"

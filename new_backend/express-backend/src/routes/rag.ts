@@ -9,6 +9,7 @@ declare global {
   namespace Express {
     interface Request {
       tenantId: string;
+      userId: string;
     }
   }
 }
@@ -44,13 +45,10 @@ const validateTenantAccess = (req: Request, res: Response, next: NextFunction) =
     }
     req.tenantId = tenantId;
     next();
-  }).catch(() => {
-    res.status(500).json({ error: 'Tenant validation failed' });
-  });
-};
+});
 
 // Query agent with RAG
-router.post('/query', validateTenantAccess, async (req: Request, res: Response) => {
+router.post('/query', async (req: Request, res: Response) => {
   try {
     const { error, value } = querySchema.validate(req.body);
     if (error) {
@@ -93,7 +91,7 @@ router.post('/query', validateTenantAccess, async (req: Request, res: Response) 
 });
 
 // Get conversation history
-router.get('/conversation/:sessionId', validateTenantAccess, async (req: Request, res: Response) => {
+router.get('/conversation/:sessionId', async (req: Request, res: Response) => {
   try {
     const { sessionId } = req.params;
     const { agentId } = req.query;
@@ -131,7 +129,7 @@ router.get('/conversation/:sessionId', validateTenantAccess, async (req: Request
 });
 
 // Clear conversation history
-router.delete('/conversation/:sessionId', validateTenantAccess, async (req: Request, res: Response) => {
+router.delete('/conversation/:sessionId', async (req: Request, res: Response) => {
   try {
     const { sessionId } = req.params;
     const { agentId } = req.query;

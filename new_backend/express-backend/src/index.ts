@@ -48,18 +48,15 @@ const io: SocketIOServer = new SocketIOServer(server, {
 // Initialize Prisma
 const prisma = new PrismaClient();
 
+// Initialize Clerk auth
+const { createClerkAuth } = require('./middleware/clerkAuth');
+const clerkAuth = createClerkAuth(prisma);
+
 // Middleware
 app.use(helmet());
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
-
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100 // limit each IP to 100 requests per windowMs
-});
-app.use(limiter);
 
 // Make services available in routes
 app.set('prisma', prisma);
@@ -71,18 +68,32 @@ const redis = new Redis({
 });
 app.set('redis', redis);
 
+// Rate limiting
+const { createTenantRateLimit } = require('./middleware/rateLimit');
+app.use(createTenantRateLimit(redis));
+
 // Routes
-app.use('/api/agents', require('./routes/agents'));
-app.use('/api/documents', require('./routes/documents'));
-app.use('/api/rag', require('./routes/rag'));
-app.use('/api/ingestion', require('./routes/ingestion'));
-app.use('/api/runner', require('./routes/runner'));
-app.use('/api/users', require('./routes/users'));
+app.use('/api/agents', clerkAuth.authenticate, require('./routes/agents'));
+app.use('/api/documents', clerkAuth.authenticate, require('./routes/documents'));
+app.use('/api/rag', clerkAuth.authenticate, require('./routes/rag'));
+app.use('/api/ingestion', clerkAuth.authenticate, require('./routes/ingestion'));
+app.use('/api/runner', clerkAuth.authenticate, require('./routes/runner'));
+app.use('/api/users', clerkAuth.authenticate, require('./routes/users'));
+
+// API Documentation
+const { swaggerUi, specs } = require('./utils/swagger');
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs));
 
 // Health check
 app.get('/health', (req: Request, res: Response) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
+
+// Error handling middleware (must be last)
+const { errorHandler, requestLogger, healthCheckErrorHandler } = require('./middleware/errorHandler');
+app.use(requestLogger);
+app.use(healthCheckErrorHandler);
+app.use(errorHandler);
 
 // Socket.IO for Twilio Media Streams
 io.on('connection', (socket: Socket) => {

@@ -9,6 +9,7 @@ declare global {
   namespace Express {
     interface Request {
       tenantId: string;
+      userId: string;
     }
   }
 }
@@ -27,18 +28,8 @@ const chatSchema = Joi.object({
   sessionId: Joi.string().optional()
 });
 
-// Middleware to validate tenant access
-const validateTenantAccess = (req: Request, res: Response, next: NextFunction) => {
-  const tenantId = req.headers['x-tenant-id'] || req.query.tenantId;
-  if (!tenantId || typeof tenantId !== 'string') {
-    return res.status(400).json({ error: 'Tenant ID required' });
-  }
-  req.tenantId = tenantId;
-  next();
-};
-
 // Chat with agent (for frontend)
-router.post('/chat', validateTenantAccess, async (req: Request, res: Response) => {
+router.post('/chat', async (req: Request, res: Response) => {
   try {
     const { error, value } = chatSchema.validate(req.body);
     if (error) {
@@ -81,7 +72,7 @@ router.post('/chat', validateTenantAccess, async (req: Request, res: Response) =
 });
 
 // Get agent info for frontend
-router.get('/agent/:agentId', validateTenantAccess, async (req: Request, res: Response) => {
+router.get('/agent/:agentId', async (req: Request, res: Response) => {
   try {
     const prisma: PrismaClient = req.app.get('prisma');
     const { agentId } = req.params;
@@ -118,7 +109,7 @@ router.get('/agent/:agentId', validateTenantAccess, async (req: Request, res: Re
 });
 
 // List user's agents for frontend
-router.get('/agents', validateTenantAccess, async (req: Request, res: Response) => {
+router.get('/agents', async (req: Request, res: Response) => {
   try {
     const prisma: PrismaClient = req.app.get('prisma');
     const { userId } = req.query;
