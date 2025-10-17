@@ -28,7 +28,9 @@ export class TwilioMediaService {
     this.voiceService = voiceService;
 
     // Initialize Vosk model
-    vosk.setLogLevel(-1); // Disable logging
+    if ((vosk as any).setLogLevel && typeof (vosk as any).setLogLevel === 'function') {
+      (vosk as any).setLogLevel(-1); // Disable logging if available
+    }
     this.voskModel = new vosk.Model(config.voskModelPath);
   }
 
@@ -58,15 +60,19 @@ export class TwilioMediaService {
       }
 
       // Process audio data
-      const isFinal = recognizer.acceptWaveform(audioData);
+      // Convert Node Buffer (bytes) to Int16Array expected by Vosk (16-bit PCM little-endian)
+      const int16Audio = new Int16Array(audioData.buffer, audioData.byteOffset, audioData.length / 2);
+      const isFinal = recognizer.acceptWaveform(int16Audio);
       let transcription = '';
 
       if (isFinal) {
         const result = recognizer.result();
         transcription = result.text;
       } else {
-        const partial = recognizer.partialResult();
-        transcription = partial.partial;
+        // partialResult is not declared on the Recognizer type in the typings,
+        // so use a safe any-cast and null-check to avoid TypeScript errors.
+        const partial = (recognizer as any).partialResult ? (recognizer as any).partialResult() : null;
+        transcription = partial && partial.partial ? partial.partial : '';
       }
 
       // If we have a complete transcription, process it with RAG
@@ -129,6 +135,21 @@ export class TwilioMediaService {
       // Fallback to a simple beep if TTS fails
       return this.generateFallbackAudio(text);
     }
+  }
+
+  // Fallback audio generator: simple 1s 440Hz sine wave at 16kHz mono 16-bit PCM
+  private generateFallbackAudio(_text: string): Buffer {
+    const sampleRate = 16000;
+    const durationSeconds = 1;
+    const freq = 440;
+    const samples = sampleRate * durationSeconds;
+    const out = Buffer.alloc(samples * 2);
+    for (let i = 0; i < samples; i++) {
+      const t = i / sampleRate;
+      const sample = Math.round(Math.sin(2 * Math.PI * freq * t) * 0.5 * 32767);
+      out.writeInt16LE(sample, i * 2);
+    }
+    return out;
   }
 
   /**

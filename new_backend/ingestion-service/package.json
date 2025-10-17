@@ -1,0 +1,11 @@
+{
+	"devDependencies": {
+		"@types/node": "^24.8.1",
+		"prisma": "^6.17.1",
+		"ts-node": "^10.9.2",
+		"typescript": "^5.9.3"
+	},
+	"dependencies": {
+		"@prisma/client": "^6.17.1"
+	}
+}
