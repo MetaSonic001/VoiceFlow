@@ -1,0 +1,36 @@
+# Web Framework
+Flask
+python-dotenv
+Werkzeug
+
+# Twilio for Voice
+twilio
+
+# AI Services
+google-generativeai
+groq
+
+# Vector Database
+chromadb
+chromadb-client
+
+# HTTP Requests
+requests
+aiohttp
+urllib3
+
+# Data Processing
+pandas
+numpy
+
+# Logging
+loguru
+
+# Text Processing
+textblob
+
+# Natural Language Processing
+nltk
+
+# Utilities
+python-dateutil
