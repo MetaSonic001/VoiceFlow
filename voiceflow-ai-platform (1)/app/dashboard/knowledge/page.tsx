@@ -7,7 +7,6 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-import { DashboardSidebar } from "@/components/dashboard/sidebar"
 import {
   Search,
   Upload,
@@ -222,15 +221,10 @@ export default function KnowledgeBasePage() {
   if (loading) {
     return (
       <div className="min-h-screen bg-background">
-        <div className="flex">
-          <DashboardSidebar />
-          <div className="flex-1 ml-64">
-            <div className="p-6">
-              <div className="flex items-center justify-center h-64">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-                <span className="ml-2">Loading knowledge base...</span>
-              </div>
-            </div>
+        <div className="p-6">
+          <div className="flex items-center justify-center h-64">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            <span className="ml-2">Loading knowledge base...</span>
           </div>
         </div>
       </div>
@@ -239,10 +233,7 @@ export default function KnowledgeBasePage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="flex">
-        <DashboardSidebar />
-        <div className="flex-1 ml-64">
-          <div className="p-6">
+      <div className="p-6">
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h1 className="text-3xl font-bold">Knowledge Base</h1>
@@ -488,9 +479,7 @@ export default function KnowledgeBasePage() {
                 </Button>
               </div>
             )}
-          </div>
         </div>
       </div>
-    </div>
-  )
-}
+    )
+  }

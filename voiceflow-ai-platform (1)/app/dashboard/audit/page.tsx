@@ -7,7 +7,6 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { DashboardSidebar } from "@/components/dashboard/sidebar"
 import {
   Search,
   Filter,
@@ -245,15 +244,10 @@ export default function AuditLogsPage() {
   if (loading) {
     return (
       <div className="min-h-screen bg-background">
-        <div className="flex">
-          <DashboardSidebar />
-          <div className="flex-1 ml-64">
-            <div className="p-6">
-              <div className="flex items-center justify-center h-64">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-                <span className="ml-2">Loading audit logs...</span>
-              </div>
-            </div>
+        <div className="p-6">
+          <div className="flex items-center justify-center h-64">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            <span className="ml-2">Loading audit logs...</span>
           </div>
         </div>
       </div>
@@ -262,10 +256,7 @@ export default function AuditLogsPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="flex">
-        <DashboardSidebar />
-        <div className="flex-1 ml-64">
-          <div className="p-6">
+      <div className="p-6">
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h1 className="text-3xl font-bold">Audit Logs</h1>
@@ -504,7 +495,6 @@ export default function AuditLogsPage() {
             )}
           </div>
         </div>
-      </div>
-    </div>
-  )
-}
+    
+    )
+  }

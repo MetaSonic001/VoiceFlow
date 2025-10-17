@@ -1,0 +1,68 @@
+# agent-workflow specific ignores
+
+# Environment files
+.env
+.env.local
+
+# ChromaDB persistent store
+chroma_db/
+
+# Vosk model directory
+models/
+
+# Test audio and simulator artifacts
+test_audio/
+
+# Logs
+ingestion_logs/
+*.log
+
+# Python caches
+__pycache__/
+*.py[cod]
+
+# VS Code
+.vscode/
+# Byte-compiled / caching
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.env
+.venv/
+venv/
+env/
+ENV/
+
+# Python packaging
+build/
+dist/
+*.egg-info/
+pip-wheel-metadata/
+__pypackages__/
+
+# Test and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs and databases
+*.log
+*.sqlite3
+*.db
+
+# IDEs and editors
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Misc
+*.pyc
+*.pyo
+*.pyd

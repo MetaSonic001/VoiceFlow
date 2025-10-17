@@ -10,7 +10,6 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { DashboardSidebar } from "@/components/dashboard/sidebar"
 import { Users, UserPlus, Shield, Mail, Phone, Calendar, MoreHorizontal, Edit, Trash2, Search } from "lucide-react"
 import { apiClient } from "@/lib/api-client"
 
@@ -159,11 +158,7 @@ export default function UserManagementPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="flex">
-        <DashboardSidebar />
-        <div className="flex-1 ml-64">
-          <div className="p-6">
+    <div className="p-6">
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h1 className="text-3xl font-bold">User Management</h1>
@@ -331,11 +326,9 @@ export default function UserManagementPage() {
               </DialogContent>
             </Dialog>
           </div>
-        </div>
-      </div>
-    </div>
-  )
-}
+      )
+    }
+
 
 interface UserFormProps {
   initialData?: Partial<User>

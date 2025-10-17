@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import DatePickerWithRange from "@/components/ui/date-range-picker"
-import { DashboardSidebar } from "@/components/dashboard/sidebar"
 import {
   Download,
   FileText,
@@ -238,10 +237,7 @@ export default function ReportsPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="flex">
-        <DashboardSidebar />
-        <div className="flex-1 ml-64">
-          <div className="p-6">
+      <div className="p-6">
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h1 className="text-3xl font-bold">Reports & Export</h1>
@@ -424,11 +420,9 @@ export default function ReportsPage() {
                     )
                   })}
                 </div>
-              </CardContent>
-            </Card>
-          </div>
+                </CardContent>
+              </Card>
         </div>
       </div>
-    </div>
-  )
-}
+    )
+  }

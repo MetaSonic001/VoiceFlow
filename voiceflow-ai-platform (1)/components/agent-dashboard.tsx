@@ -5,8 +5,6 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Badge } from "@/components/ui/badge"
-import { DashboardSidebar } from "@/components/dashboard/sidebar"
 import { AgentCard } from "@/components/dashboard/agent-card"
 import MotionWrapper, { containerVariants } from '@/components/ui/MotionWrapper'
 import { motion } from 'framer-motion'
@@ -17,6 +15,7 @@ import { RealtimeMetrics } from "@/components/dashboard/realtime-metrics"
 import { LiveConversations } from "@/components/dashboard/live-conversations"
 import { QuickActions } from "@/components/dashboard/quick-actions"
 import { Search, Plus, Filter, Activity, Phone, MessageCircle, Users, TrendingUp, Loader2 } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
 import { apiClient } from '@/lib/api-client'
 import { useClerk } from '@clerk/nextjs'
 
@@ -198,13 +197,7 @@ export function AgentDashboard() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="flex">
-        {/* Sidebar */}
-        <DashboardSidebar />
-
-        {/* Main Content */}
-        <div className="flex-1 ml-64">
-          <div className="p-6">
+      <div className="p-6">
             {/* Resume Onboarding Banner (persistent) */}
             {showResumeBanner && (
               <div aria-label="Resume onboarding banner" className="mb-4 p-4 rounded-lg bg-gradient-to-r from-primary/10 to-accent/5 border border-primary/10 flex items-center justify-between">
@@ -427,8 +420,6 @@ export function AgentDashboard() {
               <AgentDetails agent={selectedAgentData!} onBack={() => setSelectedAgent(null)} />
             )}
           </div>
-        </div>
-      </div>
 
       <OnboardingWizard 
         open={showCreateDialog} 

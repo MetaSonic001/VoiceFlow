@@ -1,17 +1,17 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import MotionWrapper from '@/components/ui/MotionWrapper'
 import { Badge } from "@/components/ui/badge"
-import { Brain, Bot, BarChart3, Settings, HelpCircle, LogOut, Users, Phone, Activity, FileText, BookOpen, Code, Database, Archive, CreditCard, Zap } from "lucide-react"
+import { Brain, Bot, BarChart3, Settings, HelpCircle, LogOut, Users, Phone, Activity, FileText, BookOpen, Code, Database, Archive, CreditCard, Zap, Bell } from "lucide-react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useRouter, usePathname } from "next/navigation"
 
 export function DashboardSidebar() {
-  const [activeItem, setActiveItem] = useState("agents")
   const [isLoggingOut, setIsLoggingOut] = useState(false)
   const router = useRouter()
+  const pathname = usePathname()
 
   const menuItems = [
     { id: "agents", label: "AI Agents", icon: Bot, badge: "3", href: "/dashboard" },
@@ -20,6 +20,8 @@ export function DashboardSidebar() {
     { id: "system", label: "System Health", icon: Activity, href: "/dashboard/system" },
     { id: "reports", label: "Reports", icon: FileText, href: "/dashboard/reports" },
     { id: "knowledge", label: "Knowledge Base", icon: Database, href: "/dashboard/knowledge" },
+    { id: "audit", label: "Audit Logs", icon: FileText, href: "/dashboard/audit" },
+    { id: "notifications", label: "Notifications", icon: Bell, href: "/dashboard/notifications" },
     { id: "backup", label: "Backup & Restore", icon: Archive, href: "/dashboard/backup" },
     { id: "billing", label: "Billing & Usage", icon: CreditCard, href: "/dashboard/billing" },
     { id: "integrations", label: "Integrations", icon: Zap, href: "/dashboard/integrations" },
@@ -27,6 +29,15 @@ export function DashboardSidebar() {
     { id: "users", label: "Team", icon: Users, href: "/dashboard/users" },
     { id: "settings", label: "Settings", icon: Settings, href: "/dashboard/settings" },
   ]
+
+  // Determine active item based on current pathname
+  const getActiveItem = () => {
+    if (pathname === "/dashboard") return "agents"
+    const activeItem = menuItems.find(item => pathname.startsWith(item.href) && item.href !== "/dashboard")
+    return activeItem?.id || "agents"
+  }
+
+  const activeItem = getActiveItem()
 
   const handleLogout = async () => {
     setIsLoggingOut(true)
@@ -66,7 +77,6 @@ export function DashboardSidebar() {
                     ? "bg-sidebar-accent text-sidebar-accent-foreground"
                     : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                 }`}
-                onClick={() => setActiveItem(item.id)}
               >
                 <item.icon className="w-4 h-4 mr-3" />
                 {item.label}

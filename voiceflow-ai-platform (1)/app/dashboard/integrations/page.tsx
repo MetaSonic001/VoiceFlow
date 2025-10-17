@@ -10,7 +10,6 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { DashboardSidebar } from "@/components/dashboard/sidebar"
 import {
   Zap,
   Settings,
@@ -18,6 +17,10 @@ import {
   XCircle,
   AlertTriangle,
   RefreshCw,
+  BarChart3,
+  CreditCard,
+  FileText,
+  Calendar,
   ExternalLink,
   Key,
   Webhook,
@@ -25,7 +28,6 @@ import {
   Mail,
   MessageSquare,
   Phone,
-  Calendar,
   Cloud,
   Shield,
   Plus
@@ -329,15 +331,10 @@ export default function IntegrationsPage() {
   if (loading) {
     return (
       <div className="min-h-screen bg-background">
-        <div className="flex">
-          <DashboardSidebar />
-          <div className="flex-1 ml-64">
-            <div className="p-6">
-              <div className="flex items-center justify-center h-64">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-                <span className="ml-2">Loading integrations...</span>
-              </div>
-            </div>
+        <div className="p-6">
+          <div className="flex items-center justify-center h-64">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            <span className="ml-2">Loading integrations...</span>
           </div>
         </div>
       </div>
@@ -346,10 +343,7 @@ export default function IntegrationsPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="flex">
-        <DashboardSidebar />
-        <div className="flex-1 ml-64">
-          <div className="p-6">
+      <div className="p-6">
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h1 className="text-3xl font-bold">Integrations</h1>
@@ -561,7 +555,6 @@ export default function IntegrationsPage() {
             </Card>
           </div>
         </div>
-      </div>
-    </div>
-  )
-}
+      
+    )
+  }

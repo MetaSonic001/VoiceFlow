@@ -4,7 +4,6 @@ import { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
-import { DashboardSidebar } from "@/components/dashboard/sidebar"
 import {
   Activity,
   Server,
@@ -122,15 +121,10 @@ export default function SystemHealthPage() {
   if (loading && !metrics) {
     return (
       <div className="min-h-screen bg-background">
-        <div className="flex">
-          <DashboardSidebar />
-          <div className="flex-1 ml-64">
-            <div className="p-6">
-              <div className="flex items-center justify-center h-64">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-                <span className="ml-2">Loading system health...</span>
-              </div>
-            </div>
+        <div className="p-6">
+          <div className="flex items-center justify-center h-64">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            <span className="ml-2">Loading system health...</span>
           </div>
         </div>
       </div>
@@ -139,10 +133,7 @@ export default function SystemHealthPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="flex">
-        <DashboardSidebar />
-        <div className="flex-1 ml-64">
-          <div className="p-6">
+      <div className="p-6">
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h1 className="text-3xl font-bold">System Health</h1>
@@ -327,9 +318,7 @@ export default function SystemHealthPage() {
                 </div>
               </CardContent>
             </Card>
-          </div>
         </div>
       </div>
-    </div>
-  )
-}
+    )
+  }

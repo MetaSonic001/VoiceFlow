@@ -4,8 +4,8 @@
 -- Create the application user with proper permissions
 DO $$
 BEGIN
-   IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'vf_app') THEN
-      CREATE USER vf_app WITH PASSWORD 'vf_app_secure_2025!';
+   IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'vf_app') THEN
+      CREATE ROLE vf_app WITH LOGIN PASSWORD 'vf_app_secure_2025!';
    END IF;
 END
 $$;

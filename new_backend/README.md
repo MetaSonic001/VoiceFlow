@@ -1,53 +1,240 @@
-# VoiceFlow Backend Services
+# VoiceFlow Backend API
 
-This directory contains the complete backend infrastructure for VoiceFlow, including the Express.js API backend, FastAPI ingestion service, and all required infrastructure services.
+The main backend service for VoiceFlow, built with Express.js and TypeScript. Provides REST APIs for agent management, user authentication, analytics, and system administration.
 
-## Architecture
+## 🚀 Features
 
-- **Express Backend** (Port 8000): Main API server with authentication, agent management, and orchestration
-- **Ingestion Service** (Port 8001): Document processing and vector embedding service
-- **PostgreSQL** (Port 5433): Primary database for application data
-- **MinIO** (Ports 9000/9001): Object storage for documents and files
-- **ChromaDB** (Port 8002): Vector database for embeddings
-- **Redis** (Port 6379): Caching and session management
+- **Agent Management** - CRUD operations for AI agents
+- **User Authentication** - Clerk JWT integration
+- **Multi-tenant Support** - Organization-based data isolation
+- **Real-time Analytics** - Usage metrics and performance data
+- **File Management** - Integration with MinIO for document storage
+- **Audit Logging** - Comprehensive activity tracking
+- **API Documentation** - Swagger/OpenAPI documentation
+- **Rate Limiting** - Redis-based request throttling
+- **Error Handling** - Structured error responses and logging
 
-## Quick Start
+## 🏗️ Architecture
 
-### Prerequisites
+```
+Express.js Backend (Port 3001)
+├── Authentication (Clerk)
+├── API Routes
+│   ├── Agents (/api/agents)
+│   ├── Users (/api/users)
+│   ├── Analytics (/api/analytics)
+│   ├── Audit (/api/audit)
+│   ├── Backup (/api/backup)
+│   └── Settings (/api/settings)
+├── Middleware
+│   ├── Authentication
+│   ├── Rate Limiting
+│   ├── Error Handling
+│   └── Logging
+├── Database (PostgreSQL)
+├── Cache (Redis)
+└── Storage (MinIO)
+```
 
-- Docker and Docker Compose
-- Bun (for faster package management)
-- Python 3.11+ (for local development)
+## 📋 Prerequisites
 
-### 1. Environment Setup
+- Node.js 18+ and npm/bun
+- PostgreSQL database
+- Redis instance
+- MinIO storage
+- Clerk account for authentication
 
-Copy the environment file and fill in your API keys:
+## 🚀 Quick Start
 
+### 1. Install Dependencies
+```bash
+npm install
+# or
+bun install
+```
+
+### 2. Environment Configuration
 ```bash
 cp .env.example .env
-# Edit .env with your Clerk and Groq API keys
 ```
 
-### 2. Start All Services
+Edit `.env` with your configuration:
+```env
+# Database
+DATABASE_URL=postgresql://user:pass@localhost:5433/voiceflow
+
+# Redis
+REDIS_URL=redis://localhost:6379
+
+# Clerk Authentication
+CLERK_SECRET_KEY=your_clerk_secret
+CLERK_PUBLISHABLE_KEY=your_clerk_publishable_key
+
+# External APIs
+OPENAI_API_KEY=your_openai_key
+GROQ_API_KEY=your_groq_key
+
+# MinIO Storage
+MINIO_ENDPOINT=localhost:9000
+MINIO_ACCESS_KEY=minioadmin
+MINIO_SECRET_KEY=minioadmin
+
+# Application
+PORT=3001
+NODE_ENV=development
+JWT_SECRET=your_jwt_secret
+```
+
+### 3. Database Setup
+```bash
+# Run database migrations
+npm run db:migrate
+
+# Seed initial data (optional)
+npm run db:seed
+```
+
+### 4. Start Development Server
+```bash
+npm run dev
+# or
+bun run dev
+```
+
+The API will be available at http://localhost:3001
+
+## 📊 API Documentation
+
+### Swagger UI
+Access interactive API documentation at: http://localhost:3001/api-docs
+
+### OpenAPI Specification
+Download the OpenAPI spec at: http://localhost:3001/api-docs.json
+
+### Health Check
+```bash
+curl http://localhost:3001/health
+```
+
+## 🔧 Available Scripts
 
 ```bash
-# Start all services with Docker Compose
-docker-compose up -d
+# Development
+npm run dev          # Start development server with hot reload
+npm run build        # Build for production
+npm run start        # Start production server
 
-# Or use the convenience script
-./start_all.bat
+# Database
+npm run db:migrate   # Run database migrations
+npm run db:generate  # Generate Prisma client
+npm run db:seed      # Seed database with initial data
+npm run db:studio    # Open Prisma Studio
+
+# Testing
+npm run test         # Run unit tests
+npm run test:watch   # Run tests in watch mode
+npm run test:cov     # Run tests with coverage
+
+# Linting & Formatting
+npm run lint         # Run ESLint
+npm run format       # Format code with Prettier
 ```
 
-### 3. Verify Services
+## 🔐 Authentication
 
-Check that all services are running:
+The API uses Clerk for authentication. All protected routes require a valid JWT token in the Authorization header:
 
+```
+Authorization: Bearer <clerk-jwt-token>
+```
+
+## 📡 API Endpoints
+
+### Core Resources
+- `GET/POST/PUT/DELETE /api/agents` - Agent management
+- `GET/POST/PUT/DELETE /api/users` - User management
+- `GET /api/analytics/*` - Analytics and reporting
+- `GET /api/audit/*` - Audit logs and compliance
+- `POST/GET /api/backup/*` - Backup and restore operations
+
+### System Endpoints
+- `GET /health` - Health check
+- `GET /api-docs` - API documentation
+- `GET /metrics` - Application metrics (Prometheus)
+
+## 🧪 Testing
+
+### Unit Tests
 ```bash
-docker-compose ps
+npm run test
 ```
 
-Expected services:
-- `postgres` - Database
+### Integration Tests
+```bash
+npm run test:integration
+```
+
+### API Testing
+```bash
+# Using curl
+curl -H "Authorization: Bearer <token>" http://localhost:3001/api/agents
+
+# Using the Swagger UI at http://localhost:3001/api-docs
+```
+
+## 🚀 Deployment
+
+### Docker
+```bash
+# Build the image
+docker build -t voiceflow-backend .
+
+# Run the container
+docker run -p 3001:3001 voiceflow-backend
+```
+
+### Environment Variables for Production
+```env
+NODE_ENV=production
+PORT=3001
+DATABASE_URL=postgresql://user:pass@db-host:5432/voiceflow
+REDIS_URL=redis://redis-host:6379
+CLERK_SECRET_KEY=your_production_clerk_secret
+```
+
+## 📊 Monitoring
+
+### Health Checks
+- `/health` - Application health status
+- `/metrics` - Prometheus metrics
+- `/ready` - Readiness probe
+
+### Logging
+- Structured JSON logging
+- Log levels: ERROR, WARN, INFO, DEBUG
+- Request/response logging middleware
+
+## 🔒 Security
+
+- **Authentication**: Clerk JWT validation
+- **Authorization**: Role-based access control
+- **Rate Limiting**: Redis-based request throttling
+- **Input Validation**: Zod schema validation
+- **CORS**: Configured for allowed origins
+- **Helmet**: Security headers
+- **Data Sanitization**: PII protection and filtering
+
+## 🤝 Contributing
+
+1. Follow the existing code style
+2. Add tests for new features
+3. Update API documentation
+4. Ensure all tests pass
+5. Create a pull request with a clear description
+
+## 📄 License
+
+MIT License - see LICENSE file for details.
 - `minio` - Object storage
 - `chroma` - Vector database
 - `redis` - Cache

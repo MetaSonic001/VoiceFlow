@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import { DashboardSidebar } from "@/components/dashboard/sidebar"
 import {
   Code,
   Copy,
@@ -326,10 +325,7 @@ export default function APIDocumentationPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="flex">
-        <DashboardSidebar />
-        <div className="flex-1 ml-64">
-          <div className="p-6">
+      <div className="p-6">
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h1 className="text-3xl font-bold">API Documentation</h1>
@@ -600,7 +596,6 @@ const data = await response.json();`, `js-${endpoint.id}`)}
             </div>
           </div>
         </div>
-      </div>
-    </div>
-  )
-}
+     
+    )
+  }

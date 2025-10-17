@@ -7,7 +7,6 @@ import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Progress } from "@/components/ui/progress"
-import { DashboardSidebar } from "@/components/dashboard/sidebar"
 import {
   Download,
   Upload,
@@ -335,15 +334,10 @@ export default function BackupRestorePage() {
   if (loading) {
     return (
       <div className="min-h-screen bg-background">
-        <div className="flex">
-          <DashboardSidebar />
-          <div className="flex-1 ml-64">
-            <div className="p-6">
-              <div className="flex items-center justify-center h-64">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-                <span className="ml-2">Loading backup data...</span>
-              </div>
-            </div>
+        <div className="p-6">
+          <div className="flex items-center justify-center h-64">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            <span className="ml-2">Loading backup data...</span>
           </div>
         </div>
       </div>
@@ -352,10 +346,7 @@ export default function BackupRestorePage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="flex">
-        <DashboardSidebar />
-        <div className="flex-1 ml-64">
-          <div className="p-6">
+      <div className="p-6">
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h1 className="text-3xl font-bold">Backup & Restore</h1>
@@ -628,7 +619,6 @@ export default function BackupRestorePage() {
             </Dialog>
           </div>
         </div>
-      </div>
-    </div>
-  )
-}
+      
+    )
+  }

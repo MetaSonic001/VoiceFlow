@@ -8,7 +8,6 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { DashboardSidebar } from "@/components/dashboard/sidebar"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { AlertCircle, CheckCircle, Key, Shield, Bell, Database, Zap, Globe } from "lucide-react"
@@ -125,11 +124,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="flex">
-        <DashboardSidebar />
-        <div className="flex-1 ml-64">
-          <div className="p-6">
+    <div className="p-6">
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h1 className="text-3xl font-bold">Settings</h1>
@@ -413,8 +408,6 @@ export default function SettingsPage() {
               </TabsContent>
             </Tabs>
           </div>
-        </div>
-      </div>
-    </div>
-  )
-}
+        
+      )
+    }
