@@ -3,6 +3,12 @@ import * as vosk from 'vosk';
 import { Readable } from 'stream';
 import RagService from './ragService';
 import VoiceService from './voiceService';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+import { promisify } from 'util';
+import { exec } from 'child_process';
+const execAsync = promisify(exec);
 
 export interface TwilioMediaConfig {
   accountSid: string;
@@ -185,36 +191,75 @@ export class TwilioMediaService {
 
   /**
    * Transcribe complete audio buffer using Vosk
-   * Note: Currently expects raw PCM audio. Frontend sends WebM which needs conversion.
+   * Handles WebM to WAV conversion for browser-recorded audio
    */
   private async transcribeCompleteAudio(audioBuffer: Buffer): Promise<string> {
     try {
-      // TODO: Add audio format conversion from WebM to PCM
-      // For now, this will likely fail with WebM format
       console.log(`Processing audio buffer of ${audioBuffer.length} bytes`);
+
+      // Check if this is WebM format (browser default)
+      const isWebM = audioBuffer.slice(0, 4).toString() === '\x1a\x45\xdf\xa3';
+
+      let pcmBuffer: Buffer;
+
+      if (isWebM) {
+        // Convert WebM to WAV using ffmpeg
+        pcmBuffer = await this.convertWebMToWAV(audioBuffer);
+      } else {
+        // Assume it's already PCM
+        pcmBuffer = audioBuffer;
+      }
 
       // Create a temporary recognizer for this audio
       const recognizer = new vosk.Recognizer({ model: this.voskModel, sampleRate: 16000 });
 
       // Convert Buffer to Int16Array for Vosk
-      const audioData = new Int16Array(audioBuffer.buffer, audioBuffer.byteOffset, audioBuffer.length / 2);
+      const audioData = new Int16Array(pcmBuffer.buffer, pcmBuffer.byteOffset, pcmBuffer.length / 2);
 
-      // Process the entire audio buffer
+      // Process the complete audio
       recognizer.acceptWaveform(audioData);
-
-      // Get the final result
       const result = recognizer.result();
-      const transcript = result.text;
-
-      console.log(`Transcription result: "${transcript}"`);
-
-      // Clean up
       recognizer.free();
 
-      return transcript;
+      return result.text || '';
     } catch (error) {
       console.error('Error transcribing audio:', error);
       return '';
+    }
+  }
+
+  /**
+   * Convert WebM audio buffer to WAV format using ffmpeg
+   */
+  private async convertWebMToWAV(webmBuffer: Buffer): Promise<Buffer> {
+    try {
+      // Create temporary files
+      const tempDir = os.tmpdir();
+      const inputPath = path.join(tempDir, `input_${Date.now()}.webm`);
+      const outputPath = path.join(tempDir, `output_${Date.now()}.wav`);
+
+      // Write WebM buffer to temporary file
+      fs.writeFileSync(inputPath, webmBuffer);
+
+      // Convert using ffmpeg
+      const ffmpegCommand = `ffmpeg -i "${inputPath}" -acodec pcm_s16le -ar 16000 -ac 1 -f wav "${outputPath}" -y`;
+      await execAsync(ffmpegCommand);
+
+      // Read the converted WAV file
+      const wavBuffer = fs.readFileSync(outputPath);
+
+      // Clean up temporary files
+      try {
+        fs.unlinkSync(inputPath);
+        fs.unlinkSync(outputPath);
+      } catch (cleanupError) {
+        console.warn('Failed to clean up temporary files:', cleanupError);
+      }
+
+      return wavBuffer;
+    } catch (error) {
+      console.error('Error converting WebM to WAV:', error);
+      throw new Error('Audio conversion failed');
     }
   }
 

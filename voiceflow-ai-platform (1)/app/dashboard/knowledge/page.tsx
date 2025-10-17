@@ -68,9 +68,11 @@ export default function KnowledgeBasePage() {
   const loadDocuments = async () => {
     try {
       setLoading(true)
-      // This would call a documents API endpoint
-      // const data = await apiClient.getDocuments()
-      // For now, using mock data
+      const data = await apiClient.getKnowledgeBase()
+      setDocuments(data)
+    } catch (error) {
+      console.error('Error loading documents:', error)
+      // Fallback to mock data
       const mockDocuments: Document[] = [
         {
           id: 'doc-001',
@@ -95,52 +97,13 @@ export default function KnowledgeBasePage() {
           tags: ['api', 'reference', 'technical'],
           category: 'Technical',
           description: 'Comprehensive API documentation'
-        },
-        {
-          id: 'doc-003',
-          name: 'Product Images.zip',
-          type: 'other',
-          size: 5242880, // 5MB
-          uploadedAt: '2024-01-13T09:15:00Z',
-          lastModified: '2024-01-13T09:15:00Z',
-          status: 'processing',
-          tags: ['images', 'product', 'media'],
-          category: 'Media',
-          description: 'Product screenshots and marketing images'
-        },
-        {
-          id: 'doc-004',
-          name: 'Training Video.mp4',
-          type: 'video',
-          size: 104857600, // 100MB
-          uploadedAt: '2024-01-12T14:20:00Z',
-          lastModified: '2024-01-12T14:20:00Z',
-          status: 'ready',
-          tags: ['training', 'video', 'tutorial'],
-          category: 'Training',
-          description: 'Step-by-step training video for new users'
-        },
-        {
-          id: 'doc-005',
-          name: 'FAQ.txt',
-          type: 'txt',
-          size: 32768, // 32KB
-          uploadedAt: '2024-01-11T11:45:00Z',
-          lastModified: '2024-01-11T12:00:00Z',
-          status: 'ready',
-          tags: ['faq', 'help', 'support'],
-          category: 'Support',
-          description: 'Frequently asked questions and answers'
         }
       ]
       setDocuments(mockDocuments)
-    } catch (error) {
-      console.error('Failed to load documents:', error)
     } finally {
       setLoading(false)
     }
   }
-
   const loadCategories = async () => {
     try {
       // This would call a categories API endpoint

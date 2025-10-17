@@ -28,7 +28,7 @@ AGENT_WORKFLOW_URL=http://localhost:8001
 # Twilio (optional, for phone calling)
 TWILIO_ACCOUNT_SID=your_account_sid
 TWILIO_AUTH_TOKEN=your_auth_token
-TWILIO_PHONE_NUMBER=+1234567890
+TWILIO_PHONE_NUMBER=+18283838255
 
 # Demo configuration
 DEMO_TENANT_NAME="VoiceFlow Demo Tenant"
@@ -108,8 +108,8 @@ The script provides detailed logging of each step and displays:
 🧠 Step 4: Testing agent workflow
 📞 Step 5: Setting up Twilio integration
 🎉 Demo completed successfully!
-📊 Summary: {'tenant_id': '...', 'agent_id': '...', 'document_id': '...', 'phone_number': '+1234567890'}
+📊 Summary: {'tenant_id': '...', 'agent_id': '...', 'document_id': '...', 'phone_number': '+18283838255'}
 
-🎯 CALL THIS NUMBER TO TEST: +1234567890
+🎯 CALL THIS NUMBER TO TEST: +18283838255
 The agent is now ready to answer questions about the extracted content!
 ``` 

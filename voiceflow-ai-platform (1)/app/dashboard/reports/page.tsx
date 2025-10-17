@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import DatePickerWithRange from "@/components/ui/date-range-picker"
+import DateRangePicker from "@/components/ui/date-range-picker"
 import {
   Download,
   FileText,
@@ -116,9 +116,12 @@ export default function ReportsPage() {
 
   const loadExportJobs = async () => {
     try {
-      // This would call an export jobs API endpoint
-      // const data = await apiClient.getExportJobs()
-      // For now, using mock data
+      // Try to get reports from API, fallback to mock data
+      const data = await apiClient.getReports()
+      setExportJobs(data)
+    } catch (error) {
+      console.error('Failed to load export jobs:', error)
+      // Fallback to mock data
       const mockJobs: ExportJob[] = [
         {
           id: 'exp-001',
@@ -143,8 +146,6 @@ export default function ReportsPage() {
         }
       ]
       setExportJobs(mockJobs)
-    } catch (error) {
-      console.error('Failed to load export jobs:', error)
     }
   }
 
@@ -153,14 +154,38 @@ export default function ReportsPage() {
 
     setLoading(true)
     try {
-      // This would call an export API endpoint
-      // const job = await apiClient.createExportJob({
-      //   templateId: selectedTemplate,
-      //   format: selectedFormat,
-      //   dateRange: dateRange
-      // })
+      const reportData = {
+        type: selectedTemplate,
+        dateRange: dateRange && dateRange.from && dateRange.to ? {
+          from: dateRange.from.toISOString(),
+          to: dateRange.to.toISOString()
+        } : {
+          from: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(), // 30 days ago
+          to: new Date().toISOString()
+        },
+        filters: {}
+      }
 
-      // Mock creating a new export job
+      const job = await apiClient.generateReport(reportData)
+
+      // Add the new job to the list
+      const newJob: ExportJob = {
+        id: job.reportId,
+        templateId: selectedTemplate,
+        status: 'pending',
+        createdAt: new Date().toISOString()
+      }
+
+      setExportJobs(prev => [newJob, ...prev])
+
+      // Refresh jobs list after a delay
+      setTimeout(() => {
+        loadExportJobs()
+      }, 2000)
+
+    } catch (error) {
+      console.error('Failed to generate report:', error)
+      // Fallback to mock behavior
       const newJob: ExportJob = {
         id: `exp-${Date.now()}`,
         templateId: selectedTemplate,
@@ -170,7 +195,6 @@ export default function ReportsPage() {
 
       setExportJobs(prev => [newJob, ...prev])
 
-      // Simulate processing
       setTimeout(() => {
         setExportJobs(prev =>
           prev.map(job =>
@@ -195,9 +219,6 @@ export default function ReportsPage() {
           )
         }, 3000)
       }, 1000)
-
-    } catch (error) {
-      console.error('Failed to create export job:', error)
     } finally {
       setLoading(false)
     }
@@ -310,7 +331,7 @@ export default function ReportsPage() {
 
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Date Range (Optional)</label>
-                  <DatePickerWithRange
+                  <DateRangePicker
                     date={dateRange}
                     onDateChange={setDateRange}
                   />

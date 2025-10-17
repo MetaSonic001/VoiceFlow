@@ -42,7 +42,7 @@ interface Backup {
 interface BackupSchedule {
   id: string
   name: string
-  type: 'full' | 'incremental'
+  type: 'full' | 'incremental' | 'configuration'
   frequency: 'daily' | 'weekly' | 'monthly'
   time: string
   enabled: boolean

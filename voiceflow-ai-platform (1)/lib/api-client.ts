@@ -362,156 +362,238 @@ class ApiClient {
     })
   }
 
-  // Real-time WebSocket connection
-  connectWebSocket(onMessage: (data: any) => void) {
-    const wsUrl = this.baseUrl.replace("http", "ws") + "/ws"
-    console.log("[v0] Connecting to WebSocket:", wsUrl)
-
-    try {
-      const ws = new WebSocket(wsUrl)
-
-      ws.onopen = () => {
-        console.log("[v0] WebSocket connected")
-      }
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data)
-          onMessage(data)
-        } catch (error) {
-          console.error("[v0] Failed to parse WebSocket message:", error)
-        }
-      }
-
-      ws.onerror = (error) => {
-        console.error("[v0] WebSocket error:", error)
-      }
-
-      ws.onclose = () => {
-        console.log("[v0] WebSocket disconnected")
-      }
-
-      return ws
-    } catch (error) {
-      console.error("[v0] Failed to create WebSocket connection:", error)
-      return null
-    }
+  // User management methods
+  async getUsers(params: { page?: number; limit?: number; search?: string; role?: string; status?: string } = {}) {
+    const queryParams = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined) queryParams.append(key, value.toString());
+    });
+    return this.request<User[]>('/api/users?' + queryParams.toString());
   }
 
-  // Real-time conversation monitoring endpoints
-  async getActiveConversations() {
-    return this.request<LiveConversation[]>("/conversations/active")
+  async getUser(userId: string) {
+    return this.request<User>(`/api/users/${userId}`);
   }
 
-  async getConversationTranscript(conversationId: string) {
-    return this.request<ConversationTranscript>(`/conversations/${conversationId}/transcript`)
-  }
-
-  async pauseAllAgents() {
-    return this.request<{ success: boolean }>("/agents/pause-all", {
-      method: "POST",
-    })
-  }
-
-  async activateAllAgents() {
-    return this.request<{ success: boolean }>("/agents/activate-all", {
-      method: "POST",
-    })
-  }
-
-  // Analytics endpoints
-  async getAnalyticsOverview(timeRange = "7d", agentId?: string) {
-    const params = new URLSearchParams({ time_range: timeRange })
-    if (agentId && agentId !== "all") {
-      params.append("agent_id", agentId)
-    }
-    return this.request<AnalyticsOverview>(`/analytics/overview?${params}`)
-  }
-
-  async getMetricsData(timeRange = "7d", agentId?: string) {
-    const params = new URLSearchParams({ time_range: timeRange })
-    if (agentId && agentId !== "all") {
-      params.append("agent_id", agentId)
-    }
-    return this.request<MetricsData>(`/analytics/metrics?${params}`)
-  }
-
-  async getPerformanceData(timeRange = "7d", agentId?: string) {
-    const params = new URLSearchParams({ time_range: timeRange })
-    if (agentId && agentId !== "all") {
-      params.append("agent_id", agentId)
-    }
-    return this.request<PerformanceData>(`/analytics/performance?${params}`)
-  }
-
-  async getMetricsChart(timeRange = "7d", agentId?: string) {
-    const params = new URLSearchParams({ time_range: timeRange })
-    if (agentId && agentId !== "all") {
-      params.append("agent_id", agentId)
-    }
-    return this.request<MetricsChartData>(`/analytics/metrics-chart?${params}`)
-  }
-
-  async getAgentComparison() {
-    return this.request<AgentComparisonData>("/analytics/agents/comparison")
-  }
-
-  async getRealtimeMetrics() {
-    return this.request<RealtimeMetrics>("/analytics/realtime")
-  }
-
-  // Call logs endpoints
-  async getCallLogs(params: CallLogsParams = {}) {
-    const searchParams = new URLSearchParams()
-
-    if (params.page) searchParams.append("page", params.page.toString())
-    if (params.limit) searchParams.append("limit", params.limit.toString())
-    if (params.search) searchParams.append("search", params.search)
-    if (params.status) searchParams.append("status", params.status)
-    if (params.type) searchParams.append("type", params.type)
-    if (params.agent_id) searchParams.append("agent_id", params.agent_id)
-
-    return this.request<CallLogsResponse>(`/analytics/calls?${searchParams}`)
-  }
-
-  async getCallDetails(callId: string) {
-    return this.request<CallLogDetails>(`/calls/${callId}`)
-  }
-
-  async getConversations(agentId: string, limit = 10) {
-    return this.request<Conversation[]>(`/agents/${agentId}/conversations?limit=${limit}`)
-  }
-
-  async sendMessage(sessionId: string, message: string) {
-    return this.request<{ response: string; chunks_used?: string[] }>(`/conversations/${sessionId}/message`, {
-      method: "POST",
-      body: JSON.stringify({ message }),
-    })
-  }
-
-  async sendAudioMessage(sessionId: string, audioFile: File) {
-    const formData = new FormData()
-    formData.append("audio", audioFile)
-
-    return this.request<{ response: string; transcript?: string }>(`/conversations/${sessionId}/audio`, {
-      method: "POST",
-      body: formData,
-      headers: {}, // Remove Content-Type for FormData
-    })
-  }
-
-  async healthCheck() {
-    return this.request<{ status: string; timestamp: string }>("/health")
-  }
-
-  // Generic helper for POSTing raw payloads from components
-  async postRaw<T = any>(endpoint: string, body: any, headers: Record<string, string> = {}) {
-    const options: RequestInit = {
+  async createUser(data: { email: string; name: string; role?: string; status?: string }) {
+    return this.request<User>('/api/users', {
       method: 'POST',
-      body: typeof body === 'string' ? body : JSON.stringify(body),
-      headers: { 'Content-Type': 'application/json', ...headers },
-    }
-    return this.request<T>(endpoint, options)
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateUser(userId: string, data: Partial<{ email: string; name: string; role: string; status: string }>) {
+    return this.request<User>(`/api/users/${userId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteUser(userId: string) {
+    return this.request<{ success: boolean }>(`/api/users/${userId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  // Analytics methods
+  async getAnalyticsOverview(params: { timeRange?: string; agentId?: string } = {}) {
+    const queryParams = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined) queryParams.append(key, value.toString());
+    });
+    return this.request('/analytics/overview?' + queryParams.toString());
+  }
+
+  async getCallLogs(params: { page?: number; limit?: number; search?: string; status?: string; type?: string; agentId?: string } = {}) {
+    const queryParams = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined) queryParams.append(key, value.toString());
+    });
+    return this.request('/analytics/calls?' + queryParams.toString());
+  }
+
+  async getChatLogs(params: { page?: number; limit?: number; search?: string; status?: string; agentId?: string } = {}) {
+    const queryParams = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined) queryParams.append(key, value.toString());
+    });
+    return this.request('/analytics/chats?' + queryParams.toString());
+  }
+
+  async getPerformanceMetrics(params: { timeRange?: string; agentId?: string } = {}) {
+    const queryParams = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined) queryParams.append(key, value.toString());
+    });
+    return this.request('/analytics/performance?' + queryParams.toString());
+  }
+
+  // Reports methods
+  async generateReport(data: { type: string; dateRange: { from: string; to: string }; filters?: any }) {
+    return this.request<{ reportId: string; status: string }>('/reports/generate', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getReport(reportId: string) {
+    return this.request('/reports/' + reportId);
+  }
+
+  async getReports(params: { page?: number; limit?: number; type?: string } = {}) {
+    const queryParams = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined) queryParams.append(key, value.toString());
+    });
+    return this.request('/reports?' + queryParams.toString());
+  }
+
+  async exportReport(reportId: string, format: 'pdf' | 'csv' | 'excel') {
+    return this.request(`/reports/${reportId}/export?format=${format}`, {
+      method: 'POST',
+    });
+  }
+
+  // Knowledge base methods
+  async getKnowledgeBase(params: { page?: number; limit?: number; search?: string } = {}) {
+    const queryParams = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined) queryParams.append(key, value.toString());
+    });
+    return this.request('/api/documents?' + queryParams.toString());
+  }
+
+  async uploadDocument(data: FormData) {
+    return this.request('/api/documents', {
+      method: 'POST',
+      body: data,
+      headers: {
+        // Don't set Content-Type for FormData - let browser set it with boundary
+      },
+    });
+  }
+
+  async deleteDocument(documentId: string) {
+    return this.request<{ success: boolean }>(`/api/documents/${documentId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  // Settings methods
+  async getSettings() {
+    return this.request('/settings');
+  }
+
+  async updateSettings(data: any) {
+    return this.request('/settings', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  // System methods
+  async getSystemHealth() {
+    return this.request('/health');
+  }
+
+  async getSystemLogs(params: { level?: string; limit?: number; from?: string; to?: string } = {}) {
+    const queryParams = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined) queryParams.append(key, value.toString());
+    });
+    return this.request('/system/logs?' + queryParams.toString());
+  }
+
+  async getSystemMetrics() {
+    return this.request('/system/metrics');
+  }
+
+  // Notifications methods
+  async getNotifications(params: { page?: number; limit?: number; read?: boolean } = {}) {
+    const queryParams = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined) queryParams.append(key, value.toString());
+    });
+    return this.request('/notifications?' + queryParams.toString());
+  }
+
+  async markNotificationAsRead(notificationId: string) {
+    return this.request('/notifications/' + notificationId + '/read', {
+      method: 'POST',
+    });
+  }
+
+  async markAllNotificationsAsRead() {
+    return this.request('/notifications/mark-all-read', {
+      method: 'POST',
+    });
+  }
+
+  // Backup methods
+  async createBackup(data: { type: 'full' | 'incremental'; description?: string }) {
+    return this.request<{ backupId: string; status: string }>('/backup/create', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getBackups(params: { page?: number; limit?: number; status?: string } = {}) {
+    const queryParams = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined) queryParams.append(key, value.toString());
+    });
+    return this.request('/backup?' + queryParams.toString());
+  }
+
+  async restoreBackup(backupId: string) {
+    return this.request('/backup/' + backupId + '/restore', {
+      method: 'POST',
+    });
+  }
+
+  // Billing methods
+  async getBillingOverview() {
+    return this.request('/billing/overview');
+  }
+
+  async getInvoices(params: { page?: number; limit?: number; status?: string } = {}) {
+    const queryParams = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined) queryParams.append(key, value.toString());
+    });
+    return this.request('/billing/invoices?' + queryParams.toString());
+  }
+
+  async getUsageStats(params: { timeRange?: string } = {}) {
+    const queryParams = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined) queryParams.append(key, value.toString());
+    });
+    return this.request('/billing/usage?' + queryParams.toString());
+  }
+
+  // Integrations methods
+  async getIntegrations() {
+    return this.request('/integrations');
+  }
+
+  async connectIntegration(data: { type: string; config: any }) {
+    return this.request('/integrations/connect', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async disconnectIntegration(integrationId: string) {
+    return this.request('/integrations/' + integrationId + '/disconnect', {
+      method: 'POST',
+    });
+  }
+
+  async testIntegration(integrationId: string) {
+    return this.request('/integrations/' + integrationId + '/test', {
+      method: 'POST',
+    });
   }
 }
 

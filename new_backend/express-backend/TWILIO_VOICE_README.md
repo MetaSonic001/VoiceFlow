@@ -37,7 +37,7 @@ Phone Call → Twilio → Webhook → Socket.IO → Vosk ASR → RagService (Gro
    ```bash
    TWILIO_ACCOUNT_SID=your_account_sid
    TWILIO_AUTH_TOKEN=your_auth_token
-   TWILIO_PHONE_NUMBER=+1234567890
+   TWILIO_PHONE_NUMBER=+18283838255
    TWILIO_PHONE_NUMBER_SID=your_phone_number_sid
    GROQ_API_KEY=your_groq_api_key
    ```
@@ -109,7 +109,7 @@ This script will:
 - **Body**:
   ```json
   {
-    "to": "+1234567890",
+    "to": "+18283838255",
     "agentId": "voice-agent"
   }
   ```

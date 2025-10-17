@@ -38,7 +38,16 @@ export default function SettingsPage() {
     }
   })
 
-  const [apiKeys, setApiKeys] = useState([])
+  type ApiKey = {
+    id: string
+    name: string
+    key: string
+    created: string
+    lastUsed: string | null
+    permissions: string[]
+  }
+
+  const [apiKeys, setApiKeys] = useState<ApiKey[]>([])
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
 
@@ -49,19 +58,36 @@ export default function SettingsPage() {
 
   const loadSettings = async () => {
     try {
-      // This would call a settings API endpoint
-      // const data = await apiClient.getSettings()
-      // setSettings(data)
+      const data = await apiClient.getSettings()
+      setSettings(data)
     } catch (error) {
       console.error('Failed to load settings:', error)
+      // Keep default settings
     }
   }
 
   const loadApiKeys = async () => {
     try {
-      // This would call an API keys management endpoint
-      // const data = await apiClient.getApiKeys()
-      // setApiKeys(data)
+      // For now, using mock data since API doesn't exist yet
+      const mockApiKeys: ApiKey[] = [
+        {
+          id: 'key-1',
+          name: 'Production API Key',
+          key: 'sk_prod_******************************',
+          created: '2024-01-01T00:00:00Z',
+          lastUsed: '2024-01-15T10:30:00Z',
+          permissions: ['read', 'write', 'admin']
+        },
+        {
+          id: 'key-2',
+          name: 'Development API Key',
+          key: 'sk_dev_*******************************',
+          created: '2024-01-05T00:00:00Z',
+          lastUsed: '2024-01-14T15:45:00Z',
+          permissions: ['read', 'write']
+        }
+      ]
+      setApiKeys(mockApiKeys)
     } catch (error) {
       console.error('Failed to load API keys:', error)
     }
@@ -70,8 +96,7 @@ export default function SettingsPage() {
   const updateSettings = async (category: string, updates: any) => {
     setLoading(true)
     try {
-      // This would call a settings update API endpoint
-      // await apiClient.updateSettings(category, updates)
+      await apiClient.updateSettings({ [category]: updates })
       setSettings(prev => ({
         ...prev,
         [category]: { ...prev[category as keyof typeof prev], ...updates }
@@ -79,6 +104,7 @@ export default function SettingsPage() {
       setMessage('Settings updated successfully!')
       setTimeout(() => setMessage(''), 3000)
     } catch (error) {
+      console.error('Failed to update settings:', error)
       setMessage('Failed to update settings')
       setTimeout(() => setMessage(''), 3000)
     } finally {

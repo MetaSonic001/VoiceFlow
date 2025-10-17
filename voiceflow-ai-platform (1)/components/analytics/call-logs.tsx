@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -8,84 +8,83 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { DashboardSidebar } from "@/components/dashboard/sidebar"
 import { CallLogDetails } from "@/components/analytics/call-log-details"
-import { Search, Filter, Download, Phone, MessageSquare, Clock } from "lucide-react"
+import { Search, Filter, Download, Phone, MessageSquare, Clock, Loader2 } from "lucide-react"
+import { apiClient } from "@/lib/api-client"
+
+interface CallLog {
+  id: string
+  type: "phone" | "chat"
+  customerInfo: string
+  agentName: string
+  agentId: string
+  startTime: string
+  duration: number
+  status: string
+  resolution: string
+  summary: string
+  sentiment: string
+  tags: string[]
+  transcript?: string
+}
 
 export function CallLogs() {
   const [searchQuery, setSearchQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
   const [typeFilter, setTypeFilter] = useState("all")
   const [selectedLog, setSelectedLog] = useState<string | null>(null)
+  const [callLogs, setCallLogs] = useState<CallLog[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  // Mock call log data
-  const callLogs = [
-    {
-      id: "call-001",
-      type: "phone",
-      customerInfo: "+1 (555) 987-6543",
-      agentName: "Customer Support Assistant",
-      startTime: "2024-01-15 14:30:25",
-      duration: "3m 24s",
-      status: "completed",
-      resolution: "resolved",
-      summary:
-        "Customer inquiry about product pricing and availability. Provided detailed information about current promotions.",
-      sentiment: "positive",
-      tags: ["pricing", "product-info"],
-    },
-    {
-      id: "call-002",
-      type: "chat",
-      customerInfo: "Anonymous User",
-      agentName: "Customer Support Assistant",
-      startTime: "2024-01-15 14:25:12",
-      duration: "1m 45s",
-      status: "completed",
-      resolution: "resolved",
-      summary: "Password reset assistance. Guided customer through the reset process successfully.",
-      sentiment: "neutral",
-      tags: ["password-reset", "account"],
-    },
-    {
-      id: "call-003",
-      type: "phone",
-      customerInfo: "+1 (555) 123-9876",
-      agentName: "Sales Qualifier",
-      startTime: "2024-01-15 14:20:08",
-      duration: "5m 12s",
-      status: "escalated",
-      resolution: "escalated",
-      summary: "Complex billing issue requiring human intervention. Customer had multiple questions about charges.",
-      sentiment: "negative",
-      tags: ["billing", "escalation"],
-    },
-    {
-      id: "call-004",
-      type: "chat",
-      customerInfo: "john.doe@email.com",
-      agentName: "HR Assistant",
-      startTime: "2024-01-15 14:15:33",
-      duration: "2m 18s",
-      status: "completed",
-      resolution: "resolved",
-      summary:
-        "Employee asking about vacation policy and available days. Provided policy document and current balance.",
-      sentiment: "positive",
-      tags: ["hr", "vacation-policy"],
-    },
-    {
-      id: "call-005",
-      type: "phone",
-      customerInfo: "+1 (555) 456-7890",
-      agentName: "Customer Support Assistant",
-      startTime: "2024-01-15 14:10:15",
-      duration: "4m 56s",
-      status: "completed",
-      resolution: "resolved",
-      summary: "Technical support for software installation. Walked customer through troubleshooting steps.",
-      sentiment: "positive",
-      tags: ["technical-support", "installation"],
-    },
-  ]
+  useEffect(() => {
+    loadCallLogs()
+  }, [])
+
+  const loadCallLogs = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      const data = await apiClient.getCallLogs()
+      setCallLogs(data)
+    } catch (err) {
+      console.error('Error loading call logs:', err)
+      setError('Failed to load call logs')
+      // Fallback to mock data
+      const mockLogs: CallLog[] = [
+        {
+          id: "call-001",
+          type: "phone",
+          customerInfo: "+1 (555) 987-6543",
+          agentName: "Customer Support Assistant",
+          agentId: "agent-1",
+          startTime: "2024-01-15T14:30:25Z",
+          duration: 204,
+          status: "completed",
+          resolution: "resolved",
+          summary: "Customer inquiry about product pricing and availability. Provided detailed information about current promotions.",
+          sentiment: "positive",
+          tags: ["pricing", "product-info"],
+        },
+        {
+          id: "call-002",
+          type: "chat",
+          customerInfo: "Anonymous User",
+          agentName: "Customer Support Assistant",
+          agentId: "agent-1",
+          startTime: "2024-01-15T14:25:12Z",
+          duration: 105,
+          status: "completed",
+          resolution: "resolved",
+          summary: "Password reset assistance. Guided customer through the reset process successfully.",
+          sentiment: "neutral",
+          tags: ["password-reset", "account"],
+        }
+      ]
+      setCallLogs(mockLogs)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const filteredLogs = callLogs.filter((log) => {
     const matchesSearch =
@@ -98,6 +97,16 @@ export function CallLogs() {
   })
 
   const selectedLogData = callLogs.find((log) => log.id === selectedLog)
+
+  const formatDuration = (seconds: number) => {
+    const minutes = Math.floor(seconds / 60)
+    const remainingSeconds = seconds % 60
+    return `${minutes}m ${remainingSeconds}s`
+  }
+
+  const formatDateTime = (dateString: string) => {
+    return new Date(dateString).toLocaleString()
+  }
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -123,6 +132,44 @@ export function CallLogs() {
       default:
         return "text-gray-600"
     }
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background">
+        <div className="flex">
+          <DashboardSidebar />
+          <div className="flex-1 ml-64">
+            <div className="p-6">
+              <div className="flex items-center justify-center h-64">
+                <Loader2 className="w-8 h-8 animate-spin" />
+                <span className="ml-2">Loading call logs...</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-background">
+        <div className="flex">
+          <DashboardSidebar />
+          <div className="flex-1 ml-64">
+            <div className="p-6">
+              <div className="flex items-center justify-center h-64">
+                <div className="text-center">
+                  <p className="text-red-600 mb-2">{error}</p>
+                  <Button onClick={loadCallLogs}>Retry</Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   if (selectedLog && selectedLogData) {

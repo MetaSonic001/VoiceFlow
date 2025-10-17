@@ -20,8 +20,7 @@ import {
   Smartphone,
   Volume2,
   VolumeX,
-  Trash2,
-  MarkAsRead
+  Trash2
 } from "lucide-react"
 import { apiClient } from "@/lib/api-client"
 
@@ -260,11 +259,10 @@ export default function NotificationsPage() {
               </div>
               {unreadCount > 0 && (
                 <Button onClick={markAllAsRead} variant="outline">
-                  <MarkAsRead className="w-4 h-4 mr-2" />
+                  <CheckCircle className="w-4 h-4 mr-2" />
                   Mark All as Read ({unreadCount})
                 </Button>
               )}
-            </div>
 
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
               <TabsList className="grid w-full grid-cols-7">
@@ -482,6 +480,6 @@ export default function NotificationsPage() {
             </Tabs>
           </div>
         </div>
-      
+      </div>
     )
   }

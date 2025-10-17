@@ -4,11 +4,17 @@ import { auth } from '@clerk/nextjs/server'
 export const runtime = 'nodejs'
 
 export async function handler(req: Request, { params }: { params: { path: string[] } }) {
+  const path = params.path.join('/')
+
+  // Allow unauthenticated access for voice agent audio endpoint
+  const isVoiceAgentAudio = path === 'audio'
   const session: any = auth()
-  if (!session?.userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+
+  if (!isVoiceAgentAudio && !session?.userId) {
+    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+  }
 
   const backendUrl = process.env.NEW_BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'
-  const path = params.path.join('/')
   const url = `${backendUrl.replace(/\/$/, '')}/api/runner/${path}`
 
   const headers: Record<string, string> = {}
@@ -32,7 +38,12 @@ export async function handler(req: Request, { params }: { params: { path: string
   if (process.env.BACKEND_API_KEY) headers['X-API-Key'] = process.env.BACKEND_API_KEY
   // add tenant and user headers
   headers['x-tenant-id'] = 'default-tenant'
-  headers['x-user-id'] = session.userId
+  if (session?.userId) {
+    headers['x-user-id'] = session.userId
+  } else if (isVoiceAgentAudio) {
+    // For voice agent demo, use a default user
+    headers['x-user-id'] = 'demo-user'
+  }
 
   const res = await fetch(url, {
     method: req.method,

@@ -64,9 +64,12 @@ export default function SystemHealthPage() {
   const loadSystemMetrics = async () => {
     try {
       setLoading(true)
-      // This would call a system health API endpoint
-      // const data = await apiClient.getSystemHealth()
-      // For now, using mock data
+      const data = await apiClient.getSystemMetrics()
+      setMetrics(data)
+      setLastUpdated(new Date())
+    } catch (error) {
+      console.error('Failed to load system metrics:', error)
+      // Fallback to mock data
       const mockMetrics: SystemMetrics = {
         uptime: "7d 14h 32m",
         cpu: 45,
@@ -93,8 +96,6 @@ export default function SystemHealthPage() {
       }
       setMetrics(mockMetrics)
       setLastUpdated(new Date())
-    } catch (error) {
-      console.error('Failed to load system metrics:', error)
     } finally {
       setLoading(false)
     }

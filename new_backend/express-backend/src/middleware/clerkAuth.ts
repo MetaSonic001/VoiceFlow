@@ -33,6 +33,15 @@ export class ClerkAuth {
   // Middleware to verify Clerk JWT and set tenant context
   authenticate = async (req: Request, res: Response, next: NextFunction) => {
     try {
+      // Allow unauthenticated access to voice agent audio endpoint for demo
+      if (req.path === '/api/runner/audio' && req.method === 'POST') {
+        // Set default tenant and user for demo
+        req.tenantId = 'default-tenant';
+        req.userId = 'demo-user';
+        req.user = { id: 'demo-user', tenantId: 'default-tenant' };
+        return next();
+      }
+
       const token = this.extractTokenFromHeader(req);
 
       if (!token) {

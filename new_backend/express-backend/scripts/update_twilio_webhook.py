@@ -10,6 +10,10 @@ import requests
 import json
 import sys
 from twilio.rest import Client
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '..', '..', '.env'))
 
 def get_ngrok_url():
     """Get the current ngrok tunnel URL"""

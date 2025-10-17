@@ -145,7 +145,7 @@ router.post('/agent-config', async (req: Request, res: Response) => {
 router.post('/deploy', async (req: Request, res: Response) => {
   try {
     // For now, just return success
-    res.json({ success: true, phone_number: '+1234567890' });
+    res.json({ success: true, phone_number: '+18283838255' });
   } catch (error) {
     console.error('Error deploying agent:', error);
     res.status(500).json({ error: 'Internal server error' });

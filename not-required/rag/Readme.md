@@ -118,10 +118,10 @@ FR CRCE College Information System - Twilio Setup
 ==================================================
 ✓ Environment and knowledge base checks passed
 ✓ Ngrok tunnel established: https://abc123.ngrok.io
-✓ Successfully configured +1234567890
+✓ Successfully configured +18283838255
 
 🎉 Setup Complete!
-📞 Phone Number: +1234567890
+📞 Phone Number: +18283838255
 🌐 Webhook URL: https://abc123.ngrok.io/voice
 ```
 

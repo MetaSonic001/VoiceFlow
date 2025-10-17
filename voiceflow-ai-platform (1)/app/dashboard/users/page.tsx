@@ -19,7 +19,7 @@ interface User {
   name: string
   role: 'admin' | 'user' | 'moderator'
   status: 'active' | 'inactive' | 'pending'
-  lastLogin: string
+  lastLogin: string | null
   createdAt: string
   avatar?: string
 }
@@ -40,9 +40,11 @@ export default function UserManagementPage() {
   const loadUsers = async () => {
     try {
       setLoading(true)
-      // This would call a user management API endpoint
-      // const data = await apiClient.getUsers()
-      // For now, using mock data
+      const data = await apiClient.getUsers()
+      setUsers(data)
+    } catch (error: any) {
+      console.error('Error loading users:', error)
+      // Fallback to mock data if API fails
       const mockUsers: User[] = [
         {
           id: '1',
@@ -50,41 +52,22 @@ export default function UserManagementPage() {
           name: 'Admin User',
           role: 'admin',
           status: 'active',
-          lastLogin: '2024-01-15T10:30:00Z',
-          createdAt: '2024-01-01T00:00:00Z',
-          avatar: '/avatars/admin.jpg'
+          lastLogin: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+          avatar: undefined
         },
         {
           id: '2',
-          email: 'john.doe@company.com',
-          name: 'John Doe',
+          email: 'user@voiceflow.com',
+          name: 'Regular User',
           role: 'user',
           status: 'active',
-          lastLogin: '2024-01-14T15:45:00Z',
-          createdAt: '2024-01-05T00:00:00Z'
-        },
-        {
-          id: '3',
-          email: 'jane.smith@company.com',
-          name: 'Jane Smith',
-          role: 'moderator',
-          status: 'active',
-          lastLogin: '2024-01-13T09:20:00Z',
-          createdAt: '2024-01-03T00:00:00Z'
-        },
-        {
-          id: '4',
-          email: 'pending.user@email.com',
-          name: 'Pending User',
-          role: 'user',
-          status: 'pending',
-          lastLogin: null,
-          createdAt: '2024-01-10T00:00:00Z'
+          lastLogin: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
+          avatar: undefined
         }
       ]
       setUsers(mockUsers)
-    } catch (error) {
-      console.error('Failed to load users:', error)
     } finally {
       setLoading(false)
     }
@@ -115,28 +98,34 @@ export default function UserManagementPage() {
 
   const handleCreateUser = async (userData: Partial<User>) => {
     try {
-      // This would call a create user API endpoint
-      // const newUser = await apiClient.createUser(userData)
+      const newUser = await apiClient.createUser({
+        email: userData.email!,
+        name: userData.name!,
+        role: userData.role || 'user',
+        status: userData.status || 'pending'
+      })
+      setUsers(prev => [...prev, newUser])
+      setIsCreateDialogOpen(false)
+    } catch (error) {
+      console.error('Failed to create user:', error)
+      // Fallback to local creation if API fails
       const newUser: User = {
         id: Date.now().toString(),
         email: userData.email!,
         name: userData.name!,
         role: userData.role || 'user',
-        status: 'pending',
+        status: userData.status || 'pending',
         lastLogin: null,
         createdAt: new Date().toISOString(),
       }
       setUsers(prev => [...prev, newUser])
       setIsCreateDialogOpen(false)
-    } catch (error) {
-      console.error('Failed to create user:', error)
     }
   }
 
   const handleUpdateUser = async (userId: string, updates: Partial<User>) => {
     try {
-      // This would call an update user API endpoint
-      // await apiClient.updateUser(userId, updates)
+      await apiClient.updateUser(userId, updates)
       setUsers(prev => prev.map(user =>
         user.id === userId ? { ...user, ...updates } : user
       ))
@@ -144,16 +133,23 @@ export default function UserManagementPage() {
       setSelectedUser(null)
     } catch (error) {
       console.error('Failed to update user:', error)
+      // Fallback to local update if API fails
+      setUsers(prev => prev.map(user =>
+        user.id === userId ? { ...user, ...updates } : user
+      ))
+      setIsEditDialogOpen(false)
+      setSelectedUser(null)
     }
   }
 
   const handleDeleteUser = async (userId: string) => {
     try {
-      // This would call a delete user API endpoint
-      // await apiClient.deleteUser(userId)
+      await apiClient.deleteUser(userId)
       setUsers(prev => prev.filter(user => user.id !== userId))
     } catch (error) {
       console.error('Failed to delete user:', error)
+      // Fallback to local delete if API fails
+      setUsers(prev => prev.filter(user => user.id !== userId))
     }
   }
 
@@ -373,7 +369,7 @@ function UserForm({ initialData, onSubmit }: UserFormProps) {
         <Label htmlFor="role">Role</Label>
         <Select
           value={formData.role}
-          onValueChange={(value) => setFormData(prev => ({ ...prev, role: value }))}
+          onValueChange={(value) => setFormData(prev => ({ ...prev, role: value as 'admin' | 'user' | 'moderator' }))}
         >
           <SelectTrigger>
             <SelectValue />
@@ -389,7 +385,7 @@ function UserForm({ initialData, onSubmit }: UserFormProps) {
         <Label htmlFor="status">Status</Label>
         <Select
           value={formData.status}
-          onValueChange={(value) => setFormData(prev => ({ ...prev, status: value }))}
+          onValueChange={(value) => setFormData(prev => ({ ...prev, status: value as 'active' | 'inactive' | 'pending' }))}
         >
           <SelectTrigger>
             <SelectValue />

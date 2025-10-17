@@ -12,38 +12,23 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 
-export default function DateRangePicker() {
-  const [startDate, setStartDate] = React.useState<Date>()
-  const [endDate, setEndDate] = React.useState<Date>()
+import { DateRange } from "react-day-picker"
+
+export default function DateRangePicker({ date, onDateChange }: { date?: DateRange; onDateChange?: (date: DateRange | undefined) => void }) {
+  const [startDate, setStartDate] = React.useState<Date | undefined>(date?.from)
+  const [endDate, setEndDate] = React.useState<Date | undefined>(date?.to)
   const [open, setOpen] = React.useState(false)
 
-  const handleSelectDate = (selected: Date | { from?: Date; to?: Date } | undefined) => {
-    if (!selected) {
-      setStartDate(undefined)
-      setEndDate(undefined)
-      return
-    }
+  // Update internal state when external date changes
+  React.useEffect(() => {
+    setStartDate(date?.from)
+    setEndDate(date?.to)
+  }, [date?.from, date?.to])
 
-    // single Date selection (defensive, though mode="range" usually provides a range object)
-    if (selected instanceof Date) {
-      const date = selected
-      if (!startDate || (startDate && endDate)) {
-        setStartDate(date)
-        setEndDate(undefined)
-      } else if (startDate && !endDate) {
-        if (date < startDate) {
-          setStartDate(date)
-        } else {
-          setEndDate(date)
-        }
-      }
-      return
-    }
-
-    // range selection: { from, to }
-    const { from, to } = selected
-    setStartDate(from)
-    setEndDate(to)
+  const handleSelectDate = (selected: DateRange | undefined) => {
+    setStartDate(selected?.from)
+    setEndDate(selected?.to)
+    onDateChange?.(selected)
   }
 
   return (

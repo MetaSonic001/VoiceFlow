@@ -35,7 +35,7 @@ router.get('/numbers', async (req: Request, res: Response) => {
     const mockNumbers = [
       {
         sid: 'PN1234567890abcdef',
-        phone_number: '+1234567890',
+        phone_number: '+18283838255',
         friendly_name: 'VoiceFlow Agent Line 1'
       },
       {
