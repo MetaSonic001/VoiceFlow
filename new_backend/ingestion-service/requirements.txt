@@ -5,6 +5,7 @@ httpx
 chromadb
 sentence-transformers
 crawl4ai
+scrapy  # Alternative web scraping framework
 playwright
 pdfminer.six
 redis
@@ -15,3 +16,13 @@ celery
 groq
 beautifulsoup4
 trafilatura
+python-doctr[torch]  # OCR for documents and images
+python-docx  # Word documents
+python-pptx  # PowerPoint files
+openpyxl  # Excel files
+pandas  # Data processing
+Pillow  # Image processing
+unstructured[all-docs]  # Universal document processing
+langchain-text-splitters  # Better text splitting
+pytesseract  # Additional OCR fallback
+opencv-python  # Image preprocessing
