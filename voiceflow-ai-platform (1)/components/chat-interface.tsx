@@ -62,25 +62,30 @@ export function ChatInterface({ agentId, sessionId, title = "Test Your Agent", c
     setLoading(true)
 
     try {
-      // Mock API call - simulate response
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
-      const mockResponses = [
-        "Hello! I'm your AI agent. How can I help you today?",
-        "That's an interesting question. Let me think about that...",
-        "Based on your request, I can help you with that.",
-        "I understand what you're asking. Here's what I recommend:",
-        "Great question! Let me provide you with some insights."
-      ]
-      
-      const randomResponse = mockResponses[Math.floor(Math.random() * mockResponses.length)]
+      const response = await fetch('/api/runner/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: message.trim(),
+          agentId: agentId || 'test-agent', // Use provided agentId or default for testing
+          sessionId: currentSessionId,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const data = await response.json()
 
       const agentMessage: Message = {
         id: `agent_${Date.now()}`,
         speaker: "agent",
-        message: randomResponse,
+        message: data.response,
         timestamp: new Date().toISOString(),
-        chunks_used: ["mock_chunk_1", "mock_chunk_2"],
+        chunks_used: [], // Could be populated if backend provides this info
       }
 
       setMessages((prev) => [...prev, agentMessage])
@@ -118,24 +123,37 @@ export function ChatInterface({ agentId, sessionId, title = "Test Your Agent", c
 
         setLoading(true)
         try {
-          // Mock audio processing
-          await new Promise(resolve => setTimeout(resolve, 1500))
-          
-          const mockTranscript = "This is a mock transcript of your audio message"
-          const mockResponse = "Thank you for your audio message. I've processed what you said."
+          // Send audio to backend for processing
+          const formData = new FormData();
+          formData.append('audio', audioFile);
+          formData.append('agentId', agentId || 'test-agent');
+          formData.append('sessionId', currentSessionId);
 
+          const response = await fetch('/api/runner/audio', {
+            method: 'POST',
+            body: formData,
+          });
+
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+
+          const data = await response.json();
+
+          // Add user message with transcript
           const userMessage: Message = {
             id: `user_audio_${Date.now()}`,
             speaker: "user",
-            message: `🎤 ${mockTranscript}`,
+            message: `🎤 ${data.transcript}`,
             timestamp: new Date().toISOString(),
           }
           setMessages((prev) => [...prev, userMessage])
 
+          // Add agent response
           const agentMessage: Message = {
             id: `agent_audio_${Date.now()}`,
             speaker: "agent",
-            message: mockResponse,
+            message: data.response,
             timestamp: new Date().toISOString(),
           }
           setMessages((prev) => [...prev, agentMessage])

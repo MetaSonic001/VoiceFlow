@@ -1,18 +1,27 @@
 import express, { Request, Response, NextFunction, Router } from 'express';
 import Joi from 'joi';
 import { PrismaClient } from '@prisma/client';
+import multer from 'multer';
+import RagService from '../services/ragService';
+import VoiceService from '../services/voiceService';
+import { TwilioMediaService, TwilioMediaConfig } from '../services/twilioMediaService';
 
 const router: Router = express.Router();
+const upload = multer({ storage: multer.memoryStorage() });
 
-// Extend Request interface
-declare global {
-  namespace Express {
-    interface Request {
-      tenantId: string;
-      userId: string;
-    }
-  }
-}
+// Import services (they are singleton instances)
+const ragService = RagService;
+const voiceService = VoiceService;
+
+// Twilio config for audio processing
+const twilioConfig: TwilioMediaConfig = {
+  accountSid: process.env.TWILIO_ACCOUNT_SID || '',
+  authToken: process.env.TWILIO_AUTH_TOKEN || '',
+  phoneNumber: process.env.TWILIO_PHONE_NUMBER || '',
+  voskModelPath: process.env.VOSK_MODEL_PATH || './models/vosk-model',
+};
+
+const twilioMediaService = new TwilioMediaService(twilioConfig, ragService, voiceService);
 
 // Interfaces
 interface ChatBody {
@@ -39,24 +48,36 @@ router.post('/chat', async (req: Request, res: Response) => {
     const prisma: PrismaClient = req.app.get('prisma');
     const { message, agentId, sessionId } = value as ChatBody;
 
-    // Verify agent belongs to tenant
-    const agent = await prisma.agent.findFirst({
+    // Verify agent belongs to tenant or use default for testing
+    let agent = await prisma.agent.findFirst({
       where: {
         id: agentId,
         tenantId: req.tenantId
       }
     });
 
+    // If agent not found, use default configuration for testing
     if (!agent) {
-      return res.status(403).json({ error: 'Access denied' });
+      if (agentId === 'test-agent' || agentId === 'voice-agent') {
+        agent = {
+          id: agentId,
+          name: 'Test Agent',
+          systemPrompt: 'You are a helpful AI assistant. Provide clear, accurate, and concise responses.',
+          tokenLimit: 2000
+        } as any;
+      } else {
+        return res.status(403).json({ error: 'Access denied' });
+      }
     }
 
-    const ragService = require('../services/ragService');
     const response = await ragService.processQuery(
       req.tenantId,
       agentId,
       message,
-      agent,
+      {
+        systemPrompt: agent!.systemPrompt || undefined,
+        tokenLimit: agent!.tokenLimit || undefined
+      },
       sessionId
     );
 
@@ -108,36 +129,28 @@ router.get('/agent/:agentId', async (req: Request, res: Response) => {
   }
 });
 
-// List user's agents for frontend
-router.get('/agents', async (req: Request, res: Response) => {
+// Audio processing for voice interface
+router.post('/audio', upload.single('audio'), async (req: Request, res: Response) => {
   try {
-    const prisma: PrismaClient = req.app.get('prisma');
-    const { userId } = req.query;
+    const { agentId, sessionId } = req.body;
 
-    if (!userId || typeof userId !== 'string') {
-      return res.status(400).json({ error: 'User ID required' });
+    if (!req.file) {
+      return res.status(400).json({ error: 'No audio file provided' });
     }
 
-    const agents = await prisma.agent.findMany({
-      where: {
-        userId: userId,
-        tenantId: req.tenantId
-      },
-      select: {
-        id: true,
-        name: true,
-        voiceType: true,
-        createdAt: true,
-        _count: {
-          select: { documents: true }
-        }
-      },
-      orderBy: { createdAt: 'desc' }
-    });
+    const audioBuffer = req.file.buffer;
 
-    res.json(agents);
+    // Process audio (this will do ASR and generate response)
+    const result = await twilioMediaService.processAudioForWeb(audioBuffer, agentId, sessionId || 'default');
+
+    res.json({
+      transcript: result.transcript,
+      response: result.response,
+      agentId: agentId,
+      sessionId: sessionId || 'default'
+    });
   } catch (error) {
-    console.error('Error fetching agents:', error);
+    console.error('Error processing audio:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
