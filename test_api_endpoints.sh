@@ -3,7 +3,7 @@
 # VoiceFlow Express Backend API Test Script
 # This script tests all endpoints with dummy data and proper authentication
 
-BASE_URL="http://localhost:3001"
+BASE_URL="http://localhost:8000"
 AUTH_TOKEN=""
 GUEST_TOKEN=""
 

@@ -17,7 +17,7 @@ The main backend service for VoiceFlow, built with Express.js and TypeScript. Pr
 ## 🏗️ Architecture
 
 ```
-Express.js Backend (Port 3001)
+Express.js Backend (Port 8000)
 ├── Authentication (Clerk)
 ├── API Routes
 │   ├── Agents (/api/agents)
@@ -80,7 +80,7 @@ MINIO_ACCESS_KEY=minioadmin
 MINIO_SECRET_KEY=minioadmin
 
 # Application
-PORT=3001
+PORT=8000
 NODE_ENV=development
 JWT_SECRET=your_jwt_secret
 ```
@@ -101,19 +101,19 @@ npm run dev
 bun run dev
 ```
 
-The API will be available at http://localhost:3001
+The API will be available at http://localhost:8000
 
 ## 📊 API Documentation
 
 ### Swagger UI
-Access interactive API documentation at: http://localhost:3001/api-docs
+Access interactive API documentation at: http://localhost:8000/api-docs
 
 ### OpenAPI Specification
-Download the OpenAPI spec at: http://localhost:3001/api-docs.json
+Download the OpenAPI spec at: http://localhost:8000/api-docs.json
 
 ### Health Check
 ```bash
-curl http://localhost:3001/health
+curl http://localhost:8000/health
 ```
 
 ## 🔧 Available Scripts
@@ -177,9 +177,9 @@ npm run test:integration
 ### API Testing
 ```bash
 # Using curl
-curl -H "Authorization: Bearer <token>" http://localhost:3001/api/agents
+curl -H "Authorization: Bearer <token>" http://localhost:8000/api/agents
 
-# Using the Swagger UI at http://localhost:3001/api-docs
+# Using the Swagger UI at http://localhost:8000/api-docs
 ```
 
 ## 🚀 Deployment
@@ -190,13 +190,13 @@ curl -H "Authorization: Bearer <token>" http://localhost:3001/api/agents
 docker build -t voiceflow-backend .
 
 # Run the container
-docker run -p 3001:3001 voiceflow-backend
+docker run -p 8000:8000 voiceflow-backend
 ```
 
 ### Environment Variables for Production
 ```env
 NODE_ENV=production
-PORT=3001
+PORT=8000
 DATABASE_URL=postgresql://user:pass@db-host:5432/voiceflow
 REDIS_URL=redis://redis-host:6379
 CLERK_SECRET_KEY=your_production_clerk_secret

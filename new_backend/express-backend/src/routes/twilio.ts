@@ -4,6 +4,8 @@ import VoiceService from '../services/voiceService';
 import { TwilioMediaService, TwilioMediaConfig } from '../services/twilioMediaService';
 
 const router: Router = express.Router();
+import dotenv from 'dotenv';
+dotenv.config();
 
 // Initialize services (these should be injected properly in production)
 const ragService = RagService;

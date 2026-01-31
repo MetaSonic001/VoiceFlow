@@ -5,6 +5,8 @@ import multer from 'multer';
 import RagService from '../services/ragService';
 import VoiceService from '../services/voiceService';
 import { TwilioMediaService, TwilioMediaConfig } from '../services/twilioMediaService';
+import dotenv from 'dotenv';
+dotenv.config();
 
 const router: Router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });

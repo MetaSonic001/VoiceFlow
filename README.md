@@ -8,7 +8,7 @@ A comprehensive multi-tenant AI agent platform with voice capabilities, advanced
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │   Next.js       │    │   Express.js    │    │   FastAPI       │
 │   Frontend      │◄──►│   Backend API   │◄──►│   Ingestion     │
-│   (Port 3000)   │    │   (Port 3001)   │    │   Service       │
+│   (Port 3000)   │    │   (Port 8000)   │    │   Service       │
 └─────────────────┘    └─────────────────┘    │   (Port 8001)   │
                                               └─────────────────┘
                                                      │
@@ -81,7 +81,7 @@ docker-compose up --build
 
 ### 4. Access the Application
 - **Frontend**: http://localhost:3000
-- **API Documentation**: http://localhost:3001/api-docs
+- **API Documentation**: http://localhost:8000/api-docs
 - **MinIO Console**: http://localhost:9001
 - **PostgreSQL**: localhost:5433
 - **Redis**: localhost:6379
@@ -114,7 +114,7 @@ python main.py
 | Service | Technology | Port | Description |
 |---------|------------|------|-------------|
 | Frontend | Next.js | 3000 | User interface and dashboards |
-| Backend API | Express.js | 3001 | Main REST API and business logic |
+| Backend API | Express.js | 8000 | Main REST API and business logic |
 | Ingestion | FastAPI | 8001 | Document processing and embeddings |
 | Database | PostgreSQL | 5433 | Primary data storage |
 | Cache | Redis | 6379 | Session storage and caching |
@@ -127,7 +127,7 @@ python main.py
 
 #### Frontend (.env.local)
 ```env
-NEXT_PUBLIC_API_URL=http://localhost:3001
+NEXT_PUBLIC_API_URL=http://localhost:8000
 NEXT_PUBLIC_PUBLIC_BASE_URL=http://localhost:3000
 NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=your_clerk_key
 ```
@@ -167,9 +167,9 @@ GROQ_API_KEY=your_groq_key
 ## 🔗 API Documentation
 
 ### Main API (Express.js)
-- **Swagger UI**: http://localhost:3001/api-docs
-- **OpenAPI Spec**: http://localhost:3001/api-docs.json
-- **Health Check**: http://localhost:3001/health
+- **Swagger UI**: http://localhost:8000/api-docs
+- **OpenAPI Spec**: http://localhost:8000/api-docs.json
+- **Health Check**: http://localhost:8000/health
 
 ### Ingestion Service (FastAPI)
 - **API Docs**: http://localhost:8001/docs

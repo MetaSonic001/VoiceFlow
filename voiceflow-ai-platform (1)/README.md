@@ -33,7 +33,7 @@ A modern, comprehensive AI agent platform built with Next.js 15, featuring advan
 
 ```
 Frontend (Next.js 15)          Backend Services
-├── Dashboard Pages            ├── Express.js API (Port 3001)
+├── Dashboard Pages            ├── Express.js API (Port 8000)
 ├── Authentication (Clerk)     ├── FastAPI Ingestion (Port 8001)
 ├── Real-time Updates          ├── PostgreSQL Database
 ├── File Uploads               ├── Redis Cache
@@ -66,7 +66,7 @@ cp .env.example .env.local
 Edit `.env.local` with your configuration:
 ```env
 # Backend API URL
-NEXT_PUBLIC_API_URL=http://localhost:3001
+NEXT_PUBLIC_API_URL=http://localhost:8000
 
 # Frontend Base URL
 NEXT_PUBLIC_PUBLIC_BASE_URL=http://localhost:3000
@@ -160,7 +160,7 @@ The platform uses Clerk for authentication with the following features:
 
 The frontend communicates with multiple backend services:
 
-- **Main API** (Port 3001): User management, agent configuration, analytics
+- **Main API** (Port 8000): User management, agent configuration, analytics
 - **Ingestion Service** (Port 8001): Document processing and vector embeddings
 - **External APIs**: Twilio, OpenAI, Stripe, and other integrations
 
