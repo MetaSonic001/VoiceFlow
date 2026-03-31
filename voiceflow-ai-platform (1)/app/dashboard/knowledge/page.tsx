@@ -15,8 +15,6 @@ import {
   Video,
   Music,
   Archive,
-  Plus,
-  Edit,
   Trash2,
   Download,
   Eye,
@@ -24,7 +22,15 @@ import {
   Grid,
   List,
   Folder,
-  Tag
+  Globe,
+  Building2,
+  Loader2,
+  ChevronDown,
+  ChevronUp,
+  RefreshCw,
+  Tag,
+  Briefcase,
+  Link,
 } from "lucide-react"
 import { apiClient } from "@/lib/api-client"
 
@@ -60,10 +66,72 @@ export default function KnowledgeBasePage() {
   const [showUploadDialog, setShowUploadDialog] = useState(false)
   const [loading, setLoading] = useState(true)
 
+// Company profile (structured onboarding data from Postgres)
+  const [companyProfile, setCompanyProfile] = useState<{
+    company_name: string | null
+    industry: string | null
+    use_case: string | null
+    website_url: string | null
+    description: string | null
+  } | null>(null)
+  const [profileLoading, setProfileLoading] = useState(true)
+
+  // Company knowledge (scraped from company website during onboarding)
+  const [companyChunks, setCompanyChunks] = useState<Array<{ id: string; content: string; metadata: any }>>([])
+  const [companyKbLoading, setCompanyKbLoading] = useState(true)
+  const [expandedChunks, setExpandedChunks] = useState<Set<string>>(new Set())
+  const [deletingChunk, setDeletingChunk] = useState<string | null>(null)
+
   useEffect(() => {
     loadDocuments()
     loadCategories()
+    loadCompanyKnowledge()
+    loadCompanyProfile()
   }, [])
+
+  const loadCompanyProfile = async () => {
+    try {
+      setProfileLoading(true)
+      const data = await apiClient.getCompanyProfile()
+      setCompanyProfile(data)
+    } catch {
+      setCompanyProfile(null)
+    } finally {
+      setProfileLoading(false)
+    }
+  }
+
+  const loadCompanyKnowledge = async () => {
+    try {
+      setCompanyKbLoading(true)
+      const data = await apiClient.getCompanyKnowledge()
+      setCompanyChunks(data.chunks || [])
+    } catch {
+      setCompanyChunks([])
+    } finally {
+      setCompanyKbLoading(false)
+    }
+  }
+
+  const handleDeleteChunk = async (chunkId: string) => {
+    setDeletingChunk(chunkId)
+    try {
+      await apiClient.deleteCompanyKnowledge(chunkId)
+      setCompanyChunks((prev) => prev.filter((c) => c.id !== chunkId))
+    } catch {
+      // ignore
+    } finally {
+      setDeletingChunk(null)
+    }
+  }
+
+  const toggleExpand = (id: string) => {
+    setExpandedChunks((prev) => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
 
   const loadDocuments = async () => {
     try {
@@ -241,6 +309,175 @@ export default function KnowledgeBasePage() {
                 </DialogContent>
               </Dialog>
             </div>
+
+            {/* ── Company Profile (from onboarding Postgres record) ── */}
+            {(companyProfile?.company_name || profileLoading) && (
+              <Card className="mb-4 border-primary/20 bg-primary/5">
+                <CardHeader className="pb-3">
+                  <div className="flex items-center gap-2">
+                    <Building2 className="w-5 h-5 text-primary" />
+                    <CardTitle className="text-lg">Company Profile</CardTitle>
+                    {profileLoading && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
+                  </div>
+                  <CardDescription>
+                    Your company details set during onboarding. This profile is stored in the vector database and used to personalise every AI agent response.
+                  </CardDescription>
+                </CardHeader>
+                {!profileLoading && companyProfile && (
+                  <CardContent>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                      {companyProfile.company_name && (
+                        <div className="flex items-start gap-2">
+                          <Building2 className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+                          <div>
+                            <p className="text-xs text-muted-foreground">Company</p>
+                            <p className="font-medium">{companyProfile.company_name}</p>
+                          </div>
+                        </div>
+                      )}
+                      {companyProfile.industry && (
+                        <div className="flex items-start gap-2">
+                          <Tag className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+                          <div>
+                            <p className="text-xs text-muted-foreground">Industry</p>
+                            <p className="font-medium capitalize">{companyProfile.industry.replace(/-/g, ' ')}</p>
+                          </div>
+                        </div>
+                      )}
+                      {companyProfile.use_case && (
+                        <div className="flex items-start gap-2">
+                          <Briefcase className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+                          <div>
+                            <p className="text-xs text-muted-foreground">Primary Use Case</p>
+                            <p className="font-medium capitalize">{companyProfile.use_case.replace(/-/g, ' ')}</p>
+                          </div>
+                        </div>
+                      )}
+                      {companyProfile.website_url && (
+                        <div className="flex items-start gap-2">
+                          <Link className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+                          <div>
+                            <p className="text-xs text-muted-foreground">Website</p>
+                            <a
+                              href={companyProfile.website_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="font-medium text-primary hover:underline truncate block max-w-[200px]"
+                            >
+                              {companyProfile.website_url.replace(/^https?:\/\//, '')}
+                            </a>
+                          </div>
+                        </div>
+                      )}
+                      {companyProfile.description && (
+                        <div className="flex items-start gap-2 sm:col-span-2">
+                          <Globe className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+                          <div>
+                            <p className="text-xs text-muted-foreground">Description</p>
+                            <p className="text-muted-foreground leading-relaxed">{companyProfile.description}</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                )}
+              </Card>
+            )}
+
+            {/* ── Company Knowledge (scraped during onboarding) ── */}
+            <Card className="mb-6 border-primary/20">
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Building2 className="w-5 h-5 text-primary" />
+                    <CardTitle className="text-lg">Company Knowledge</CardTitle>
+                    <Badge variant="secondary" className="text-xs">
+                      {companyChunks.length} chunks
+                    </Badge>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={loadCompanyKnowledge}
+                    disabled={companyKbLoading}
+                  >
+                    <RefreshCw className={`w-4 h-4 ${companyKbLoading ? "animate-spin" : ""}`} />
+                  </Button>
+                </div>
+                <CardDescription>
+                  Content automatically scraped from your company website during onboarding. This is loaded into every agent's knowledge base.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {companyKbLoading ? (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Loading company knowledge…
+                  </div>
+                ) : companyChunks.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground text-sm space-y-2">
+                    <Globe className="w-8 h-8 mx-auto opacity-30" />
+                    <p>No company knowledge yet.</p>
+                    <p className="text-xs">Complete the company onboarding step with a website URL to auto-scrape your company's information.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {companyChunks.map((chunk) => {
+                      const isExpanded = expandedChunks.has(chunk.id)
+                      const preview = chunk.content.slice(0, 160)
+                      const needsTruncation = chunk.content.length > 160
+                      return (
+                        <div key={chunk.id} className="rounded-lg border border-border/60 bg-muted/30 p-3 group">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                <Globe className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+                                <span className="text-xs text-muted-foreground truncate max-w-[240px]">
+                                  {chunk.metadata?.source || "—"}
+                                </span>
+                                <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                                  chunk {(chunk.metadata?.chunk ?? 0) + 1}
+                                </Badge>
+                              </div>
+                              <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                                {isExpanded ? chunk.content : preview}
+                                {!isExpanded && needsTruncation && (
+                                  <span className="text-muted-foreground">…</span>
+                                )}
+                              </p>
+                              {needsTruncation && (
+                                <button
+                                  onClick={() => toggleExpand(chunk.id)}
+                                  className="text-xs text-primary mt-1 flex items-center gap-0.5 hover:underline"
+                                >
+                                  {isExpanded ? (
+                                    <><ChevronUp className="w-3 h-3" /> Show less</>
+                                  ) : (
+                                    <><ChevronDown className="w-3 h-3" /> Show more</>
+                                  )}
+                                </button>
+                              )}
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+                              disabled={deletingChunk === chunk.id}
+                              onClick={() => handleDeleteChunk(chunk.id)}
+                            >
+                              {deletingChunk === chunk.id
+                                ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                : <Trash2 className="w-3.5 h-3.5" />
+                              }
+                            </Button>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
 
             {/* Filters and Search */}
             <Card className="mb-6">

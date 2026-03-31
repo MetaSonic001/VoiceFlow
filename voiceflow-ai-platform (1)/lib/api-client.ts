@@ -175,11 +175,66 @@ class ApiClient {
   }
 
   // Onboarding endpoints
-  async saveCompanyProfile(data: CompanyProfile) {
-    return this.request<{ success: boolean }>("/onboarding/company", {
+  async saveCompanyProfile(data: {
+    company_name: string
+    industry: string
+    use_case: string
+    website_url?: string
+    description?: string
+  }) {
+    return this.request<{ success: boolean; scrapeJobId?: string }>("/onboarding/company", {
       method: "POST",
       body: JSON.stringify(data),
     })
+  }
+
+  async getCompanyProfile() {
+    return this.request<{
+      company_name: string | null
+      industry: string | null
+      use_case: string | null
+      website_url: string | null
+      description: string | null
+    }>("/onboarding/company")
+  }
+
+  // LinkedIn-style company search against the seed list
+  async searchCompanies(q: string) {
+    return this.request<{
+      companies: Array<{
+        id: string
+        name: string
+        domain: string
+        industry: string
+        description?: string
+      }>
+    }>(`/onboarding/company-search?q=${encodeURIComponent(q)}`)
+  }
+
+  // Poll the status of a background company scraping job
+  async getCompanyScrapingStatus(jobId: string) {
+    return this.request<{
+      status: string
+      progress: string
+      chunks_processed: number
+      pages_scraped: number
+    }>(`/onboarding/scrape-status/${jobId}`)
+  }
+
+  // Fetch company knowledge chunks from ChromaDB (for the knowledge dashboard)
+  async getCompanyKnowledge() {
+    return this.request<{
+      chunks: Array<{ id: string; content: string; metadata: any }>
+      total: number
+    }>(`/onboarding/company-knowledge`)
+  }
+
+  // Delete a single chunk from the company knowledge base
+  async deleteCompanyKnowledge(chunkId: string) {
+    return this.request<{ deleted: boolean }>(
+      `/onboarding/company-knowledge/${encodeURIComponent(chunkId)}`,
+      { method: "DELETE" }
+    )
   }
 
   async createAgent(data: AgentCreationData) {

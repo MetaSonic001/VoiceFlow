@@ -12,7 +12,7 @@ import { VoicePersonality } from "@/components/onboarding/voice-personality"
 import { ChannelSetup } from "@/components/onboarding/channel-setup"
 import { TestingSandbox } from "@/components/onboarding/testing-sandbox"
 import { GoLive } from "@/components/onboarding/go-live"
-import { Brain, CheckCircle } from "lucide-react"
+import { Brain, CheckCircle, Sparkles, Loader2, CheckCircle2 } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { apiClient } from "@/lib/api-client"
 import { useToast } from '@/hooks/use-toast'
@@ -35,6 +35,12 @@ export function OnboardingFlow() {
   const [onboardingData, setOnboardingData] = useState({})
   const { toast } = useToast()
   const [isProcessing, setIsProcessing] = useState(false)
+  // Persistent scraping banner (company knowledge gathering)
+  const [scrapeStatus, setScrapeStatus] = useState<"idle"|"scraping"|"done"|"failed">("idle")
+  const [scrapeJobId, setScrapeJobId]   = useState<string | null>(null)
+  const [scrapePages, setScrapePages]   = useState(0)
+  const [scrapeChunks, setScrapeChunks] = useState(0)
+  const scrapePollerRef = (typeof window !== 'undefined' ? { current: null as ReturnType<typeof setInterval> | null } : { current: null });
 
   // hydrate from server-side onboarding progress if present
   useEffect(() => {
@@ -65,10 +71,48 @@ export function OnboardingFlow() {
         let agentId = (merged as any).agent_id || ''
 
         // Step 1: company profile
-                if (currentStep === 1 && stepData.company) {
-                  await apiClient.saveCompanyProfile({ company_name: stepData.company.companyName, industry: stepData.company.industry, use_case: stepData.company.useCase })
-                  try { await apiClient.saveOnboardingProgress({ current_step: currentStep, data: { company: stepData.company } }) } catch (e) {}
-                }
+        // CompanySetup component calls onComplete with company data.
+        // THIS is where we persist to postgres + trigger the scrape job.
+        if (currentStep === 1 && stepData.company) {
+          try {
+            const saveRes = await apiClient.saveCompanyProfile({
+              company_name: stepData.company.companyName,
+              industry:     stepData.company.industry,
+              use_case:     stepData.company.useCase,
+              website_url:  stepData.company.websiteUrl  || undefined,
+              description:  stepData.company.description || undefined,
+            })
+            const jobId = (saveRes as any)?.scrapeJobId
+            if (jobId) {
+              setScrapeJobId(jobId)
+              setScrapeStatus('scraping')
+              // Start background poller — banner will show on every step
+              if (scrapePollerRef.current) clearInterval(scrapePollerRef.current)
+              let attempts = 0
+              scrapePollerRef.current = setInterval(async () => {
+                attempts++
+                try {
+                  const st = await apiClient.getCompanyScrapingStatus(jobId)
+                  setScrapePages(st.pages_scraped   || 0)
+                  setScrapeChunks(st.chunks_processed || 0)
+                  if (st.status === 'completed') {
+                    clearInterval(scrapePollerRef.current!)
+                    setScrapeStatus('done')
+                  } else if ((st.status as string)?.startsWith('failed')) {
+                    clearInterval(scrapePollerRef.current!)
+                    setScrapeStatus('failed')
+                  } else if (attempts >= 90) {
+                    clearInterval(scrapePollerRef.current!)
+                    setScrapeStatus('done') // stop polling after 3 min
+                  }
+                } catch { /* ignore poll errors */ }
+              }, 2000)
+            }
+            try { await apiClient.saveOnboardingProgress({ current_step: currentStep, data: { company: stepData.company } }) } catch (e) {}
+          } catch (e) {
+            toast({ title: 'Company save failed', description: (e as any)?.message || 'Could not save company profile' })
+          }
+        }
 
         // Step 2: create agent
         if (currentStep === 2 && stepData.agent) {
@@ -246,6 +290,26 @@ export function OnboardingFlow() {
           </div>
           <Progress value={progress} className="h-2" />
         </div>
+
+        {/* ── Persistent scraping banner ── */}
+        {scrapeStatus === 'scraping' && (
+          <div className="mb-6 flex items-center gap-3 px-4 py-3 rounded-xl bg-blue-500/10 border border-blue-500/20 text-sm text-blue-600 dark:text-blue-400">
+            <Loader2 className="w-4 h-4 animate-spin flex-shrink-0" />
+            <span>
+              Gathering your company knowledge in the background
+              {scrapePages > 0 && (
+                <> — <strong>{scrapePages} pages</strong>, <strong>{scrapeChunks} chunks</strong> stored so far</>
+              )}
+            </span>
+            <span className="ml-auto text-xs opacity-70">You can keep setting up your agent while this runs</span>
+          </div>
+        )}
+        {scrapeStatus === 'done' && currentStep > 1 && (
+          <div className="mb-6 flex items-center gap-3 px-4 py-3 rounded-xl bg-green-500/10 border border-green-500/20 text-sm text-green-600 dark:text-green-400">
+            <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+            <span>Company knowledge ready — <strong>{scrapePages} pages</strong>, <strong>{scrapeChunks} chunks</strong> loaded into your knowledge base.</span>
+          </div>
+        )}
 
         <div className="grid lg:grid-cols-4 gap-8">
           {/* Steps Sidebar */}

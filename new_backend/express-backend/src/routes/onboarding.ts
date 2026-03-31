@@ -16,13 +16,61 @@ declare global {
   }
 }
 
-// Company profile setup
+// ─── Company search endpoint ──────────────────────────────────────────────────
+// Proxies to Clearbit Autocomplete (free, no auth) to search any real company.
+// Falls back to empty array if Clearbit is unreachable.
+router.get('/company-search', async (req: Request, res: Response) => {
+  const q = ((req.query.q as string) || '').trim();
+  if (!q || q.length < 1) {
+    return res.json({ companies: [] });
+  }
+  try {
+    const response = await axios.get(
+      `https://autocomplete.clearbit.com/v1/companies/suggest?query=${encodeURIComponent(q)}`,
+      { timeout: 5000 }
+    );
+    const companies = (response.data || []).slice(0, 10).map((item: any) => ({
+      id:          item.domain || item.name.toLowerCase().replace(/\s+/g, '-'),
+      name:        item.name,
+      domain:      item.domain || '',
+      industry:    '',        // Clearbit autocomplete doesn't expose industry
+      description: item.domain || '',
+    }));
+    res.json({ companies });
+  } catch (err) {
+    console.error('Clearbit search failed:', err);
+    res.json({ companies: [] });
+  }
+});
+
+// ─── Company profile setup ────────────────────────────────────────────────────
+// GET: return existing company profile from tenant settings
+router.get('/company', async (req: Request, res: Response) => {
+  try {
+    const prisma: PrismaClient = req.app.get('prisma');
+    const tenant = await prisma.tenant.findUnique({ where: { id: req.tenantId } });
+    const settings = (tenant?.settings as any) || {};
+    res.json({
+      company_name: settings.companyName || null,
+      industry: settings.industry || null,
+      use_case: settings.useCase || null,
+      website_url: settings.websiteUrl || null,
+      description: settings.description || null,
+    });
+  } catch (error) {
+    console.error('Error fetching company profile:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST: saves company metadata to tenant.settings AND triggers a background scrape
+// of the company website so that content lands in the vector store immediately.
 router.post('/company', async (req: Request, res: Response) => {
   try {
     const prisma: PrismaClient = req.app.get('prisma');
-    const { company_name, industry, use_case } = req.body;
+    const { company_name, industry, use_case, website_url, description } = req.body;
 
-    // For now, just store in tenant settings
+    // Persist to Postgres tenant record
     await prisma.tenant.update({
       where: { id: req.tenantId },
       data: {
@@ -30,14 +78,80 @@ router.post('/company', async (req: Request, res: Response) => {
           companyName: company_name,
           industry: industry,
           useCase: use_case,
+          websiteUrl: website_url || null,
+          description: description || null,
         },
       },
     });
 
-    res.json({ success: true });
+    // If a website URL was provided, kick off a background ingestion job so
+    // company knowledge is available right away for RAG.
+    let scrapeJobId: string | null = null;
+    if (website_url) {
+      try {
+        const ingestionUrl = process.env.FASTAPI_URL || 'http://localhost:8001';
+        const scrapeRes = await axios.post(`${ingestionUrl}/ingest/company`, {
+          tenantId: req.tenantId,
+          website_url,
+          company_name: company_name || '',
+          company_description: description || undefined,
+          industry: industry || undefined,
+          use_case: use_case || undefined,
+        });
+        scrapeJobId = scrapeRes.data?.job_id || null;
+        console.log(`Company scrape job started: ${scrapeJobId} for tenant ${req.tenantId}`);
+      } catch (scrapeErr) {
+        // Non-fatal: log but don't block the onboarding response
+        console.error('Failed to trigger company scrape:', scrapeErr);
+      }
+    }
+
+    res.json({ success: true, scrapeJobId });
   } catch (error) {
     console.error('Error saving company profile:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ─── Proxy: ingestion job status ─────────────────────────────────────────────
+// Frontend polls this to show scraping progress without talking directly to FastAPI.
+router.get('/scrape-status/:jobId', async (req: Request, res: Response) => {
+  try {
+    const ingestionUrl = process.env.FASTAPI_URL || 'http://localhost:8001';
+    const response = await axios.get(`${ingestionUrl}/status/${req.params.jobId}`);
+    res.json(response.data);
+  } catch (error) {
+    console.error('Error fetching scrape status:', error);
+    res.status(500).json({ error: 'Failed to fetch scrape status' });
+  }
+});
+
+// ─── Proxy: company knowledge list ───────────────────────────────────────────
+// Returns chunks from ChromaDB that belong to the company_profile source.
+router.get('/company-knowledge', async (req: Request, res: Response) => {
+  try {
+    const ingestionUrl = process.env.FASTAPI_URL || 'http://localhost:8001';
+    const response = await axios.get(
+      `${ingestionUrl}/knowledge/company/${req.tenantId}`
+    );
+    res.json(response.data);
+  } catch (error) {
+    console.error('Error fetching company knowledge:', error);
+    res.status(500).json({ error: 'Failed to fetch company knowledge' });
+  }
+});
+
+// ─── Proxy: delete a knowledge chunk ─────────────────────────────────────────
+router.delete('/company-knowledge/:chunkId', async (req: Request, res: Response) => {
+  try {
+    const ingestionUrl = process.env.FASTAPI_URL || 'http://localhost:8001';
+    await axios.delete(
+      `${ingestionUrl}/knowledge/${req.tenantId}/${req.params.chunkId}`
+    );
+    res.json({ deleted: true });
+  } catch (error) {
+    console.error('Error deleting knowledge chunk:', error);
+    res.status(500).json({ error: 'Failed to delete chunk' });
   }
 });
 
