@@ -3,6 +3,7 @@ uvicorn
 pydantic
 httpx
 chromadb
+python-dotenv
 sentence-transformers
 crawl4ai
 scrapy  # Alternative web scraping framework

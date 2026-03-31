@@ -3,6 +3,13 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import os
 import uuid
+
+# Load .env file automatically when running locally
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # dotenv not installed — env vars must be set manually
 import concurrent.futures
 from datetime import datetime
 import redis
