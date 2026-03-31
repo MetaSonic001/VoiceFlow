@@ -73,6 +73,7 @@ router.post('/query', async (req: Request, res: Response) => {
     }
 
     const ragService = require('../services/ragService');
+    const startedAt = new Date();
     const response = await ragService.processQuery(
       req.tenantId,
       agentId,
@@ -80,6 +81,19 @@ router.post('/query', async (req: Request, res: Response) => {
       agent,
       sessionId
     );
+    const endedAt = new Date();
+
+    // Fire-and-forget CallLog write — never block the response
+    prisma.callLog.create({
+      data: {
+        tenantId: req.tenantId,
+        agentId,
+        startedAt,
+        endedAt,
+        durationSeconds: Math.round((endedAt.getTime() - startedAt.getTime()) / 1000),
+        transcript: `Q: ${query}\nA: ${typeof response === 'string' ? response : JSON.stringify(response)}`,
+      },
+    }).catch((err: Error) => console.error('CallLog write failed:', err));
 
     res.json({
       response: response,

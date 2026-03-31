@@ -1,4 +1,5 @@
 import express, { Request, Response, NextFunction, Router } from 'express';
+import { PrismaClient } from '@prisma/client';
 
 const router: Router = express.Router();
 
@@ -16,33 +17,57 @@ declare global {
 router.get('/overview', async (req: Request, res: Response) => {
   try {
     const { timeRange = '7d', agentId } = req.query;
+    const prisma: PrismaClient = req.app.get('prisma');
 
-    // Mock analytics data - in production, this would query the database
-    const overviewData = {
-      totalInteractions: 12847,
-      successRate: 94.2,
-      avgResponseTime: 2.1,
-      customerSatisfaction: 4.7,
-      totalCalls: 8234,
-      totalChats: 4613,
-      activeCalls: 8,
-      activeChats: 12,
-      queuedInteractions: 3,
-      topIssues: [
-        { issue: "Password Reset", count: 234, percentage: 18.2 },
-        { issue: "Billing Questions", count: 189, percentage: 14.7 },
-        { issue: "Product Information", count: 156, percentage: 12.1 },
-        { issue: "Technical Support", count: 134, percentage: 10.4 },
-        { issue: "Account Setup", count: 98, percentage: 7.6 },
-      ],
-      channelPerformance: {
-        phone: { count: 8234, avgDuration: "4m 32s", successRate: 96 },
-        chat: { count: 4613, avgDuration: "2m 18s", successRate: 92 },
-        whatsapp: { count: 1456, avgDuration: "3m 45s", successRate: 89 },
-      }
-    };
+    // Determine date window
+    const now = new Date();
+    const days = timeRange === '24h' ? 1 : timeRange === '30d' ? 30 : timeRange === '90d' ? 90 : 7;
+    const since = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
 
-    res.json(overviewData);
+    const baseWhere: any = { tenantId: req.tenantId, startedAt: { gte: since } };
+    if (agentId && typeof agentId === 'string' && agentId !== 'all') {
+      baseWhere.agentId = agentId;
+    }
+
+    const [totalLogs, ratedLogs, durationAgg] = await Promise.all([
+      prisma.callLog.count({ where: baseWhere }),
+      prisma.callLog.count({ where: { ...baseWhere, rating: { not: null } } }),
+      prisma.callLog.aggregate({
+        where: { ...baseWhere, durationSeconds: { not: null } },
+        _avg: { durationSeconds: true },
+        _sum: { durationSeconds: true },
+      }),
+    ]);
+
+    const thumbsUp = await prisma.callLog.count({ where: { ...baseWhere, rating: 1 } });
+    const successRate = ratedLogs > 0 ? Math.round((thumbsUp / ratedLogs) * 1000) / 10 : null;
+    const avgDurationSec = durationAgg._avg.durationSeconds ?? 0;
+
+    // Calls per day for sparkline (last `days` days)
+    const allLogs = await prisma.callLog.findMany({
+      where: baseWhere,
+      select: { startedAt: true },
+    });
+
+    const dayCounts: Record<string, number> = {};
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      dayCounts[d.toISOString().split('T')[0]] = 0;
+    }
+    for (const log of allLogs) {
+      const key = log.startedAt.toISOString().split('T')[0];
+      if (key in dayCounts) dayCounts[key]++;
+    }
+    const callsPerDay = Object.entries(dayCounts).map(([date, count]) => ({ date, count }));
+
+    res.json({
+      totalInteractions: totalLogs,
+      successRate,
+      avgResponseTimeSec: Math.round(avgDurationSec * 10) / 10,
+      callsPerDay,
+      timeRange,
+    });
   } catch (error) {
     console.error('Error fetching analytics overview:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -237,6 +262,25 @@ router.get('/agent-comparison', async (req: Request, res: Response) => {
     res.json({ agents: comparisonData });
   } catch (error) {
     console.error('Error fetching agent comparison data:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Usage summary for billing page — real counts from Postgres
+router.get('/usage', async (req: Request, res: Response) => {
+  try {
+    const prisma: PrismaClient = req.app.get('prisma');
+    const tenantId = req.tenantId;
+
+    const [agents, callLogs, documents] = await Promise.all([
+      prisma.agent.count({ where: { tenantId } }),
+      prisma.callLog.count({ where: { tenantId } }),
+      prisma.document.count({ where: { tenantId } }),
+    ]);
+
+    res.json({ agents, callLogs, documents });
+  } catch (error) {
+    console.error('Error fetching usage summary:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

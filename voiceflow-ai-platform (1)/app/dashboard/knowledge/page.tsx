@@ -28,6 +28,8 @@ import {
   ChevronDown,
   ChevronUp,
   RefreshCw,
+  AlertCircle,
+  CheckCircle,
   Tag,
   Briefcase,
   Link,
@@ -82,6 +84,13 @@ export default function KnowledgeBasePage() {
   const [expandedChunks, setExpandedChunks] = useState<Set<string>>(new Set())
   const [deletingChunk, setDeletingChunk] = useState<string | null>(null)
 
+  // URL ingestion
+  const [urlInput, setUrlInput] = useState('')
+  const [ingestJobId, setIngestJobId] = useState<string | null>(null)
+  const [ingestStatus, setIngestStatus] = useState<'idle' | 'submitting' | 'processing' | 'completed' | 'failed'>('idle')
+  const [ingestProgress, setIngestProgress] = useState(0)
+  const [ingestChunks, setIngestChunks] = useState(0)
+
   useEffect(() => {
     loadDocuments()
     loadCategories()
@@ -124,6 +133,44 @@ export default function KnowledgeBasePage() {
       setDeletingChunk(null)
     }
   }
+
+  const submitUrlIngestion = async () => {
+    const trimmed = urlInput.trim()
+    if (!trimmed) return
+    try {
+      setIngestStatus('submitting')
+      const result = await apiClient.triggerUrlIngestion(trimmed)
+      setIngestJobId(result.jobId)
+      setIngestStatus('processing')
+      setIngestProgress(0)
+      setIngestChunks(0)
+    } catch {
+      setIngestStatus('failed')
+    }
+  }
+
+  // Poll ingestion status while a job is running
+  useEffect(() => {
+    if (!ingestJobId || ingestStatus !== 'processing') return
+    const interval = setInterval(async () => {
+      try {
+        const s = await apiClient.getIngestionStatus(ingestJobId)
+        setIngestProgress(Number(s.progress) || 0)
+        setIngestChunks(s.chunks_processed ?? 0)
+        if (s.status === 'completed') {
+          setIngestStatus('completed')
+          clearInterval(interval)
+          loadDocuments()
+        } else if (s.status?.startsWith('failed')) {
+          setIngestStatus('failed')
+          clearInterval(interval)
+        }
+      } catch {
+        // network blip — keep polling
+      }
+    }, 3000)
+    return () => clearInterval(interval)
+  }, [ingestJobId, ingestStatus])
 
   const toggleExpand = (id: string) => {
     setExpandedChunks((prev) => {
@@ -475,6 +522,69 @@ export default function KnowledgeBasePage() {
                       )
                     })}
                   </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* ── Add URL to Knowledge Base ── */}
+            <Card className="mb-6">
+              <CardHeader className="pb-3">
+                <div className="flex items-center gap-2">
+                  <Globe className="w-5 h-5 text-primary" />
+                  <CardTitle className="text-lg">Add URL to Knowledge Base</CardTitle>
+                </div>
+                <CardDescription>
+                  Paste any public URL and the scraper will extract its content and add it to the knowledge base.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="https://example.com/page"
+                    value={urlInput}
+                    onChange={(e) => setUrlInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && ingestStatus !== 'submitting' && ingestStatus !== 'processing' && submitUrlIngestion()}
+                    disabled={ingestStatus === 'submitting' || ingestStatus === 'processing'}
+                    className="flex-1"
+                  />
+                  <Button
+                    onClick={submitUrlIngestion}
+                    disabled={!urlInput.trim() || ingestStatus === 'submitting' || ingestStatus === 'processing'}
+                  >
+                    {ingestStatus === 'submitting' || ingestStatus === 'processing'
+                      ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      : <Globe className="w-4 h-4 mr-2" />
+                    }
+                    {ingestStatus === 'processing' ? 'Scraping…' : 'Scrape & Add'}
+                  </Button>
+                </div>
+                {ingestStatus === 'processing' && (
+                  <div className="mt-3 space-y-1">
+                    <div className="flex justify-between text-xs text-muted-foreground">
+                      <span>Scraping in progress…</span>
+                      <span>{ingestProgress}% · {ingestChunks} chunks</span>
+                    </div>
+                    <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-primary transition-all duration-500 rounded-full"
+                        style={{ width: `${ingestProgress}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+                {ingestStatus === 'completed' && (
+                  <p className="mt-2 text-xs text-green-600 flex items-center gap-1">
+                    <CheckCircle className="w-3.5 h-3.5" /> Scraping complete — {ingestChunks} chunks added.{' '}
+                    <button className="underline" onClick={() => { setIngestStatus('idle'); setUrlInput(''); setIngestJobId(null); }}>
+                      Add another
+                    </button>
+                  </p>
+                )}
+                {ingestStatus === 'failed' && (
+                  <p className="mt-2 text-xs text-destructive flex items-center gap-1">
+                    <AlertCircle className="w-3.5 h-3.5" /> Scraping failed. Check the URL and try again.{' '}
+                    <button className="underline" onClick={() => setIngestStatus('idle')}>Retry</button>
+                  </p>
                 )}
               </CardContent>
             </Card>

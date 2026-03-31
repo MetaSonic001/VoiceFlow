@@ -24,7 +24,7 @@ interface StartIngestionBody {
 
 // Validation schemas
 const startIngestionSchema = Joi.object({
-  agentId: Joi.string().required(),
+  agentId: Joi.string().default('knowledge_base'),
   urls: Joi.array().items(Joi.string().uri()).default([]),
   s3Urls: Joi.array().items(Joi.string()).default([])
 });
@@ -48,19 +48,20 @@ router.post('/start', validateTenantAccess, async (req: Request, res: Response) 
     }
 
     const prisma: PrismaClient = req.app.get('prisma');
-    const { agentId, urls, s3Urls } = value as StartIngestionBody;
+    const { agentId: requestedAgentId, urls, s3Urls } = value as StartIngestionBody;
 
-    // Verify agent belongs to tenant
-    const agent = await prisma.agent.findFirst({
-      where: {
-        id: agentId,
-        tenantId: req.tenantId
-      }
+    // Resolve agent — use the requested one if it belongs to this tenant,
+    // otherwise fall back to the tenant's first agent (knowledge-base ingestion from UI)
+    let agent = await prisma.agent.findFirst({
+      where: { id: requestedAgentId, tenantId: req.tenantId }
     });
-
     if (!agent) {
-      return res.status(403).json({ error: 'Access denied' });
+      agent = await prisma.agent.findFirst({ where: { tenantId: req.tenantId } });
     }
+    if (!agent) {
+      return res.status(403).json({ error: 'No agents found for this tenant' });
+    }
+    const agentId = agent.id;
 
     // Create documents in database
     const documents = [];
@@ -69,7 +70,7 @@ router.post('/start', validateTenantAccess, async (req: Request, res: Response) 
         data: {
           url: url,
           agentId: agentId,
-          tenantId: req.user.tenantId,
+          tenantId: req.tenantId,
           status: 'pending'
         }
       });
@@ -81,7 +82,7 @@ router.post('/start', validateTenantAccess, async (req: Request, res: Response) 
         data: {
           s3Path: s3Url,
           agentId: agentId,
-          tenantId: req.user.tenantId,
+          tenantId: req.tenantId,
           status: 'pending'
         }
       });

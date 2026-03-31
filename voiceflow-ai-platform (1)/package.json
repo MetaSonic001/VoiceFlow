@@ -2,11 +2,15 @@
   "name": "my-v0-project",
   "version": "0.1.0",
   "private": true,
+  "prisma": {
+    "schema": "../new_backend/express-backend/prisma/schema.prisma"
+  },
   "scripts": {
     "build": "next build",
     "dev": "next dev",
     "lint": "next lint",
-    "start": "next start"
+    "start": "next start",
+    "db:generate": "prisma generate"
   },
   "dependencies": {
     "@clerk/nextjs": "^6.33.3",

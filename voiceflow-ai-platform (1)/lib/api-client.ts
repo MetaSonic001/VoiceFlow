@@ -237,6 +237,19 @@ class ApiClient {
     )
   }
 
+  async triggerUrlIngestion(url: string, agentId?: string) {
+    return this.request<{ jobId: string; status: string }>('/api/ingestion/start', {
+      method: 'POST',
+      body: JSON.stringify({ urls: [url], agentId: agentId ?? 'knowledge_base' }),
+    });
+  }
+
+  async getIngestionStatus(jobId: string) {
+    return this.request<{ status: string; progress?: number | string; chunks_processed?: number; pages_scraped?: number }>(
+      `/api/ingestion/status/${jobId}`
+    );
+  }
+
   // ── Call / Conversation Logs ─────────────────────────────────────────────
 
   async getCallLogs(params?: {
@@ -510,14 +523,6 @@ class ApiClient {
     return this.request('/analytics/overview?' + queryParams.toString());
   }
 
-  async getCallLogs(params: { page?: number; limit?: number; search?: string; status?: string; type?: string; agentId?: string } = {}) {
-    const queryParams = new URLSearchParams();
-    Object.entries(params).forEach(([key, value]) => {
-      if (value !== undefined) queryParams.append(key, value.toString());
-    });
-    return this.request('/analytics/calls?' + queryParams.toString());
-  }
-
   async getChatLogs(params: { page?: number; limit?: number; search?: string; status?: string; agentId?: string } = {}) {
     const queryParams = new URLSearchParams();
     Object.entries(params).forEach(([key, value]) => {
@@ -671,11 +676,7 @@ class ApiClient {
   }
 
   async getUsageStats(params: { timeRange?: string } = {}) {
-    const queryParams = new URLSearchParams();
-    Object.entries(params).forEach(([key, value]) => {
-      if (value !== undefined) queryParams.append(key, value.toString());
-    });
-    return this.request('/billing/usage?' + queryParams.toString());
+    return this.request<{ agents: number; callLogs: number; documents: number }>('/analytics/usage');
   }
 
   // Integrations methods

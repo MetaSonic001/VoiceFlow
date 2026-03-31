@@ -86,6 +86,9 @@ class CompanyIngestRequest(BaseModel):
     industry: Optional[str] = None
     use_case: Optional[str] = None
     additional_urls: Optional[List[str]] = []
+    # scraper strategy: "auto" (default), "trafilatura", "playwright", "requests"
+    # auto = try trafilatura; if content < 500 chars, retry with playwright
+    strategy: Optional[str] = "auto"
 
 class IngestResponse(BaseModel):
     job_id: str
@@ -125,13 +128,24 @@ async def get_job_status(job_id: str):
 # This keeps company knowledge clearly separated from agent-specific knowledge.
 # ─── Synchronous company ingestion (runs in thread pool, never blocks the loop) ─
 
-def _scrape_url_sync(url: str) -> Optional[str]:
-    """Sync scraper: trafilatura → requests+BS4 → playwright (JS fallback)."""
+def _scrape_url_sync(url: str, strategy: str = "auto") -> Optional[str]:
+    """
+    Sync scraper with selectable strategy.
+    strategy="auto"        → trafilatura first; if content < 500 chars retry with playwright
+    strategy="trafilatura" → trafilatura only
+    strategy="playwright"  → playwright only
+    strategy="requests"    → requests+BS4 only
+    """
     import requests as _req
     import urllib3
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+    # If strategy is explicitly playwright, skip straight to playwright
+    if strategy == "playwright":
+        return _scrape_with_playwright(url)
+
     # Strategy 1: Trafilatura
+    trafilatura_content: Optional[str] = None
     try:
         downloaded = trafilatura.fetch_url(url, no_ssl=True)
         if downloaded:
@@ -145,12 +159,23 @@ def _scrape_url_sync(url: str) -> Optional[str]:
                 favor_precision=True,
             )
             if content and len(content.strip()) > 100:
-                return content
+                trafilatura_content = content
+                # For explicit trafilatura strategy, return immediately
+                if strategy == "trafilatura":
+                    return trafilatura_content
+                # For auto: if we have enough content, no need for playwright
+                if len(content.strip()) >= 500:
+                    return trafilatura_content
     except Exception as e:
         print(f"Trafilatura failed for {url}: {e}")
 
+    # If explicit requests strategy, skip to requests+BS4
+    if strategy == "requests":
+        pass  # fall through to requests block below
+
     # Strategy 2: requests + BeautifulSoup
     got_404 = False
+    bs4_content: Optional[str] = None
     try:
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
         r = _req.get(url, headers=headers, timeout=15, verify=False)
@@ -165,43 +190,56 @@ def _scrape_url_sync(url: str) -> Optional[str]:
         lines = [l.strip() for l in text.split("\n") if l.strip() and len(l) > 10]
         result = "\n".join(lines)
         if len(result) > 100:
-            return result
+            bs4_content = result
+            if strategy == "requests":
+                return bs4_content
+            # For auto: if requests found enough, no playwright needed
+            if len(result) >= 500:
+                return bs4_content
     except Exception as e:
         if "404" in str(e):
             got_404 = True
         else:
             print(f"requests+BS4 failed for {url}: {e}")
 
-    # Strategy 3: Playwright (JS-heavy pages) — skip for known 404s
-    if not got_404:
-        try:
-            from playwright.sync_api import sync_playwright
-            with sync_playwright() as pw:
-                browser = pw.chromium.launch(headless=True)
-                try:
-                    ctx = browser.new_context(ignore_https_errors=True)
-                    page = ctx.new_page()
-                    page.set_extra_http_headers({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
-                    resp = page.goto(url, timeout=25000, wait_until="networkidle")
-                    if resp and resp.status == 404:
-                        browser.close()
-                        return None
-                    page.wait_for_timeout(2000)
-                    html = page.content()
-                    soup = BeautifulSoup(html, "html.parser")
-                    for el in soup(["script", "style", "nav", "header", "footer", "aside"]):
-                        el.decompose()
-                    text = soup.get_text(separator="\n", strip=True)
-                    lines = [l.strip() for l in text.split("\n") if l.strip() and len(l) > 10]
-                    result = "\n".join(lines)
-                    if len(result) > 100:
-                        return result
-                finally:
-                    browser.close()
-        except Exception as e:
-            print(f"Playwright failed for {url}: {e}")
+    # Strategy 3 / auto-fallback: Playwright (JS-heavy pages) — skip for known 404s
+    # In auto mode this only runs when trafilatura AND requests returned thin content
+    if not got_404 and strategy != "trafilatura" and strategy != "requests":
+        playwright_result = _scrape_with_playwright(url)
+        if playwright_result:
+            return playwright_result
 
-    return None
+    # Return best effort from earlier strategies
+    return trafilatura_content or bs4_content or None
+
+
+def _scrape_with_playwright(url: str) -> Optional[str]:
+    """Isolated playwright scrape — used as explicit strategy or auto-fallback."""
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True)
+            try:
+                ctx = browser.new_context(ignore_https_errors=True)
+                page = ctx.new_page()
+                page.set_extra_http_headers({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
+                resp = page.goto(url, timeout=15000, wait_until="load")
+                if resp and resp.status == 404:
+                    return None
+                page.wait_for_timeout(1000)
+                html = page.content()
+                soup = BeautifulSoup(html, "html.parser")
+                for el in soup(["script", "style", "nav", "header", "footer", "aside"]):
+                    el.decompose()
+                text = soup.get_text(separator="\n", strip=True)
+                lines = [l.strip() for l in text.split("\n") if l.strip() and len(l) > 10]
+                result = "\n".join(lines)
+                return result if len(result) > 100 else None
+            finally:
+                browser.close()
+    except Exception as e:
+        print(f"Playwright failed for {url}: {e}")
+        return None
 
 
 def _extract_internal_links(base_url: str, html: str) -> List[str]:
@@ -256,6 +294,7 @@ def _process_company_sync(
     company_description: Optional[str] = None,
     industry: Optional[str] = None,
     use_case: Optional[str] = None,
+    strategy: str = "auto",
 ):
     """
     Synchronous company ingestion — runs inside a ThreadPoolExecutor so the
@@ -358,7 +397,7 @@ def _process_company_sync(
 
         for i, url in enumerate(urls_to_scrape):
             try:
-                content = _scrape_url_sync(url)
+                content = _scrape_url_sync(url, strategy)
                 if content:
                     chunks = text_splitter.split_text(content)
                     if chunks:
@@ -423,6 +462,7 @@ async def ingest_company(request: CompanyIngestRequest, background_tasks: Backgr
         request.company_description,
         request.industry,
         request.use_case,
+        request.strategy or "auto",
     )
     return IngestResponse(job_id=job_id, status="processing")
 

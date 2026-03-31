@@ -1,6 +1,12 @@
-// Prisma schema for VoiceFlow — canonical unified schema
-// All services (Next.js, Express backend) share the same PostgreSQL database.
-// This file is the single source of truth for table definitions.
+// Prisma schema for VoiceFlow — SINGLE SOURCE OF TRUTH
+// Shared by both services:
+//   • Express backend  (new_backend/express-backend)  — run: pnpm prisma generate
+//   • Next.js frontend (voiceflow-ai-platform (1))     — run: pnpm db:generate
+//     The Next.js package.json "prisma.schema" field points here, so both
+//     services generate their own client from this one file.
+//
+// Migrations live in new_backend/express-backend/prisma/migrations/ only.
+// To create a migration: cd new_backend/express-backend && pnpm prisma migrate dev
 
 generator client {
   provider = "prisma-client-js"
