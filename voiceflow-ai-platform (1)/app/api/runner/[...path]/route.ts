@@ -8,7 +8,7 @@ export async function handler(req: Request, { params }: { params: { path: string
 
   // Allow unauthenticated access for voice agent audio endpoint
   const isVoiceAgentAudio = path === 'audio'
-  const session: any = auth()
+  const session: any = await auth()
 
   if (!isVoiceAgentAudio && !session?.userId) {
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
@@ -37,7 +37,8 @@ export async function handler(req: Request, { params }: { params: { path: string
   // add api-key for server-to-server
   if (process.env.BACKEND_API_KEY) headers['X-API-Key'] = process.env.BACKEND_API_KEY
   // add tenant and user headers
-  headers['x-tenant-id'] = 'default-tenant'
+  // orgId = Clerk organization (one org → one tenant); userId = per-user fallback
+  headers['x-tenant-id'] = session?.orgId || session?.userId || 'default-tenant'
   if (session?.userId) {
     headers['x-user-id'] = session.userId
   } else if (isVoiceAgentAudio) {

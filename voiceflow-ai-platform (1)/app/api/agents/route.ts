@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
 
 export async function GET(req: Request) {
-  const session: any = auth()
+  const session: any = await auth()
   const userId = session?.userId
   if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
@@ -28,7 +28,7 @@ export async function GET(req: Request) {
       headers: {
         'X-API-Key': backendKey,
         'Authorization': req.headers.get('authorization') || '',
-        'x-tenant-id': 'default-tenant', // Add tenant header
+        'x-tenant-id': session?.orgId || session?.userId || 'default-tenant',
         'x-user-id': userId
       }
     })
