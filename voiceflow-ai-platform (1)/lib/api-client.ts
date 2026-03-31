@@ -237,6 +237,57 @@ class ApiClient {
     )
   }
 
+  // ── Call / Conversation Logs ─────────────────────────────────────────────
+
+  async getCallLogs(params?: {
+    agentId?: string
+    from?: string   // ISO date string
+    to?: string     // ISO date string
+    page?: number
+    limit?: number
+  }) {
+    const qs = new URLSearchParams()
+    if (params?.agentId) qs.set('agentId', params.agentId)
+    if (params?.from)    qs.set('from', params.from)
+    if (params?.to)      qs.set('to', params.to)
+    if (params?.page)    qs.set('page', String(params.page))
+    if (params?.limit)   qs.set('limit', String(params.limit))
+    const query = qs.toString() ? `?${qs.toString()}` : ''
+    return this.request<{
+      logs: Array<{
+        id: string
+        tenantId: string
+        agentId: string
+        startedAt: string
+        endedAt: string | null
+        durationSeconds: number | null
+        transcript: string
+        rating: number | null
+        ratingNotes: string | null
+        flaggedForRetraining: boolean
+        createdAt: string
+        agent: { id: string; name: string }
+      }>
+      total: number
+      page: number
+      limit: number
+      pages: number
+    }>(`/api/logs${query}`)
+  }
+
+  async rateCallLog(id: string, rating: 1 | -1, notes?: string) {
+    return this.request<{ id: string; rating: number }>(`/api/logs/${id}/rating`, {
+      method: 'PATCH',
+      body: JSON.stringify({ rating, notes }),
+    })
+  }
+
+  async flagCallLogForRetraining(id: string) {
+    return this.request<{ id: string; flaggedForRetraining: boolean }>(`/api/logs/${id}/flag`, {
+      method: 'POST',
+    })
+  }
+
   async createAgent(data: AgentCreationData) {
     return this.request<{ agent_id: string }>("/onboarding/agent", {
       method: "POST",

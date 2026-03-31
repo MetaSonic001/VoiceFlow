@@ -1,4 +1,9 @@
 import 'dotenv/config';
+import { validateEnv } from './config/env';
+
+// Validate required environment variables before anything else starts up
+validateEnv();
+
 import express, { Request, Response, Application } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -20,6 +25,7 @@ import ingestionRouter from './routes/ingestion';
 import runnerRouter from './routes/runner';
 import twilioRouter from './routes/twilio';
 import usersRouter from './routes/users';
+import logsRouter from './routes/logs';
 
 // Middleware imports
 import { createTenantRateLimit } from './middleware/rateLimit';
@@ -101,6 +107,7 @@ app.use('/api/rag', clerkAuth.authenticate, ragRouter);
 app.use('/api/ingestion', clerkAuth.authenticate, ingestionRouter);
 app.use('/api/runner', clerkAuth.authenticate, runnerRouter);
 app.use('/api/users', clerkAuth.authenticate, usersRouter);
+app.use('/api/logs', clerkAuth.authenticate, logsRouter);
 
 // API Documentation
 // app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs));
@@ -194,8 +201,6 @@ io.on('connection', (socket: Socket) => {
     console.log('Client disconnected:', socket.id);
   });
 });
-
-import 'dotenv/config';
 
 // Start server
 const PORT = process.env.PORT || 8000;
