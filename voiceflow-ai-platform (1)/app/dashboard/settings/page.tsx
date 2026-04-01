@@ -10,8 +10,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
-import { AlertCircle, CheckCircle, Key, Shield, Bell, Database, Zap, Globe } from "lucide-react"
+import { AlertCircle, CheckCircle, Key, Shield, Bell, Database, Zap, Globe, Loader2, ExternalLink, Trash2, Volume2 } from "lucide-react"
 import { apiClient } from "@/lib/api-client"
+import { VoiceSelector } from "@/components/voice-selector"
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState({
@@ -26,17 +27,29 @@ export default function SettingsPage() {
       sessionTimeout: 30,
       passwordPolicy: 'strong'
     },
-    integrations: {
-      twilioEnabled: true,
-      webhookUrl: '',
-      apiRateLimit: 100
-    },
     system: {
       maintenanceMode: false,
       debugMode: false,
       logLevel: 'info'
     }
   })
+
+  // Twilio credentials state
+  const [twilioAccountSid, setTwilioAccountSid] = useState('')
+  const [twilioAuthToken, setTwilioAuthToken] = useState('')
+  const [twilioStatus, setTwilioStatus] = useState<{
+    configured: boolean
+    accountSid?: string
+    hasAuthToken?: boolean
+    credentialsVerified?: boolean
+    updatedAt?: string
+  }>({ configured: false })
+  const [twilioSaving, setTwilioSaving] = useState(false)
+  const [twilioError, setTwilioError] = useState('')
+
+  // Agent voice state
+  const [agentVoiceId, setAgentVoiceId] = useState<string | null>(null)
+  const [voiceSaving, setVoiceSaving] = useState(false)
 
   type ApiKey = {
     id: string
@@ -54,6 +67,7 @@ export default function SettingsPage() {
   useEffect(() => {
     loadSettings()
     loadApiKeys()
+    loadTwilioStatus()
   }, [])
 
   const loadSettings = async () => {
@@ -62,7 +76,70 @@ export default function SettingsPage() {
       setSettings(data)
     } catch (error) {
       console.error('Failed to load settings:', error)
-      // Keep default settings
+    }
+  }
+
+  const loadTwilioStatus = async () => {
+    try {
+      const status = await apiClient.getTwilioCredentialStatus()
+      setTwilioStatus(status)
+      if (status.accountSid) {
+        setTwilioAccountSid(status.accountSid)
+      }
+    } catch (error) {
+      console.error('Failed to load Twilio status:', error)
+    }
+  }
+
+  const saveTwilioCredentials = async () => {
+    if (!twilioAccountSid.trim() || !twilioAuthToken.trim()) {
+      setTwilioError('Both Account SID and Auth Token are required')
+      return
+    }
+    setTwilioSaving(true)
+    setTwilioError('')
+    try {
+      await apiClient.saveTwilioCredentials({
+        accountSid: twilioAccountSid.trim(),
+        authToken: twilioAuthToken.trim(),
+      })
+      setTwilioAuthToken('')
+      setMessage('Twilio credentials verified and saved!')
+      setTimeout(() => setMessage(''), 3000)
+      await loadTwilioStatus()
+    } catch (error: any) {
+      const msg = error?.response?.error || error?.message || 'Failed to save credentials'
+      setTwilioError(msg)
+    } finally {
+      setTwilioSaving(false)
+    }
+  }
+
+  const removeTwilioCredentials = async () => {
+    try {
+      await apiClient.deleteTwilioCredentials()
+      setTwilioAccountSid('')
+      setTwilioAuthToken('')
+      setTwilioStatus({ configured: false })
+      setMessage('Twilio credentials removed')
+      setTimeout(() => setMessage(''), 3000)
+    } catch (error) {
+      setTwilioError('Failed to remove credentials')
+    }
+  }
+
+  const saveVoiceConfig = async (voiceId: string) => {
+    setAgentVoiceId(voiceId)
+    setVoiceSaving(true)
+    try {
+      await apiClient.configureVoice({ voice: voiceId, tone: '', language: '', personality: '' })
+      setMessage('Agent voice updated!')
+      setTimeout(() => setMessage(''), 3000)
+    } catch (err) {
+      setMessage('Failed to update voice')
+      setTimeout(() => setMessage(''), 3000)
+    } finally {
+      setVoiceSaving(false)
     }
   }
 
@@ -166,8 +243,9 @@ export default function SettingsPage() {
             )}
 
             <Tabs defaultValue="general" className="space-y-6">
-              <TabsList className="grid w-full grid-cols-5">
+              <TabsList className="grid w-full grid-cols-6">
                 <TabsTrigger value="general">General</TabsTrigger>
+                <TabsTrigger value="voice">Voice</TabsTrigger>
                 <TabsTrigger value="security">Security</TabsTrigger>
                 <TabsTrigger value="integrations">Integrations</TabsTrigger>
                 <TabsTrigger value="api-keys">API Keys</TabsTrigger>
@@ -227,6 +305,30 @@ export default function SettingsPage() {
                         onCheckedChange={(checked) => updateSettings('notifications', { errorAlerts: checked })}
                       />
                     </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              <TabsContent value="voice" className="space-y-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center space-x-2">
+                      <Volume2 className="w-5 h-5" />
+                      <span>Agent Voice</span>
+                    </CardTitle>
+                    <CardDescription>
+                      Choose a preset voice or clone a custom one for your agents.
+                      Powered by Chatterbox Turbo — self-hosted, zero cost per minute.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <VoiceSelector
+                      value={agentVoiceId}
+                      onChange={saveVoiceConfig}
+                    />
+                    {voiceSaving && (
+                      <p className="text-sm text-muted-foreground mt-2">Saving…</p>
+                    )}
                   </CardContent>
                 </Card>
               </TabsContent>
@@ -295,45 +397,93 @@ export default function SettingsPage() {
                   <CardHeader>
                     <CardTitle className="flex items-center space-x-2">
                       <Globe className="w-5 h-5" />
-                      <span>Third-party Integrations</span>
+                      <span>Twilio Credentials</span>
                     </CardTitle>
-                    <CardDescription>Connect with external services and APIs</CardDescription>
+                    <CardDescription>
+                      Connect your own Twilio account for phone number provisioning and voice calls.
+                      Credentials are encrypted at rest with AES-256-GCM.
+                    </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-0.5">
-                        <Label>Twilio Integration</Label>
-                        <p className="text-sm text-muted-foreground">Enable phone and SMS capabilities</p>
+                    {/* Status indicator */}
+                    {twilioStatus.configured && (
+                      <div className="flex items-center gap-2 p-3 rounded-lg bg-green-50 border border-green-200 text-green-800">
+                        <CheckCircle className="w-4 h-4" />
+                        <span className="text-sm font-medium">
+                          Twilio connected — Account {twilioStatus.accountSid}
+                        </span>
+                        {twilioStatus.updatedAt && (
+                          <span className="text-xs text-green-600 ml-auto">
+                            Updated {new Date(twilioStatus.updatedAt).toLocaleDateString()}
+                          </span>
+                        )}
                       </div>
-                      <Switch
-                        checked={settings.integrations.twilioEnabled}
-                        onCheckedChange={(checked) => updateSettings('integrations', { twilioEnabled: checked })}
+                    )}
+
+                    {twilioError && (
+                      <div className="flex items-center gap-2 p-3 rounded-lg bg-red-50 border border-red-200 text-red-800">
+                        <AlertCircle className="w-4 h-4" />
+                        <span className="text-sm">{twilioError}</span>
+                      </div>
+                    )}
+
+                    <div className="space-y-2">
+                      <Label htmlFor="twilio-sid">Account SID</Label>
+                      <Input
+                        id="twilio-sid"
+                        value={twilioAccountSid}
+                        onChange={(e) => setTwilioAccountSid(e.target.value)}
+                        placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                        autoComplete="off"
                       />
                     </div>
-                    <Separator />
+
                     <div className="space-y-2">
-                      <Label>Webhook URL</Label>
+                      <Label htmlFor="twilio-token">Auth Token</Label>
                       <Input
-                        value={settings.integrations.webhookUrl}
-                        onChange={(e) => setSettings(prev => ({
-                          ...prev,
-                          integrations: { ...prev.integrations, webhookUrl: e.target.value }
-                        }))}
-                        placeholder="https://your-app.com/webhook"
+                        id="twilio-token"
+                        type="password"
+                        value={twilioAuthToken}
+                        onChange={(e) => setTwilioAuthToken(e.target.value)}
+                        placeholder={twilioStatus.hasAuthToken ? '••••••••••••••••••••••••••••••••' : 'Enter your Auth Token'}
+                        autoComplete="off"
                       />
-                      <p className="text-sm text-muted-foreground">URL to receive webhook notifications</p>
+                      <p className="text-xs text-muted-foreground">
+                        {twilioStatus.hasAuthToken
+                          ? 'Token is stored securely. Enter a new one to replace it.'
+                          : 'Find your Auth Token in the Twilio Console.'}
+                      </p>
                     </div>
-                    <Separator />
-                    <div className="space-y-2">
-                      <Label>API Rate Limit (requests/minute)</Label>
-                      <Input
-                        type="number"
-                        value={settings.integrations.apiRateLimit}
-                        onChange={(e) => setSettings(prev => ({
-                          ...prev,
-                          integrations: { ...prev.integrations, apiRateLimit: parseInt(e.target.value) }
-                        }))}
-                      />
+
+                    <div className="flex items-center gap-2 pt-2">
+                      <Button
+                        onClick={saveTwilioCredentials}
+                        disabled={twilioSaving}
+                      >
+                        {twilioSaving && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                        {twilioStatus.configured ? 'Update Credentials' : 'Verify & Save'}
+                      </Button>
+
+                      {twilioStatus.configured && (
+                        <Button
+                          variant="outline"
+                          onClick={removeTwilioCredentials}
+                          className="text-red-600 hover:text-red-700"
+                        >
+                          <Trash2 className="w-4 h-4 mr-2" />
+                          Disconnect
+                        </Button>
+                      )}
+
+                      <a
+                        href="https://console.twilio.com"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="ml-auto text-sm text-muted-foreground hover:text-foreground flex items-center gap-1"
+                      >
+                        Open Twilio Console
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
                     </div>
                   </CardContent>
                 </Card>

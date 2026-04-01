@@ -22,6 +22,13 @@ const envSchema = Joi.object({
   // Twilio
   TWILIO_ACCOUNT_SID: Joi.string().optional(),
   TWILIO_AUTH_TOKEN: Joi.string().optional(),
+  TWILIO_WEBHOOK_BASE_URL: Joi.string().uri().optional(), // e.g. https://abc123.ngrok.io
+
+  // Credential encryption (64-char hex = 32-byte key for AES-256-GCM)
+  CREDENTIALS_ENCRYPTION_KEY: Joi.string().hex().length(64).optional(),
+
+  // TTS Service (Chatterbox Turbo microservice)
+  TTS_SERVICE_URL: Joi.string().uri().optional(), // e.g. http://tts-service:8003
 
   // MinIO / S3
   MINIO_ENDPOINT: Joi.string().optional(),

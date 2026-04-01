@@ -2,6 +2,7 @@ import express, { Request, Response, NextFunction, Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import multer from 'multer';
 import axios from 'axios';
+import { provisionAgentNumber, deprovisionAgentNumber } from '../services/twilioProvisioningService';
 
 const router: Router = express.Router();
 const upload = multer({ dest: 'uploads/' });
@@ -240,10 +241,35 @@ router.post('/knowledge', upload.array('files'), async (req: Request, res: Respo
   }
 });
 
-// Voice configuration
+// Voice configuration — save voiceId to agent configuration
 router.post('/voice', async (req: Request, res: Response) => {
   try {
-    // For now, just return success
+    const prisma: PrismaClient = req.app.get('prisma');
+    const { voice, tone, language, personality } = req.body;
+
+    // Find the tenant's most recent agent and update its configuration
+    const agent = await prisma.agent.findFirst({
+      where: { tenantId: req.tenantId },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (agent) {
+      await prisma.agentConfiguration.upsert({
+        where: { agentId: agent.id },
+        update: {
+          voiceId: voice || undefined,
+          responseTone: tone || undefined,
+          preferredResponseStyle: personality || undefined,
+        },
+        create: {
+          agentId: agent.id,
+          voiceId: voice || undefined,
+          responseTone: tone || undefined,
+          preferredResponseStyle: personality || undefined,
+        },
+      });
+    }
+
     res.json({ success: true });
   } catch (error) {
     console.error('Error configuring voice:', error);
@@ -265,11 +291,57 @@ router.post('/channels', async (req: Request, res: Response) => {
 // Agent configuration
 router.post('/agent-config', async (req: Request, res: Response) => {
   try {
-    // For now, just return success
+    const prisma: PrismaClient = req.app.get('prisma');
+    const {
+      agent_name, agent_role, agent_description,
+      personality_traits, communication_channels,
+      preferred_response_style, response_tone, voice_id,
+      company_name, industry, primary_use_case,
+    } = req.body;
+
+    // Find the tenant's most recent agent
+    const agent = await prisma.agent.findFirst({
+      where: { tenantId: req.tenantId },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (agent) {
+      await prisma.agentConfiguration.upsert({
+        where: { agentId: agent.id },
+        update: {
+          agentName: agent_name || undefined,
+          agentRole: agent_role || undefined,
+          agentDescription: agent_description || undefined,
+          personalityTraits: personality_traits || undefined,
+          communicationChannels: communication_channels || undefined,
+          preferredResponseStyle: preferred_response_style || undefined,
+          responseTone: response_tone || undefined,
+          voiceId: voice_id || undefined,
+          companyName: company_name || undefined,
+          industry: industry || undefined,
+          primaryUseCase: primary_use_case || undefined,
+        },
+        create: {
+          agentId: agent.id,
+          agentName: agent_name || undefined,
+          agentRole: agent_role || undefined,
+          agentDescription: agent_description || undefined,
+          personalityTraits: personality_traits || undefined,
+          communicationChannels: communication_channels || undefined,
+          preferredResponseStyle: preferred_response_style || undefined,
+          responseTone: response_tone || undefined,
+          voiceId: voice_id || undefined,
+          companyName: company_name || undefined,
+          industry: industry || undefined,
+          primaryUseCase: primary_use_case || undefined,
+        },
+      });
+    }
+
     res.json({
       success: true,
       message: 'Agent configured successfully',
-      agent_id: 'temp_id',
+      agent_id: agent?.id || 'unknown',
       chroma_collection: `collection_${req.tenantId}`,
     });
   } catch (error) {
@@ -278,14 +350,56 @@ router.post('/agent-config', async (req: Request, res: Response) => {
   }
 });
 
-// Deploy agent
+// Deploy agent — provision a real Twilio phone number
 router.post('/deploy', async (req: Request, res: Response) => {
   try {
-    // For now, just return success
-    res.json({ success: true, phone_number: '+18283838255' });
-  } catch (error) {
+    const prisma: PrismaClient = req.app.get('prisma');
+    const { agent_id, country_code } = req.body;
+
+    if (!agent_id) {
+      return res.status(400).json({ error: 'agent_id is required' });
+    }
+
+    // Verify the agent belongs to this tenant
+    const agent = await prisma.agent.findFirst({
+      where: { id: agent_id, tenantId: req.tenantId },
+    });
+    if (!agent) {
+      return res.status(404).json({ error: 'Agent not found' });
+    }
+
+    // If the agent already has a number, return it
+    if (agent.phoneNumber) {
+      return res.json({ success: true, phone_number: agent.phoneNumber, already_provisioned: true });
+    }
+
+    // Pre-flight: ensure tenant has Twilio credentials configured
+    const tenant = await prisma.tenant.findUnique({ where: { id: req.tenantId } });
+    const tenantSettings = (tenant?.settings as Record<string, any>) || {};
+    if (!tenantSettings.twilioAccountSid || !tenantSettings.twilioAuthToken) {
+      return res.status(400).json({
+        error: 'Twilio credentials not configured. Please add your Twilio Account SID and Auth Token in Settings \u2192 Integrations before deploying.',
+        code: 'TWILIO_NOT_CONFIGURED',
+      });
+    }
+
+    const phoneNumber = await provisionAgentNumber(
+      prisma,
+      agent_id,
+      req.tenantId,
+      country_code || 'US',
+    );
+
+    // Activate the agent
+    await prisma.agent.update({
+      where: { id: agent_id },
+      data: { status: 'active' },
+    });
+
+    res.json({ success: true, phone_number: phoneNumber });
+  } catch (error: any) {
     console.error('Error deploying agent:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: error?.message || 'Failed to deploy agent' });
   }
 });
 

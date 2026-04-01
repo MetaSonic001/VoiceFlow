@@ -631,6 +631,54 @@ class ApiClient {
     });
   }
 
+  // ── Twilio Credentials (per-tenant) ─────────────────────────────────────
+
+  async saveTwilioCredentials(data: { accountSid: string; authToken: string }) {
+    return this.request<{ success: boolean; message: string; accountSid: string }>(
+      '/api/settings/twilio',
+      { method: 'POST', body: JSON.stringify(data) },
+    )
+  }
+
+  async getTwilioCredentialStatus() {
+    return this.request<{
+      configured: boolean
+      accountSid?: string
+      hasAuthToken?: boolean
+      credentialsVerified?: boolean
+      updatedAt?: string
+    }>('/api/settings/twilio')
+  }
+
+  async deleteTwilioCredentials() {
+    return this.request<{ success: boolean }>('/api/settings/twilio', { method: 'DELETE' })
+  }
+
+  // ── TTS / Voice ─────────────────────────────────────────────────────────
+
+  async getPresetVoices() {
+    return this.request<{
+      voices: Array<{ id: string; name: string; description: string; sampleUrl: string | null }>
+    }>('/api/tts/preset-voices')
+  }
+
+  async synthesisePreview(text: string, voiceId: string) {
+    return this.request<{ audioUrl: string; cached: boolean }>('/api/tts/synthesise', {
+      method: 'POST',
+      body: JSON.stringify({ text, voiceId }),
+    })
+  }
+
+  async cloneVoice(file: File) {
+    const formData = new FormData()
+    formData.append('file', file)
+    return this.request<{ voiceId: string; testAudioUrl: string }>('/api/tts/clone-voice', {
+      method: 'POST',
+      body: formData,
+      headers: {}, // Let browser set Content-Type for FormData
+    })
+  }
+
   // System methods
   async getSystemHealth() {
     return this.request('/health');

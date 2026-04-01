@@ -1,432 +1,161 @@
-# VoiceFlow Backend API
+# VoiceFlow Backend
 
-The main backend service for VoiceFlow, built with Express.js and TypeScript. Provides REST APIs for agent management, user authentication, analytics, and system administration.
+Backend services for the VoiceFlow AI platform. Contains the Express.js API server, FastAPI ingestion service, and Docker infrastructure.
 
-## 🚀 Features
+## Services
 
-- **Agent Management** - CRUD operations for AI agents
-- **User Authentication** - Clerk JWT integration
-- **Multi-tenant Support** - Organization-based data isolation
-- **Real-time Analytics** - Usage metrics and performance data
-- **File Management** - Integration with MinIO for document storage
-- **Audit Logging** - Comprehensive activity tracking
-- **API Documentation** - Swagger/OpenAPI documentation
-- **Rate Limiting** - Redis-based request throttling
-- **Error Handling** - Structured error responses and logging
+| Service | Port | Technology | Description |
+|---|---|---|---|
+| Express Backend | 8000 | Node.js + TypeScript | Main API: auth, agents, RAG, voice, Twilio |
+| Ingestion Service | 8001 | Python + FastAPI | Web scraping, document processing, embeddings |
+| PostgreSQL | 5433 | Docker | Primary database |
+| Redis | 6379 | Docker | Cache, rate limits, call sessions, job tracking |
+| MinIO | 9000/9001 | Docker | S3-compatible file + TTS cache storage |
+| ChromaDB | 8002 | Docker | Vector embeddings (per-tenant collections) |
 
-## 🏗️ Architecture
+## Quick Start
 
-```
-Express.js Backend (Port 8000)
-├── Authentication (Clerk)
-├── API Routes
-│   ├── Agents (/api/agents)
-│   ├── Users (/api/users)
-│   ├── Analytics (/api/analytics)
-│   ├── Audit (/api/audit)
-│   ├── Backup (/api/backup)
-│   └── Settings (/api/settings)
-├── Middleware
-│   ├── Authentication
-│   ├── Rate Limiting
-│   ├── Error Handling
-│   └── Logging
-├── Database (PostgreSQL)
-├── Cache (Redis)
-└── Storage (MinIO)
-```
+### 1. Start Infrastructure
 
-## 📋 Prerequisites
-
-- Node.js 18+ and npm/bun
-- PostgreSQL database
-- Redis instance
-- MinIO storage
-- Clerk account for authentication
-
-## 🚀 Quick Start
-
-### 1. Install Dependencies
 ```bash
+cd new_backend
+docker-compose up -d
+```
+
+### 2. Configure Environment
+
+```bash
+cp express-backend/.env.example express-backend/.env
+cp ingestion-service/.env.example ingestion-service/.env
+```
+
+Fill in `CLERK_SECRET_KEY`, `GROQ_API_KEY`, and `CREDENTIALS_ENCRYPTION_KEY` in `express-backend/.env`.
+
+Generate the encryption key:
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+### 3. Start Express Backend
+
+```bash
+cd express-backend
 npm install
-# or
-bun install
-```
-
-### 2. Environment Configuration
-```bash
-cp .env.example .env
-```
-
-Edit `.env` with your configuration:
-```env
-# Database
-DATABASE_URL=postgresql://user:pass@localhost:5433/voiceflow
-
-# Redis
-REDIS_URL=redis://localhost:6379
-
-# Clerk Authentication
-CLERK_SECRET_KEY=your_clerk_secret
-CLERK_PUBLISHABLE_KEY=your_clerk_publishable_key
-
-# External APIs
-OPENAI_API_KEY=your_openai_key
-GROQ_API_KEY=your_groq_key
-
-# MinIO Storage
-MINIO_ENDPOINT=localhost:9000
-MINIO_ACCESS_KEY=minioadmin
-MINIO_SECRET_KEY=minioadmin
-
-# Application
-PORT=8000
-NODE_ENV=development
-JWT_SECRET=your_jwt_secret
-```
-
-### 3. Database Setup
-```bash
-# Run database migrations
-npm run db:migrate
-
-# Seed initial data (optional)
-npm run db:seed
-```
-
-### 4. Start Development Server
-```bash
+npx prisma generate
+npx prisma db push
 npm run dev
-# or
-bun run dev
 ```
 
-The API will be available at http://localhost:8000
+### 4. Start Ingestion Service
 
-## 📊 API Documentation
-
-### Swagger UI
-Access interactive API documentation at: http://localhost:8000/api-docs
-
-### OpenAPI Specification
-Download the OpenAPI spec at: http://localhost:8000/api-docs.json
-
-### Health Check
 ```bash
+cd ingestion-service
+pip install -r requirements.txt
+playwright install chromium
+uvicorn main:app --host 0.0.0.0 --port 8001 --reload
+```
+
+### 5. Verify Everything Works
+
+```bash
+# Health check
 curl http://localhost:8000/health
+
+# Ingestion service
+curl http://localhost:8001/docs
 ```
 
-## 🔧 Available Scripts
+## Express Backend Architecture
+
+```
+express-backend/src/
+├── index.ts                     ← Server entry, route mounting, Socket.IO
+├── config/env.ts                ← Joi env validation
+├── routes/
+│   ├── auth.ts                  ← Login, signup, Clerk sync
+│   ├── agents.ts                ← Agent CRUD
+│   ├── documents.ts             ← Document upload/list/delete
+│   ├── ingestion.ts             ← Trigger & poll ingestion jobs
+│   ├── onboarding.ts            ← 7-step wizard API
+│   ├── rag.ts                   ← Direct RAG query
+│   ├── runner.ts                ← Chat + audio endpoints
+│   ├── twilio.ts                ← List provisioned numbers
+│   ├── twilioVoice.ts           ← Twilio webhooks (incoming/respond/status)
+│   ├── settings.ts              ← Twilio credentials CRUD
+│   ├── tts.ts                   ← TTS proxy routes
+│   ├── analytics.ts             ← Usage metrics (mocked)
+│   ├── users.ts                 ← User management
+│   └── admin.ts                 ← Admin endpoints
+├── services/
+│   ├── ragService.ts            ← Core RAG: retrieval + Groq LLM
+│   ├── credentialsService.ts    ← AES-256-GCM encrypt/decrypt
+│   ├── twilioClientService.ts   ← Per-tenant Twilio client cache
+│   ├── twilioProvisioningService.ts ← Number search/purchase/release
+│   ├── ttsService.ts            ← TTS call helper (2s timeout)
+│   ├── callAnalysisService.ts   ← Post-call analysis
+│   ├── promptAssemblyService.ts ← Template + config → system prompt
+│   ├── minioService.ts          ← S3 file operations
+│   └── voiceService.ts          ← Legacy ASR/TTS
+├── middleware/
+│   ├── clerkAuth.ts             ← JWT verify + user/tenant sync
+│   ├── rateLimit.ts             ← Redis-based per-tenant limits
+│   └── errorHandler.ts          ← Structured error responses
+└── prisma/schema.prisma         ← Database schema (10 models)
+```
+
+## Key Features
+
+### Per-Tenant Twilio Credentials
+- Each tenant enters their own Twilio Account SID + Auth Token in Settings → Integrations
+- Credentials encrypted with AES-256-GCM before storage (`credentialsService.ts`)
+- Twilio clients cached per-tenant with 5-min TTL (`twilioClientService.ts`)
+- Env vars (`TWILIO_ACCOUNT_SID/AUTH_TOKEN`) used only as dev/admin fallback
+- Numbers provisioned on the tenant's own Twilio account
+
+### TwiML Gather Voice Loop
+- Incoming calls handled via pure HTTP webhooks, no WebSocket
+- `/twilio/voice/incoming` → greeting + `<Gather input="speech">`
+- `/twilio/voice/respond` → RAG query + TTS + another `<Gather>` (loop)
+- `/twilio/voice/status` → call logging + session cleanup
+- Redis stores call session (`twilio:session:{CallSid}`, TTL 1h)
+- TTS via Chatterbox with 2-second timeout fallback to `<Say>`
+
+### Real Phone Number Provisioning
+- `provisionAgentNumber()` → search → purchase → configure webhooks → store in Agent
+- `deprovisionAgentNumber()` → release number → clear DB fields
+- `syncAgentWebhookUrl()` → update stale webhooks on server restart
+- Deploy is gated: backend returns 400 if tenant has no Twilio credentials
+
+## Docker Compose Services
 
 ```bash
-# Development
-npm run dev          # Start development server with hot reload
-npm run build        # Build for production
-npm run start        # Start production server
-
-# Database
-npm run db:migrate   # Run database migrations
-npm run db:generate  # Generate Prisma client
-npm run db:seed      # Seed database with initial data
-npm run db:studio    # Open Prisma Studio
-
-# Testing
-npm run test         # Run unit tests
-npm run test:watch   # Run tests in watch mode
-npm run test:cov     # Run tests with coverage
-
-# Linting & Formatting
-npm run lint         # Run ESLint
-npm run format       # Format code with Prettier
+docker-compose up -d          # Start all infrastructure
+docker-compose ps             # Check status
+docker-compose logs redis     # View logs for a service
+docker-compose down           # Stop all
+docker-compose down -v        # Stop + delete volumes (full reset)
 ```
 
-## 🔐 Authentication
-
-The API uses Clerk for authentication. All protected routes require a valid JWT token in the Authorization header:
-
-```
-Authorization: Bearer <clerk-jwt-token>
-```
-
-## 📡 API Endpoints
-
-### Core Resources
-- `GET/POST/PUT/DELETE /api/agents` - Agent management
-- `GET/POST/PUT/DELETE /api/users` - User management
-- `GET /api/analytics/*` - Analytics and reporting
-- `GET /api/audit/*` - Audit logs and compliance
-- `POST/GET /api/backup/*` - Backup and restore operations
-
-### System Endpoints
-- `GET /health` - Health check
-- `GET /api-docs` - API documentation
-- `GET /metrics` - Application metrics (Prometheus)
-
-## 🧪 Testing
-
-### Unit Tests
-```bash
-npm run test
-```
-
-### Integration Tests
-```bash
-npm run test:integration
-```
-
-### API Testing
-```bash
-# Using curl
-curl -H "Authorization: Bearer <token>" http://localhost:8000/api/agents
-
-# Using the Swagger UI at http://localhost:8000/api-docs
-```
-
-## 🚀 Deployment
-
-### Docker
-```bash
-# Build the image
-docker build -t voiceflow-backend .
-
-# Run the container
-docker run -p 8000:8000 voiceflow-backend
-```
-
-### Environment Variables for Production
-```env
-NODE_ENV=production
-PORT=8000
-DATABASE_URL=postgresql://user:pass@db-host:5432/voiceflow
-REDIS_URL=redis://redis-host:6379
-CLERK_SECRET_KEY=your_production_clerk_secret
-```
-
-## 📊 Monitoring
-
-### Health Checks
-- `/health` - Application health status
-- `/metrics` - Prometheus metrics
-- `/ready` - Readiness probe
-
-### Logging
-- Structured JSON logging
-- Log levels: ERROR, WARN, INFO, DEBUG
-- Request/response logging middleware
-
-## 🔒 Security
-
-- **Authentication**: Clerk JWT validation
-- **Authorization**: Role-based access control
-- **Rate Limiting**: Redis-based request throttling
-- **Input Validation**: Zod schema validation
-- **CORS**: Configured for allowed origins
-- **Helmet**: Security headers
-- **Data Sanitization**: PII protection and filtering
-
-## 🤝 Contributing
-
-1. Follow the existing code style
-2. Add tests for new features
-3. Update API documentation
-4. Ensure all tests pass
-5. Create a pull request with a clear description
-
-## 📄 License
-
-MIT License - see LICENSE file for details.
-- `minio` - Object storage
-- `chroma` - Vector database
-- `redis` - Cache
-- `express-backend` - API server
-- `ingestion-service` - Document processing
-
-### 4. Database Setup
-
-Run database migrations and seed data:
+## Database
 
 ```bash
 cd express-backend
-bun run db:seed
+npx prisma generate           # Generate client from schema
+npx prisma db push            # Push schema to database
+npx prisma studio             # Visual DB browser (localhost:5555)
+npx prisma migrate dev        # Create migration (for version control)
 ```
-
-### 5. Start Frontend
-
-In a separate terminal:
-
-```bash
-cd ../voiceflow-ai-platform (1)
-npm install
-npm run dev
-```
-
-## Service Endpoints
-
-| Service | URL | Description |
-|---------|-----|-------------|
-| Express Backend | http://localhost:8000 | Main API |
-| Ingestion Service | http://localhost:8001 | Document processing |
-| MinIO Console | http://localhost:9001 | Storage admin |
-| ChromaDB | http://localhost:8002 | Vector database |
-| PostgreSQL | localhost:5433 | Database |
-
-## API Documentation
-
-- Express Backend: http://localhost:8000/api-docs
-- Ingestion Service: http://localhost:8001/docs
-
-## Development
-
-### Local Development (without Docker)
-
-1. Start infrastructure services:
-```bash
-docker-compose up -d postgres minio chroma redis
-```
-
-2. Start Express backend:
-```bash
-cd express-backend
-bun run dev
-```
-
-3. Start Ingestion service:
-```bash
-cd ../ingestion-service
-python main.py
-```
-
-### Testing
-
-```bash
-# Backend tests
-cd express-backend
-bun test
-
-# Ingestion service tests
-cd ../ingestion-service
-python test_ingestion.py
-```
-
-## Configuration
-
-### Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `DATABASE_URL` | PostgreSQL connection string | `postgresql://vf_admin:vf_secure_2025!@localhost:5433/voiceflow_prod` |
-| `REDIS_HOST` | Redis hostname | `redis` (docker) / `localhost` (local) |
-| `MINIO_ENDPOINT` | MinIO server URL | `http://minio:9000` |
-| `CHROMA_URL` | ChromaDB server URL | `http://chroma:8000` |
-| `FASTAPI_URL` | Ingestion service URL | `http://ingestion-service:8001` |
-| `CLERK_SECRET_KEY` | Clerk authentication secret | Required |
-| `GROQ_API_KEY` | Groq API key for embeddings | Required |
 
 ## Troubleshooting
 
-### Service Health Checks
-
-```bash
-# Check all services
-docker-compose ps
-
-# View logs
-docker-compose logs [service-name]
-
-# Restart a service
-docker-compose restart [service-name]
-```
-
-### Common Issues
-
-1. **Port conflicts**: Ensure ports 8000-8002, 9000-9001, 5433, 6379 are available
-2. **Database connection**: Wait for PostgreSQL to be healthy before starting other services
-3. **MinIO access**: Use `minioadmin` / `minioadmin` for console access
-4. **API keys**: Ensure Clerk and Groq API keys are properly set
-
-### Reset Everything
-
-```bash
-# Stop and remove all containers and volumes
-docker-compose down -v
-
-# Rebuild and restart
-docker-compose up -d --build
-```
-
-## Integration with Frontend
-
-The frontend (`voiceflow-ai-platform (1)`) is configured to call:
-- API: `http://localhost:8000` (configured in `NEXT_PUBLIC_API_URL`)
-- Authentication: Clerk (configured in `.env`)
-
-All frontend actions (login, agent creation, document upload, chat) now connect to real backend APIs instead of using mock data.
-
-- **Express Backend**: http://localhost:8000 (run locally)
-- **FastAPI Ingestion**: http://localhost:8001 (run locally)
-- **PostgreSQL**: localhost:5432 (Docker)
-- **MinIO**: http://localhost:9000 (Docker)
-- **Chroma DB**: http://localhost:8002 (Docker)
-- **Redis**: localhost:6379 (run locally)
-
-## Environment Setup
-
-The `.env` files are configured for local development with Docker infrastructure services. Update the following placeholders:
-
-- `GROQ_API_KEY`: Your Groq Cloud API key
-- `TWILIO_ACCOUNT_SID`: Your Twilio account SID
-- `TWILIO_AUTH_TOKEN`: Your Twilio auth token
-- `TWILIO_PHONE_NUMBER`: Your Twilio phone number
-
-Make sure Redis is installed and running locally:
-```bash
-# On macOS with Homebrew
-brew install redis
-brew services start redis
-
-# On Ubuntu/Debian
-sudo apt install redis-server
-sudo systemctl start redis
-
-# On Windows (using WSL or Chocolatey)
-choco install redis-64
-redis-server
-```
-
-## API Endpoints
-
-### Agents
-- `POST /agents` - Create agent
-- `GET /agents?userId=...` - List user agents
-- `PUT /agents/:id` - Update agent
-
-### Documents
-- `POST /documents` - Create document
-- `GET /documents?agentId=...` - List agent documents
-
-### RAG
-- `POST /rag/query` - Query agent with RAG
-
-### Ingestion
-- `POST /ingestion/start` - Start document ingestion
-- `GET /ingestion/status/:jobId` - Check ingestion status
-
-### Runner (for frontend)
-- `POST /runner/chat` - Chat with agent
-
-## Testing
-
-### Backend Tests
-```bash
-cd express-backend
-npm test
-```
-
-### Scraping Test
-```bash
-cd ingestion-service
-python test_scraping.py
-```
+| Problem | Fix |
+|---|---|
+| Port 5433 in use | `docker-compose down` then restart, or change port in docker-compose.yml |
+| Prisma client out of date | `npx prisma generate` after schema changes |
+| Redis connection refused | `docker-compose up -d redis` |
+| Ingestion 404 on ChromaDB | Ensure `CHROMA_HOST=localhost` and `CHROMA_PORT=8002` |
+| Twilio deploy fails 400 | Tenant needs to save Twilio credentials in Settings → Integrations |
+| Encryption key error | Set `CREDENTIALS_ENCRYPTION_KEY` (64-char hex string) in `.env` |
 
 ### Full Ingestion Test
 ```bash

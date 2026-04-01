@@ -141,7 +141,7 @@ export function OnboardingFlow() {
 
         // Step 4: voice configuration
         if (currentStep === 4 && stepData.voicePersonality) {
-          await apiClient.configureVoice({ voice: stepData.voicePersonality.voice, tone: stepData.voicePersonality.tone, language: stepData.voicePersonality.language, personality: stepData.voicePersonality.personality })
+          await apiClient.configureVoice({ voice: stepData.voicePersonality.voiceId, tone: stepData.voicePersonality.tone, language: stepData.voicePersonality.language, personality: stepData.voicePersonality.personality })
           
           // Also save complete agent configuration to database
           const agentConfigData = {
@@ -152,6 +152,7 @@ export function OnboardingFlow() {
             communication_channels: (merged as any).agent?.channels,
             preferred_response_style: stepData.voicePersonality.personality,
             response_tone: stepData.voicePersonality.tone,
+            voice_id: stepData.voicePersonality.voiceId,
             company_name: (merged as any).company?.companyName,
             industry: (merged as any).company?.industry,
             primary_use_case: (merged as any).company?.useCase,

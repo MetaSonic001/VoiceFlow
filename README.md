@@ -2,7 +2,7 @@
 
 A multi-tenant SaaS platform for building, deploying, and managing AI-powered voice and chat agents. Businesses onboard through a guided wizard, upload their knowledge base, and receive a domain-specific AI agent that answers customer queries over phone (Twilio) or a web chat interface — using Retrieval-Augmented Generation (RAG) over their own documents.
 
-> **Honest Status:** This is a functional early prototype. The core RAG pipeline and onboarding flow work. Several enterprise dashboard sections currently return mock data. See the [Implementation Status](#implementation-status) section for the full picture.
+> **Status:** The core platform is functional end-to-end. RAG pipeline, onboarding, per-tenant Twilio provisioning, TwiML voice loop, and self-hosted TTS all work. Several enterprise dashboard sections (analytics, billing) still return mock data. See the [Implementation Status](#implementation-status) section for the full picture.
 
 
 ---
@@ -73,21 +73,21 @@ The primary market is Indian SMBs. Every tenant and agent is logically isolated 
 │   │                   CORE SERVICES                              │  │
 │   │                                                              │  │
 │   │   ┌─────────────────────┐   ┌──────────────────────────┐    │  │
-│   │   │   RAG Service       │   │   Voice Service          │    │  │
+│   │   │   RAG Service       │   │   Twilio Voice Svc       │    │  │
 │   │   │                     │   │                          │    │  │
-│   │   │  • Hybrid retrieval │   │  • Vosk ASR (local)      │    │  │
-│   │   │  • BM25 scoring     │   │  • Whisper API (cloud)   │    │  │
-│   │   │  • Context condense │   │  • Coqui TTS (local)     │    │  │
-│   │   │  • Groq LLM call    │   │  • Audio processing      │    │  │
+│   │   │  • Hybrid retrieval │   │  • TwiML Gather loop     │    │  │
+│   │   │  • BM25 scoring     │   │  • Per-tenant creds      │    │  │
+│   │   │  • Context condense │   │  • Webhook validation    │    │  │
+│   │   │  • Groq LLM call    │   │  • Redis call sessions   │    │  │
 │   │   │  • Conv. history    │   └──────────────────────────┘    │  │
 │   │   └─────────────────────┘                                   │  │
 │   │                                                              │  │
 │   │   ┌─────────────────────┐   ┌──────────────────────────┐    │  │
-│   │   │   Twilio Media Svc  │   │   MinIO Service          │    │  │
+│   │   │   Credentials Svc   │   │   MinIO Service          │    │  │
 │   │   │                     │   │                          │    │  │
-│   │   │  • TwiML generation │   │  • Per-tenant buckets    │    │  │
-│   │   │  • WebSocket stream │   │  • File upload/download  │    │  │
-│   │   │  • Call management  │   │  • S3-compatible API     │    │  │
+│   │   │  • AES-256-GCM      │   │  • Per-tenant buckets    │    │  │
+│   │   │  • Per-tenant keys  │   │  • File upload/download  │    │  │
+│   │   │  • Client cache     │   │  • S3-compatible API     │    │  │
 │   │   └─────────────────────┘   └──────────────────────────┘    │  │
 │   └──────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────┘
@@ -114,9 +114,21 @@ The primary market is Indian SMBs. Every tenant and agent is logically isolated 
 │    via Redis             │  │  │            │  │             │  │
 │                          │  │  │ Conv hist  │  │ Per-tenant  │  │
 └──────────────────────────┘  │  │ Rate limit │  │ file store  │  │
+                              │  │ Call sesh  │  │ TTS cache   │  │
                               │  │ Job status │  │ (S3-compat) │  │
                               │  └────────────┘  └─────────────┘  │
                               └────────────────────────────────────┘
+                                         ▲
+┌──────────────────────────┐             │
+│  CHATTERBOX TTS SERVICE  │─────────────┘
+│  (Port 8003)             │
+│                          │
+│  • Chatterbox Turbo 350M │
+│  • 5 preset voices       │
+│  • Voice cloning         │
+│  • MinIO TTS cache       │
+│  • SHA-256 dedup         │
+└──────────────────────────┘
 ```
 
 ---
@@ -190,6 +202,12 @@ VoiceFlow/
 │   └── ingestion-service/         ← ACTIVE: FastAPI ingestion
 │       └── main.py                ← Scraping + embedding + ChromaDB
 │
+├── tts-service/                   ← ACTIVE: Chatterbox TTS microservice
+│   ├── main.py                    ← FastAPI TTS server (port 8003)
+│   ├── Dockerfile
+│   ├── requirements.txt
+│   └── README.md
+│
 ├── not-required/                  ← LEGACY: archived prior iterations
 │   ├── agent-workflow/            ← Old Flask+Groq RAG app
 │   ├── backend/                   ← Old FastAPI+CrewAI backend
@@ -251,9 +269,9 @@ VoiceFlow/
 | Cache / Queue | Redis 7 |
 | File Storage | MinIO (S3-compatible) |
 | LLM | Groq API (`llama` / `mixtral` family) |
-| ASR | Vosk (local) / OpenAI Whisper (cloud) |
-| TTS | Coqui TTS (local) / Mozilla TTS |
-| Telephony | Twilio (voice webhooks, Media Streams) |
+| TTS | Chatterbox Turbo 350M (self-hosted, MIT license) |
+| Telephony | Twilio (TwiML Gather loop, per-tenant credentials) |
+| Credential Encryption | AES-256-GCM via Node.js crypto |
 | Auth Provider | Clerk |
 
 ---
@@ -372,31 +390,55 @@ ragService.processQuery(tenantId, agentId, query, agent, sessionId)
 { response, agentId, sessionId }
 ```
 
-### Voice Call Flow (Twilio)
+### Voice Call Flow (Twilio — TwiML Gather Loop)
 
 ```
-Caller dials Twilio number
+Caller dials Twilio number provisioned on tenant's account
         │
         ▼
-Twilio → POST /twilio/voice (Express webhook)
-        │ Returns TwiML: <Connect><Stream url="wss://ngrok-url/socket.io"/>
+Twilio → POST /twilio/voice/incoming (Express webhook)
         │
-        ▼
-Socket.IO connection established (client = Twilio)
+        ├─ 1. Look up agent by phoneNumber (req.body.To)
+        │     → prisma.agent.findFirst({ phoneNumber: toNumber })
+        │     → load tenant + agentConfiguration
         │
-  [on "start"]  → store session metadata (tenantId, agentId)
+        ├─ 2. Validate Twilio webhook signature
+        │     → getTwilioAuthTokenForValidation(tenantId)
+        │     → uses per-tenant decrypted auth token
         │
-  [on "media"]  → accumulate base64 audio chunks
-        │         when buffer >= 32000 bytes:
-        │           voiceService.transcribeAudio(buffer)
-        │             → Vosk ASR (local 16kHz PCM) OR
-        │             → OpenAI Whisper API
-        │           ragService.processQuery(transcript)
-        │           voiceService.generateSpeech(response)
-        │             → Coqui TTS (local) OR Mozilla TTS
-        │           socket.emit("response", { text, audio })
+        ├─ 3. Create Redis session
+        │     → key: twilio:session:{CallSid}
+        │     → stores: { agentId, tenantId, callSid }
+        │     → TTL: 1 hour
         │
-  [on "stop"]   → cleanup session, free Vosk recognizer
+        ├─ 4. Generate greeting via TTS (if voiceId configured)
+        │     → ttsService.synthesiseForCall(greeting, voiceId)
+        │     → 2s timeout → falls back to <Say> on failure
+        │
+        └─ 5. Return TwiML:
+              <Response>
+                <Play>{presigned wav url}</Play>  ← or <Say> fallback
+                <Gather input="speech" action="/twilio/voice/respond">
+                  <Say>...</Say>
+                </Gather>
+              </Response>
+        │
+        ▼  (caller speaks)
+        │
+Twilio → POST /twilio/voice/respond
+        │
+        ├─ 1. Load session from Redis (CallSid)
+        ├─ 2. Extract speech: req.body.SpeechResult
+        ├─ 3. ragService.processQuery(tenantId, agentId, speech)
+        ├─ 4. TTS: synthesiseForCall(aiResponse, voiceId)
+        └─ 5. Return TwiML with <Play> + another <Gather>
+              → loop continues until caller hangs up
+        │
+        ▼  (on hangup)
+        │
+Twilio → POST /twilio/voice/status
+        │
+        └─ Log call duration, create CallLog record, clean Redis session
 ```
 
 ---
@@ -405,13 +447,13 @@ Socket.IO connection established (client = Twilio)
 
 ### Prerequisites
 
-- Docker Desktop (for infrastructure)
+- Docker Desktop (for infrastructure services)
 - Node.js 18+
 - Python 3.10+
 - `npm` or `pnpm`
-- Clerk account → API keys
-- Groq API key
-- (Optional) OpenAI API key for Whisper, Twilio account for phone
+- Clerk account → API keys ([dashboard.clerk.com](https://dashboard.clerk.com))
+- Groq API key ([console.groq.com](https://console.groq.com))
+- (Optional) Twilio account for phone calls — each tenant brings their own
 
 ### Step 1 — Start Infrastructure
 
@@ -420,163 +462,166 @@ cd new_backend
 docker-compose up -d
 ```
 
-This starts PostgreSQL (5433), Redis (6379), MinIO (9000/9001), and ChromaDB (8002).
+This starts PostgreSQL (5433), Redis (6379), MinIO (9000/9001), ChromaDB (8002), and the TTS service (8003).
 
-### Step 2 — Configure Environment Files
+> **Note:** The TTS service requires an NVIDIA GPU for CUDA inference. If running CPU-only, set `DEVICE=cpu` in `tts-service/.env` (slower but works).
 
-**Express Backend** (`new_backend/express-backend/.env`):
-```env
-# Database
-DATABASE_URL=postgresql://vf_admin:vf_secure_2025!@localhost:5433/voiceflow_prod
+### Step 2 — Generate Encryption Key
 
-# Redis
-REDIS_HOST=localhost
-REDIS_PORT=6379
-
-# ChromaDB
-CHROMA_URL=http://localhost:8002
-
-# Clerk Authentication
-CLERK_SECRET_KEY=sk_test_...
-CLERK_PUBLISHABLE_KEY=pk_test_...
-CLERK_API_KEY=...
-
-# External APIs
-GROQ_API_KEY=gsk_...
-OPENAI_API_KEY=sk-...       # Optional, for Whisper ASR
-
-# MinIO
-MINIO_ENDPOINT=localhost:9000
-MINIO_ACCESS_KEY=minioadmin
-MINIO_SECRET_KEY=minioadmin
-
-# Twilio (Optional, for voice calls)
-TWILIO_ACCOUNT_SID=AC...
-TWILIO_AUTH_TOKEN=...
-TWILIO_PHONE_NUMBER=+1...
-NGROK_URL=your-ngrok-url.ngrok.io
-
-# Voice
-ASR_ENGINE=vosk              # vosk | whisper
-TTS_ENGINE=coqui             # coqui | mozilla
-VOSK_MODEL_PATH=./models/vosk-model
-
-# App
-PORT=8000
-NODE_ENV=development
-FRONTEND_URL=http://localhost:3000
+```bash
+# Run once — store the output in your .env as CREDENTIALS_ENCRYPTION_KEY
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
-**Ingestion Service** (`new_backend/ingestion-service/.env`):
-```env
-REDIS_HOST=localhost
-REDIS_PORT=6379
-CHROMA_PATH=./chroma_db
-MINIO_ENDPOINT=http://localhost:9000
-MINIO_ACCESS_KEY=minioadmin
-MINIO_SECRET_KEY=minioadmin
-EMBEDDING_MODEL=all-MiniLM-L6-v2
-CHUNK_SIZE=1000
-CHUNK_OVERLAP=200
+> **Warning:** Never change this key after tenants have saved Twilio credentials — changing it makes all stored credentials unreadable.
+
+### Step 3 — Configure Environment Files
+
+Each service has a `.env.example` template. Copy and fill in real values:
+
+```bash
+# Express Backend
+cp new_backend/express-backend/.env.example new_backend/express-backend/.env
+
+# Ingestion Service
+cp new_backend/ingestion-service/.env.example new_backend/ingestion-service/.env
+
+# TTS Service
+cp tts-service/.env.example tts-service/.env
+
+# Frontend
+cp "voiceflow-ai-platform (1)/.env.example" "voiceflow-ai-platform (1)/.env.local"
 ```
 
-**Frontend** (`voiceflow-ai-platform (1)/.env.local`):
-```env
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
-CLERK_SECRET_KEY=sk_test_...
-CLERK_API_KEY=...
-DATABASE_URL=postgresql://vf_admin:vf_secure_2025!@localhost:5433/voiceflow_prod
-NEXT_PUBLIC_API_URL=http://localhost:8000
-NEW_BACKEND_URL=http://localhost:8000
-```
+Required values to fill in:
+- `CLERK_SECRET_KEY` and `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` from Clerk dashboard
+- `GROQ_API_KEY` from Groq console
+- `CREDENTIALS_ENCRYPTION_KEY` from Step 2
+- `DATABASE_URL` (default matches docker-compose: `postgresql://vf_admin:vf_secure_2025!@localhost:5433/voiceflow_prod`)
 
-### Step 3 — Start Express Backend
+### Step 4 — Start Express Backend
 
 ```bash
 cd new_backend/express-backend
 npm install
 npx prisma generate
-npx prisma db push
-npm run dev
+npx prisma db push      # creates/updates tables
+npm run dev              # starts on port 8000
 ```
 
-### Step 4 — Start Ingestion Service
+### Step 5 — Start Ingestion Service
 
 ```bash
 cd new_backend/ingestion-service
 pip install -r requirements.txt
-# On Windows, also install Playwright browser:
-playwright install chromium
+playwright install chromium   # required for scraping
 uvicorn main:app --host 0.0.0.0 --port 8001 --reload
 ```
 
-### Step 5 — Start Frontend
+### Step 6 — Start Frontend
 
 ```bash
 cd "voiceflow-ai-platform (1)"
 npm install
 npx prisma generate
-npm run dev
+npm run dev              # starts on port 3000
 ```
 
-### Step 6 — Access the Application
+### Step 7 — Access the Application
 
 | Interface | URL |
 |---|---|
 | Frontend | http://localhost:3000 |
 | Express API | http://localhost:8000 |
+| Express Health | http://localhost:8000/health |
 | FastAPI Ingestion Docs | http://localhost:8001/docs |
+| TTS Service Health | http://localhost:8003/health |
 | MinIO Console | http://localhost:9001 (minioadmin / minioadmin) |
 | ChromaDB | http://localhost:8002 |
 
 ### (Optional) Voice Calls via Twilio
 
+1. **Expose your local backend publicly:**
 ```bash
-# Expose local port publicly
 ngrok http 8000
 ```
 
-Set `NGROK_URL` in your `.env`, then configure your Twilio phone number's voice webhook to:
-```
-https://your-ngrok-url.ngrok.io/twilio/voice
+2. **Set the webhook URL in your backend `.env`:**
+```env
+TWILIO_WEBHOOK_BASE_URL=https://your-subdomain.ngrok-free.app
 ```
 
-Download a Vosk model for local ASR:
-```bash
-mkdir -p new_backend/express-backend/models
-cd new_backend/express-backend/models
-# Download from https://alphacephei.com/vosk/models
-# Recommended: vosk-model-small-en-us-0.15 (~40MB)
-```
+3. **Each tenant enters their own Twilio credentials** in the Settings → Integrations page after signing up. The platform uses their credentials to provision numbers on their Twilio account.
+
+4. **On deploy**, the onboarding wizard calls the Twilio API to search for an available local number, purchase it, and configure the voice webhooks automatically. No manual Twilio console setup needed.
 
 ---
 
 ## Environment Variables
 
-### Required
+### Express Backend (`new_backend/express-backend/.env`)
 
-| Variable | Service | Description |
-|---|---|---|
-| `DATABASE_URL` | Backend, Frontend | PostgreSQL connection string |
-| `CLERK_SECRET_KEY` | Backend, Frontend | Clerk secret for JWT verification |
-| `CLERK_PUBLISHABLE_KEY` | Frontend | Clerk public key |
-| `GROQ_API_KEY` | Backend | LLM inference via Groq |
-| `REDIS_HOST` / `REDIS_PORT` | Backend, Ingestion | Redis connection |
-| `CHROMA_URL` / `CHROMA_PATH` | Backend, Ingestion | ChromaDB endpoint |
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `DATABASE_URL` | **Yes** | — | PostgreSQL connection string |
+| `REDIS_HOST` | **Yes** | `localhost` | Redis host |
+| `REDIS_PORT` | No | `6379` | Redis port |
+| `CLERK_SECRET_KEY` | **Yes** | — | Clerk secret for JWT verification |
+| `GROQ_API_KEY` | **Yes** | — | LLM inference via Groq |
+| `CREDENTIALS_ENCRYPTION_KEY` | No* | — | 64-char hex string for AES-256-GCM encryption of tenant Twilio creds. Required if tenants save Twilio credentials. |
+| `CHROMA_HOST` | No | `localhost` | ChromaDB host |
+| `CHROMA_PORT` | No | `8002` | ChromaDB port |
+| `CHROMA_URL` | No | `http://localhost:8002` | ChromaDB full URL (used by ragService) |
+| `MINIO_ENDPOINT` | No | `localhost` | MinIO host |
+| `MINIO_PORT` | No | `9000` | MinIO port |
+| `MINIO_ACCESS_KEY` | No | `minioadmin` | MinIO access key |
+| `MINIO_SECRET_KEY` | No | `minioadmin` | MinIO secret key |
+| `TWILIO_ACCOUNT_SID` | No | — | Fallback Twilio SID (dev/admin only) |
+| `TWILIO_AUTH_TOKEN` | No | — | Fallback Twilio token (dev/admin only) |
+| `TWILIO_WEBHOOK_BASE_URL` | No | — | Public URL for Twilio webhooks (e.g. ngrok URL) |
+| `TTS_SERVICE_URL` | No | `http://localhost:8003` | Chatterbox TTS service URL |
+| `FASTAPI_URL` | No | `http://localhost:8001` | Ingestion service URL |
+| `PORT` | No | `8000` | Express server port |
+| `NODE_ENV` | No | `development` | Environment mode |
+| `JWT_SECRET` | No | `dev-secret` | JWT signing secret (change in production) |
 
-### Optional
+### Ingestion Service (`new_backend/ingestion-service/.env`)
 
-| Variable | Service | Description |
-|---|---|---|
-| `OPENAI_API_KEY` | Backend | Whisper ASR (cloud fallback) |
-| `TWILIO_ACCOUNT_SID` | Backend | Twilio voice integration |
-| `TWILIO_AUTH_TOKEN` | Backend | Twilio voice integration |
-| `TWILIO_PHONE_NUMBER` | Backend | Assigned phone number |
-| `NGROK_URL` | Backend | Public URL for Twilio webhooks |
-| `VOSK_MODEL_PATH` | Backend | Path to local Vosk model directory |
-| `MINIO_ENDPOINT` | Backend, Ingestion | MinIO/S3 endpoint |
-| `MINIO_ACCESS_KEY` | Backend, Ingestion | MinIO credentials |
-| `MINIO_SECRET_KEY` | Backend, Ingestion | MinIO credentials |
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `REDIS_HOST` | No | `localhost` | Redis host for job tracking |
+| `REDIS_PORT` | No | `6379` | Redis port |
+| `CHROMA_HOST` | No | `localhost` | ChromaDB host |
+| `CHROMA_PORT` | No | `8002` | ChromaDB port |
+| `MINIO_ENDPOINT` | No | `http://localhost:9000` | MinIO endpoint |
+| `MINIO_ACCESS_KEY` | No | — | MinIO access key |
+| `MINIO_SECRET_KEY` | No | — | MinIO secret key |
+| `EMBEDDING_MODEL` | No | `all-MiniLM-L6-v2` | Sentence transformer model |
+| `CHUNK_SIZE` | No | `1000` | Text chunk size |
+| `CHUNK_OVERLAP` | No | `200` | Chunk overlap |
+
+### TTS Service (`tts-service/.env`)
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `MINIO_ENDPOINT` | No | `localhost:9000` | MinIO endpoint for TTS cache |
+| `MINIO_ACCESS_KEY` | No | `minioadmin` | MinIO access key |
+| `MINIO_SECRET_KEY` | No | `minioadmin` | MinIO secret key |
+| `MINIO_BUCKET` | No | `voiceflow-tts` | MinIO bucket for TTS audio |
+| `DEVICE` | No | `cuda` | PyTorch device (`cuda` or `cpu`) |
+
+### Frontend (`voiceflow-ai-platform (1)/.env.local`)
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | **Yes** | — | Clerk publishable key |
+| `CLERK_SECRET_KEY` | **Yes** | — | Clerk secret key |
+| `DATABASE_URL` | **Yes** | — | PostgreSQL connection string |
+| `NEXT_PUBLIC_API_URL` | No | `http://localhost:8000` | Public backend URL for client-side calls |
+| `BACKEND_URL` | No | `http://localhost:8000` | Server-side backend URL for API proxies |
+| `NEW_BACKEND_URL` | No | `http://localhost:8000` | Alias for backend URL |
+| `BACKEND_API_KEY` | No | — | Server-to-server auth key |
+| `NEXT_PUBLIC_WS_URL` | No | `ws://localhost:8000` | WebSocket URL |
 
 ---
 
@@ -587,9 +632,10 @@ cd new_backend/express-backend/models
 | Frontend | Next.js 15 | 3000 | UI, dashboard, onboarding |
 | Express Backend | Node.js | 8000 | Auth, agents, RAG, voice, API |
 | Ingestion Service | FastAPI | 8001 | Scraping, embedding, ChromaDB writes |
+| TTS Service | FastAPI + Chatterbox | 8003 | Self-hosted text-to-speech, voice cloning |
 | PostgreSQL | Docker | 5433 | Primary relational data |
-| Redis | Docker | 6379 | Conversation cache, rate limits, job queue |
-| MinIO | Docker | 9000/9001 | File storage (S3-compatible) |
+| Redis | Docker | 6379 | Conversation cache, rate limits, call sessions |
+| MinIO | Docker | 9000/9001 | File storage, TTS cache (S3-compatible) |
 | ChromaDB | Docker | 8002 | Vector embeddings (per-tenant collections) |
 
 ---
@@ -657,10 +703,24 @@ x-tenant-id: <tenant_uuid>
 ### Twilio / Voice
 | Method | Endpoint | Description |
 |---|---|---|
-| GET | `/twilio/numbers` | Get available phone numbers |
-| POST | `/twilio/voice` | Incoming call webhook (TwiML response) |
-| POST | `/twilio/call` | Initiate outbound call |
-| GET | `/twilio/call/:callSid` | Get call status |
+| GET | `/twilio/numbers` | List provisioned phone numbers for tenant |
+| POST | `/twilio/voice/incoming` | Inbound call webhook (TwiML Gather) — no auth |
+| POST | `/twilio/voice/respond` | Conversation loop webhook (TwiML) — no auth |
+| POST | `/twilio/voice/status` | Call status callback — no auth |
+
+### Settings
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/api/settings/twilio` | Save & verify Twilio credentials (encrypted) |
+| GET | `/api/settings/twilio` | Get credential status (never returns auth token) |
+| DELETE | `/api/settings/twilio` | Remove Twilio credentials |
+
+### TTS (Text-to-Speech)
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/tts/preset-voices` | List 5 preset voices with sample audio |
+| POST | `/api/tts/synthesise` | Generate speech audio for text + voiceId |
+| POST | `/api/tts/clone-voice` | Upload audio to create a cloned voice profile |
 
 ### Analytics (currently mocked)
 | Method | Endpoint | Description |
@@ -686,7 +746,7 @@ A complete breakdown of what works versus what is a stub or mock.
 | Component | Notes |
 |---|---|
 | Clerk authentication | JWT verify, user sync via ClerkSync component |
-| 7-step onboarding wizard | Steps 1-4 persist to backend; Step 7 returns mock phone |
+| 7-step onboarding wizard | All 7 steps persist to backend, including deploy |
 | URL scraping + ingestion | 4-strategy cascade: Crawl4AI → Trafilatura → Playwright → Scrapy |
 | File ingestion (PDF/DOCX/PPTX/XLSX) | With OCR fallback for scanned PDFs via DocTR |
 | ChromaDB vector storage | Per-tenant collections with agentId metadata filter |
@@ -697,84 +757,95 @@ A complete breakdown of what works versus what is a stub or mock.
 | Chat interface (frontend) | Sends to `/api/runner/chat` via Next.js proxy |
 | Redis rate limiting | Per-tenant with in-memory fallback |
 | MinIO file storage | Per-tenant object paths (`{tenantId}/{timestamp}-{filename}`) |
-| Twilio webhook (TwiML) | TwiML generation works; full E2E voice untested |
-| Vosk ASR | Works when model is downloaded locally |
-| Coqui TTS | Works when Coqui model is installed |
+| Twilio voice (TwiML Gather loop) | Inbound calls → speech recognition → RAG → TTS response, auto-loops |
+| Per-tenant Twilio credentials | AES-256-GCM encrypted, stored in tenant settings, client cache with 5-min TTL |
+| Real Twilio number provisioning | Search → purchase → webhook config → store in Agent record |
+| Twilio webhook validation | Per-tenant auth token decryption for signature verification |
+| Agent template system | 6 seeded templates (General, Sales, Healthcare, Legal, Restaurant, Real Estate) |
+| Prompt assembly service | Dynamic system prompt from template + agent configuration |
+| Voice selector UI | 5 preset voices + voice cloning via Chatterbox Turbo |
+| TTS microservice | Self-hosted Chatterbox Turbo 350M, MinIO caching, SHA-256 dedup |
+| Call logging | CallLog records with duration, transcript, caller phone |
+| Onboarding progress (server-side) | GET/POST/DELETE `/onboarding/progress` for resume |
+| Deploy gating | Frontend checks Twilio credential status before allowing deploy |
 
 ### Partially Implemented / Mocked
 
 | Component | Issue |
 |---|---|
 | Analytics dashboard | All routes return hardcoded data — no real DB aggregation |
-| Twilio phone numbers | Returns 2 hardcoded mock numbers |
-| `/onboarding/voice` | Returns `{ success: true }`, no persistence |
-| `/onboarding/channels` | Returns `{ success: true }`, no persistence |
-| `/onboarding/deploy` | Returns hardcoded mock phone number |
-| Onboarding progress | Stored in process memory — lost on server restart |
 | Admin pipelines page | UI page exists, no backend |
 | Billing / invoices | Frontend API methods exist, no backend routes |
 | Notifications | Frontend API methods exist, no backend routes |
 | Backup / restore | Frontend API methods exist, no backend routes |
+| Onboarding progress persistence | Stored in process memory — lost on server restart |
 
 ### Known Issues
 
 | Issue | Impact |
 |---|---|
-| `x-tenant-id: 'default-tenant'` hardcoded in Next.js proxy | Multi-tenancy broken — all users share a single tenant |
-| Two incompatible Prisma schemas | `AgentConfiguration`, `Brand`, `OnboardingProgress` exist only in frontend schema, not backend |
-| Agent config never used in RAG | Persona, tone, behavior rules, escalation triggers collected in onboarding but **never injected into LLM prompt** |
+| Agent config never used in RAG | Persona, tone, behavior rules, escalation triggers collected in onboarding but **not injected into LLM prompt at inference time** |
 | Conversation history not passed to LLM | Redis stores 20 turns but `generateResponse()` only sends `[system, user]` — no history in messages array |
 | TypeScript build errors suppressed | `next.config.mjs` has `typescript: { ignoreBuildErrors: true }` |
 | `localStorage` in ApiClient constructor | Throws during SSR; Clerk token getter in class method always returns `null` |
-| No environment variable validation | App fails silently when `GROQ_API_KEY`, `CLERK_SECRET_KEY` etc. are missing |
+| Inconsistent backend URL env vars | Frontend uses `BACKEND_URL`, `NEW_BACKEND_URL`, and `NEXT_PUBLIC_API_URL` interchangeably |
 
 ---
 
 ## Data Models
 
-### PostgreSQL — Backend (Runtime, source of truth)
+### PostgreSQL — Unified Prisma Schema (`new_backend/express-backend/prisma/schema.prisma`)
 
 ```
 Tenant
-  id (cuid), name, domain?, apiKey, settings (JSON), isActive
-  → has many: Users, Agents, Documents
+  id (cuid), name, domain?, apiKey, settings (JSON — includes encrypted
+  Twilio creds, twilioCredentialsVerified flag), isActive
+  → has many: Users, Agents, Documents, Brands
 
 User
-  id (cuid), email, name?, tenantId
+  id (cuid), email, name?, role, tenantId, brandId?
+  → belongs to: Tenant, Brand
+
+Brand
+  id (cuid), tenantId, name
   → belongs to: Tenant
-  → has many: Agents
 
 Agent
   id (cuid), name, systemPrompt?, voiceType, llmPreferences (JSON),
-  tokenLimit, contextWindowStrategy, tenantId, userId
-  → belongs to: Tenant, User
-  → has many: Documents
+  tokenLimit, contextWindowStrategy, tenantId, userId, brandId?,
+  templateId?, phoneNumber?, twilioNumberSid?, chromaCollection?,
+  channels (JSON), status
+  → belongs to: Tenant, User, Brand, AgentTemplate
+  → has one: AgentConfiguration
+  → has many: Documents, CallLogs
+
+AgentConfiguration
+  agentId (unique FK), templateId?, agentName, agentRole,
+  agentDescription, personalityTraits (JSON), communicationChannels (JSON),
+  preferredResponseStyle, responseTone, voiceId?, voiceCloneSourceUrl?,
+  companyName, industry, primaryUseCase, behaviorRules (JSON),
+  escalationTriggers (JSON), knowledgeBoundaries (JSON),
+  maxResponseLength, confidenceThreshold
+  → belongs to: Agent, AgentTemplate
+
+AgentTemplate
+  id (cuid), name (unique), description, category?,
+  baseSystemPrompt, defaultCapabilities (JSON),
+  suggestedKnowledgeCategories (JSON), defaultTools (JSON)
+
+OnboardingProgress
+  id (autoincrement), userEmail (unique), tenantId?, agentId?,
+  currentStep, data (JSON)
 
 Document
   id (cuid), url?, s3Path?, status, title?, content?, metadata (JSON),
   tenantId, agentId
   → status: pending | processing | completed | failed
-```
 
-### PostgreSQL — Frontend (Onboarding / user-facing state)
-
-Additional models that exist only in the frontend schema and need to be migrated to the backend:
-
-```
-AgentConfiguration
-  agentId, agentName, agentRole, agentDescription,
-  personalityTraits (JSON), communicationChannels (JSON),
-  preferredResponseStyle, responseTone,
-  companyName, industry, primaryUseCase,
-  behaviorRules (JSON), escalationTriggers (JSON),
-  knowledgeBoundaries (JSON),
-  maxResponseLength, confidenceThreshold
-
-OnboardingProgress
-  userEmail, tenantId, agentId, currentStep, data (JSON)
-
-Brand
-  id, tenantId, name
+CallLog
+  id (cuid), tenantId, agentId, callerPhone?, startedAt,
+  endedAt?, durationSeconds?, transcript, analysis (JSON),
+  rating?, flaggedForRetraining
 ```
 
 ### ChromaDB
@@ -796,6 +867,7 @@ Collection name: "tenant_{tenantId}"
 
 ```
 conversation:{tenantId}:{agentId}:{sessionId}  → JSON array of messages (TTL: 24h)
+twilio:session:{CallSid}                       → JSON { agentId, tenantId, callSid } (TTL: 1h)
 job:{jobId}                                    → ingestion job status string
 job:{jobId}:progress                           → "0"–"100" percent
 rate_limit:{tenantId}:{endpoint}               → request count (TTL: 15m)
@@ -956,7 +1028,7 @@ Incoming Request (Voice or Text)
 
 ### What Needs to Be Built to Make All Claims True
 
-The scaffolding is in place. Five focused modules need to be implemented:
+The scaffolding is in place. Three focused modules need to be implemented:
 
 **Module 1 — Hierarchical Context Injection Service** *(highest priority)*
 A new `contextInjector.ts` service that, given `(tenantId, agentId, sessionId)`, loads all five layers and returns a structured `ContextObject`. Called at the start of every `processQuery()` invocation before any retrieval. This is the core differentiator.
@@ -967,11 +1039,9 @@ Rewrite `generateResponse()` to accept a `ContextObject` and compose the full mu
 **Module 3 — Policy-Aware Retrieval Scoring**
 Add a scoring pass after ChromaDB retrieval that reads `AgentConfiguration.knowledgeBoundaries` and tenant compliance rules, applies multiplicative weights and exclusion filters before chunks enter the prompt.
 
-**Module 4 — Schema Unification + AgentConfiguration in Backend**
-Migrate `AgentConfiguration`, `Brand`, and `OnboardingProgress` from the frontend-only Prisma schema into the backend schema so the RAG service can load them at inference time.
-
-**Module 5 — Phone Number to Tenant Mapping**
-Add a `PhoneNumberMapping` table (`phone_number → tenantId → agentId`) and use it in the Twilio webhook for tenant resolution from called number, replacing auth-token-based resolution for voice calls.
+**Previously completed:**
+- ~~Module 4 — Schema Unification~~ → `AgentConfiguration`, `Brand`, `OnboardingProgress`, `CallLog` all exist in the backend Prisma schema.
+- ~~Module 5 — Phone Number to Tenant Mapping~~ → `Agent.phoneNumber` and `Agent.twilioNumberSid` fields, looked up by `/twilio/voice/incoming` handler via `req.body.To`.
 
 ### Implementation Status of Patent Claims
 
@@ -979,8 +1049,8 @@ Add a `PhoneNumberMapping` table (`phone_number → tenantId → agentId`) and u
 |---|---|---|
 | 1 | Receive input → resolve tenant → inject metadata → query isolated store → dynamic prompt → LLM → deliver | Partial — isolation and retrieval work; context injection and dynamic prompt not yet wired |
 | 2 | Auto-create tenant vector store on first ingestion | **Done** — `get_or_create_collection()` in ingestion service |
-| 3 | Tenant metadata includes policies, compliance, persona | Data model exists in frontend schema; not yet read at inference time |
-| 4 | Per-agent sub-stores within a tenant | Done via `agentId` metadata filter in ChromaDB |
+| 3 | Tenant metadata includes policies, compliance, persona | Data model exists in backend schema; not yet read at inference time |
+| 4 | Per-agent sub-stores within a tenant | **Done** via `agentId` metadata filter in ChromaDB |
 | 5 | Policy-based filtering of retrieved chunks | Not implemented — no policy scoring layer exists yet |
 | 6 | Conversation state loaded and incorporated into prompt | Redis storage exists; not yet passed to LLM messages array |
 | 7 | Dynamic LLM model selection per tenant config | Not implemented — hardcoded to `grok-beta` for all tenants |
@@ -988,8 +1058,8 @@ Add a `PhoneNumberMapping` table (`phone_number → tenantId → agentId`) and u
 | 9 | Dynamic prompt assembly (not static template) | Not implemented — current prompt is a static 2-line template |
 | 10 | Real-time ingestion without downtime | **Done** — FastAPI background task ingestion |
 | 11 | Tenant isolation at storage AND inference layers | Storage: done. Inference-layer isolation: not yet enforced |
-| 12 | Telephony with tenant-from-phone-number resolution | Webhook structure exists; phone-to-tenant mapping not implemented |
-| 13 | TTS audio response back via telephony | Structure and code exists; untested end-to-end |
+| 12 | Telephony with tenant-from-phone-number resolution | **Done** — `/incoming` handler looks up Agent by `req.body.To` phone number |
+| 13 | TTS audio response back via telephony | **Done** — Chatterbox Turbo TTS integrated into TwiML Gather loop |
 | 14 | Non-voice channels use same RAG pipeline | **Done** — `/api/runner/chat` uses identical `ragService` |
 | 15 | Shared infra, logically separated per-tenant | Architecture supports it; inference-layer separation not fully enforced |
 

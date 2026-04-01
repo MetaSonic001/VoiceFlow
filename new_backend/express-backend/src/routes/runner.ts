@@ -5,6 +5,7 @@ import multer from 'multer';
 import RagService from '../services/ragService';
 import VoiceService from '../services/voiceService';
 import { TwilioMediaService, TwilioMediaConfig } from '../services/twilioMediaService';
+import { getTenantTwilioCreds } from '../services/twilioClientService';
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -15,15 +16,40 @@ const upload = multer({ storage: multer.memoryStorage() });
 const ragService = RagService;
 const voiceService = VoiceService;
 
-// Twilio config for audio processing
-const twilioConfig: TwilioMediaConfig = {
-  accountSid: process.env.TWILIO_ACCOUNT_SID || '',
-  authToken: process.env.TWILIO_AUTH_TOKEN || '',
-  phoneNumber: process.env.TWILIO_PHONE_NUMBER || '',
-  voskModelPath: process.env.VOSK_MODEL_PATH || './models/vosk-model',
-};
+// Lazy-init TwilioMediaService per-tenant to avoid hardcoded env credentials
+const mediaServiceCache = new Map<string, TwilioMediaService>();
 
-const twilioMediaService = new TwilioMediaService(twilioConfig, ragService, voiceService);
+async function getMediaService(req: Request): Promise<TwilioMediaService> {
+  const tenantId = req.tenantId || 'default';
+  const cached = mediaServiceCache.get(tenantId);
+  if (cached) return cached;
+
+  const prisma: PrismaClient = req.app.get('prisma');
+  let accountSid = '';
+  let authToken = '';
+
+  // Prefer per-tenant creds, fall back to env vars
+  const creds = await getTenantTwilioCreds(prisma, tenantId).catch(() => null);
+  if (creds) {
+    accountSid = creds.accountSid;
+    authToken = creds.authToken;
+  } else {
+    accountSid = process.env.TWILIO_ACCOUNT_SID || '';
+    authToken = process.env.TWILIO_AUTH_TOKEN || '';
+  }
+
+  const config: TwilioMediaConfig = {
+    accountSid,
+    authToken,
+    phoneNumber: process.env.TWILIO_PHONE_NUMBER || '',
+    voskModelPath: process.env.VOSK_MODEL_PATH || './models/vosk-model',
+  };
+  const svc = new TwilioMediaService(config, ragService, voiceService);
+  mediaServiceCache.set(tenantId, svc);
+  // Expire cache entry after 5 minutes
+  setTimeout(() => mediaServiceCache.delete(tenantId), 5 * 60 * 1000);
+  return svc;
+}
 
 // Interfaces
 interface ChatBody {
@@ -143,7 +169,8 @@ router.post('/audio', upload.single('audio'), async (req: Request, res: Response
     const audioBuffer = req.file.buffer;
 
     // Process audio (this will do ASR and generate response)
-    const result = await twilioMediaService.processAudioForWeb(audioBuffer, agentId, sessionId || 'default');
+    const mediaService = await getMediaService(req);
+    const result = await mediaService.processAudioForWeb(audioBuffer, agentId, sessionId || 'default');
 
     res.json({
       transcript: result.transcript,

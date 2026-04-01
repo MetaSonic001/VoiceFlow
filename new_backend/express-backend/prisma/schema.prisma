@@ -84,6 +84,7 @@ model Agent {
   tokenLimit            Int?     @default(4096)
   contextWindowStrategy String?  @default("condense")
   phoneNumber           String?
+  twilioNumberSid       String?
   totalCalls            Int?     @default(0)
   totalChats            Int?     @default(0)
   successRate           Int?     @default(0)
@@ -115,6 +116,8 @@ model AgentConfiguration {
   communicationChannels  Json?
   preferredResponseStyle String?
   responseTone           String?
+  voiceId                String?
+  voiceCloneSourceUrl    String?
   companyName            String?
   industry               String?
   primaryUseCase         String?
@@ -193,10 +196,12 @@ model CallLog {
   id                   String    @id @default(uuid())
   tenantId             String
   agentId              String
+  callerPhone          String?
   startedAt            DateTime
   endedAt              DateTime?
   durationSeconds      Int?
   transcript           String    @db.Text
+  analysis             Json?
   rating               Int?      // 1 = thumbs up, -1 = thumbs down, null = unrated
   ratingNotes          String?
   flaggedForRetraining Boolean   @default(false)

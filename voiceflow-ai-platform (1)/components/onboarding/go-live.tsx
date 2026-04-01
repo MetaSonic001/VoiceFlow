@@ -4,9 +4,10 @@ import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { CheckCircle, Rocket, Phone, MessageSquare, Copy, ExternalLink } from "lucide-react"
+import { CheckCircle, Rocket, Phone, MessageSquare, Copy, ExternalLink, AlertTriangle } from "lucide-react"
 import { apiClient } from '@/lib/api-client'
 import { useToast } from '@/hooks/use-toast'
+import Link from 'next/link'
 
 interface GoLiveProps {
   onComplete: (data: any) => void
@@ -17,9 +18,17 @@ export function GoLive({ onComplete, phoneNumber }: GoLiveProps) {
   const [isDeploying, setIsDeploying] = useState(false)
   const [isDeployed, setIsDeployed] = useState(false)
   const [deployedNumber, setDeployedNumber] = useState<string | undefined>(phoneNumber)
+  const [twilioConfigured, setTwilioConfigured] = useState<boolean | null>(null)
   const { toast } = useToast()
 
   useEffect(() => { setDeployedNumber(phoneNumber) }, [phoneNumber])
+
+  // Check Twilio credential status on mount
+  useEffect(() => {
+    apiClient.getTwilioCredentialStatus()
+      .then((status) => setTwilioConfigured(!!status.configured && !!status.credentialsVerified))
+      .catch(() => setTwilioConfigured(false))
+  }, [])
 
   const handleDeploy = async () => {
     setIsDeploying(true)
@@ -123,7 +132,23 @@ export function GoLive({ onComplete, phoneNumber }: GoLiveProps) {
         </Card>
 
         <div className="text-center">
-          <Button onClick={handleDeploy} disabled={isDeploying} size="lg" className="px-8">
+          {twilioConfigured === false && (
+            <Card className="mb-4 border-amber-200 bg-amber-50">
+              <CardContent className="py-4 flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                <div className="text-left">
+                  <p className="text-sm font-medium text-amber-800">Twilio credentials required</p>
+                  <p className="text-sm text-amber-700 mt-1">
+                    Before deploying your agent, add your Twilio Account SID and Auth Token so we can provision a real phone number on your Twilio account.
+                  </p>
+                  <Link href="/dashboard/settings" className="text-sm font-medium text-amber-900 underline mt-2 inline-block">
+                    Go to Settings &rarr; Integrations
+                  </Link>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+          <Button onClick={handleDeploy} disabled={isDeploying || twilioConfigured === false} size="lg" className="px-8">
             {isDeploying ? (
               <>
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
