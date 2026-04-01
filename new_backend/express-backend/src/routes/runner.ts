@@ -1,9 +1,12 @@
 import express, { Request, Response, NextFunction, Router } from 'express';
 import Joi from 'joi';
 import { PrismaClient } from '@prisma/client';
+import Redis from 'ioredis';
 import multer from 'multer';
 import RagService from '../services/ragService';
 import VoiceService from '../services/voiceService';
+import { ContextInjector } from '../services/contextInjector';
+import { buildSystemPrompt } from '../services/promptAssembly';
 import { TwilioMediaService, TwilioMediaConfig } from '../services/twilioMediaService';
 import { getTenantTwilioCreds } from '../services/twilioClientService';
 import dotenv from 'dotenv';
@@ -65,7 +68,7 @@ const chatSchema = Joi.object({
   sessionId: Joi.string().optional()
 });
 
-// Chat with agent (for frontend)
+// Chat with agent (for frontend) — uses full 5-layer context hierarchy
 router.post('/chat', async (req: Request, res: Response) => {
   try {
     const { error, value } = chatSchema.validate(req.body);
@@ -74,7 +77,8 @@ router.post('/chat', async (req: Request, res: Response) => {
     }
 
     const prisma: PrismaClient = req.app.get('prisma');
-    const { message, agentId, sessionId } = value as ChatBody;
+    const redis: Redis = req.app.get('redis');
+    const { message, agentId, sessionId = 'default' } = value as ChatBody;
 
     // Verify agent belongs to tenant or use default for testing
     let agent = await prisma.agent.findFirst({
@@ -98,17 +102,42 @@ router.post('/chat', async (req: Request, res: Response) => {
       }
     }
 
+    // ── Assemble full context hierarchy ──────────────────────────────────
+    const injector = new ContextInjector(prisma, redis);
+    let systemPrompt: string;
+    let policyRules: any[] = [];
+
+    try {
+      const ctx = await injector.assemble(req.tenantId, agentId, sessionId);
+      systemPrompt = buildSystemPrompt(ctx);
+      policyRules = ctx.mergedPolicyRules;
+    } catch {
+      // Fallback if context assembly fails (e.g. test agents without full data)
+      systemPrompt = agent!.systemPrompt || 'You are a helpful AI assistant.';
+    }
+
+    // Query RAG with policy-scored retrieval
     const chatStart = new Date();
-    const response = await ragService.processQuery(
-      req.tenantId,
-      agentId,
-      message,
-      {
-        systemPrompt: agent!.systemPrompt || undefined,
-        tokenLimit: agent!.tokenLimit || undefined
-      },
-      sessionId
+    const contexts = await ragService.queryDocuments(
+      req.tenantId, agentId, message, 10, agent!.tokenLimit || 4096, policyRules,
     );
+    const response = await ragService.generateResponse(
+      systemPrompt, contexts, message, agent!.tokenLimit || 4096,
+    );
+
+    // Store conversation turn in Redis
+    const convKey = `conversation:${req.tenantId}:${agentId}:${sessionId}`;
+    try {
+      const rawConv = await redis.get(convKey);
+      let conversation = rawConv ? JSON.parse(rawConv) : [];
+      conversation.push({ role: 'user', content: message });
+      conversation.push({ role: 'assistant', content: response });
+      if (conversation.length > 20) conversation = conversation.slice(-20);
+      await redis.setex(convKey, 86400, JSON.stringify(conversation));
+    } catch (redisErr) {
+      console.warn('Redis error storing conversation:', redisErr);
+    }
+
     const chatEnd = new Date();
     const durationMs = chatEnd.getTime() - chatStart.getTime();
 
@@ -131,7 +160,7 @@ router.post('/chat', async (req: Request, res: Response) => {
     res.json({
       response: response,
       agentId: agentId,
-      sessionId: sessionId || 'default'
+      sessionId: sessionId
     });
   } catch (error) {
     console.error('Error in chat:', error);

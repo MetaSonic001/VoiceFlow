@@ -107,6 +107,10 @@ async def health_check():
 
 @app.post("/ingest", response_model=IngestResponse)
 async def ingest_documents(request: IngestRequest, background_tasks: BackgroundTasks):
+    if not request.tenantId or not request.tenantId.strip():
+        raise HTTPException(status_code=400, detail="tenantId is required")
+    if not request.agentId or not request.agentId.strip():
+        raise HTTPException(status_code=400, detail="agentId is required")
     job_id = str(uuid.uuid4())
     redis_client.set(f"job:{job_id}", "processing")
     redis_client.set(f"job:{job_id}:progress", "0")
@@ -450,6 +454,8 @@ def _process_company_sync(
 
 @app.post("/ingest/company", response_model=IngestResponse)
 async def ingest_company(request: CompanyIngestRequest, background_tasks: BackgroundTasks):
+    if not request.tenantId or not request.tenantId.strip():
+        raise HTTPException(status_code=400, detail="tenantId is required")
     job_id = str(uuid.uuid4())
     redis_client.set(f"job:{job_id}", "processing")
     redis_client.set(f"job:{job_id}:progress", "0")
@@ -481,6 +487,8 @@ async def get_company_knowledge(tenant_id: str, limit: int = 200):
     Returns all ChromaDB chunks tagged as company_profile for a given tenant.
     Used by the dashboard's Knowledge Base tab to show/manage company data.
     """
+    if not tenant_id or not tenant_id.strip():
+        raise HTTPException(status_code=400, detail="tenant_id is required")
     try:
         collection_name = f"tenant_{tenant_id}"
         collection = chroma_client.get_or_create_collection(name=collection_name)
@@ -508,6 +516,8 @@ async def get_company_knowledge(tenant_id: str, limit: int = 200):
 @app.delete("/knowledge/{tenant_id}/{chunk_id}")
 async def delete_knowledge_chunk(tenant_id: str, chunk_id: str):
     """Deletes a single chunk from a tenant's ChromaDB collection."""
+    if not tenant_id or not tenant_id.strip():
+        raise HTTPException(status_code=400, detail="tenant_id is required")
     try:
         collection_name = f"tenant_{tenant_id}"
         collection = chroma_client.get_collection(name=collection_name)
@@ -519,6 +529,8 @@ async def delete_knowledge_chunk(tenant_id: str, chunk_id: str):
 
 async def process_ingestion(job_id: str, tenant_id: str, agent_id: str, urls: List[str], s3_urls: List[str]):
     try:
+        if not tenant_id or not tenant_id.strip():
+            raise ValueError("tenant_id is required for vector store isolation")
         collection_name = f"tenant_{tenant_id}"
         collection = chroma_client.get_or_create_collection(name=collection_name)
 

@@ -1,5 +1,6 @@
 import axios, { AxiosResponse } from 'axios';
 import Redis from 'ioredis';
+import { PolicyRule } from './contextInjector';
 
 interface Agent {
   systemPrompt?: string;
@@ -11,14 +12,23 @@ interface ConversationMessage {
   content: string;
 }
 
+interface ScoredDocument {
+  content: string;
+  metadata: Record<string, any>;
+  score: number;
+}
+
 interface ChromaQueryResponse {
   results: {
     documents: string[];
+    metadatas: Record<string, any>[];
+    distances: number[];
   }[];
 }
 
 interface ChromaGetResponse {
   documents: string[];
+  metadatas: Record<string, any>[];
 }
 
 interface GroqResponse {
@@ -45,30 +55,41 @@ class RagService {
     });
   }
 
-  async queryDocuments(tenantId: string, agentId: string, query: string, topK: number = 5, maxTokens: number = 4000): Promise<string[]> {
+  async queryDocuments(tenantId: string, agentId: string, query: string, topK: number = 5, maxTokens: number = 4000, policyRules: PolicyRule[] = []): Promise<string[]> {
+    if (!tenantId) throw new Error('tenantId is required for document queries');
+
     try {
       const collectionName = `tenant_${tenantId}`;
 
-      // Get semantic search results
-      const semanticResults = await this.semanticSearch(collectionName, query, agentId, Math.floor(topK * 0.7));
+      // Get semantic search results (with metadata)
+      const semanticResults = await this.semanticSearchScored(collectionName, query, agentId, Math.floor(topK * 0.7));
 
-      // Get keyword search results using BM25
-      const keywordResults = await this.keywordSearch(collectionName, query, agentId, Math.floor(topK * 0.3));
+      // Get keyword search results using BM25 (with metadata)
+      const keywordResults = await this.keywordSearchScored(collectionName, query, agentId, Math.floor(topK * 0.3));
 
-      // Combine and deduplicate results
-      const combinedResults = [...semanticResults, ...keywordResults];
-      const uniqueResults = Array.from(new Set(combinedResults));
+      // Combine and deduplicate by content
+      const seen = new Set<string>();
+      const combined: ScoredDocument[] = [];
+      for (const doc of [...semanticResults, ...keywordResults]) {
+        if (!seen.has(doc.content)) {
+          seen.add(doc.content);
+          combined.push(doc);
+        }
+      }
 
       // Re-rank by relevance to query
-      const scoredResults = uniqueResults.map(doc => ({
-        content: doc,
-        score: this.calculateRelevanceScore(doc, query)
-      }));
+      for (const doc of combined) {
+        doc.score += this.calculateRelevanceScore(doc.content, query);
+      }
 
-      scoredResults.sort((a, b) => b.score - a.score);
+      // ── Policy scoring pass ────────────────────────────────────────────
+      // Apply policy rules to adjust scores: restrict → penalise, require → boost
+      const policyScored = this.applyPolicyScoring(combined, policyRules);
+
+      policyScored.sort((a, b) => b.score - a.score);
 
       // Extract top results and condense to fit token limits
-      const topResults = scoredResults.slice(0, topK).map(item => item.content);
+      const topResults = policyScored.slice(0, topK).map(item => item.content);
       const condensedContext = await this.condenseContext(topResults, query, maxTokens);
 
       console.log(`RAG Query: "${query}" - Retrieved ${topResults.length} chunks, condensed to ${condensedContext.length} (${this.estimateTokens(condensedContext.join(' '))} tokens)`);
@@ -80,15 +101,84 @@ class RagService {
     }
   }
 
+  /**
+   * Policy scoring pass — adjusts document scores based on merged policy rules.
+   *   restrict → multiply score by 0.05 (nearly remove)
+   *   require  → multiply score by 2.0 (boost)
+   *   allow    → no change (score × 1.0)
+   */
+  private applyPolicyScoring(docs: ScoredDocument[], rules: PolicyRule[]): ScoredDocument[] {
+    if (!rules.length) return docs;
+
+    return docs.map((doc) => {
+      let multiplier = 1.0;
+
+      for (const rule of rules) {
+        const matched = this.doesPolicyMatch(doc, rule);
+        if (!matched) continue;
+
+        if (rule.type === 'restrict') {
+          multiplier *= 0.05;
+        } else if (rule.type === 'require') {
+          multiplier *= 2.0;
+        }
+        // 'allow' → multiplier unchanged
+      }
+
+      return { ...doc, score: doc.score * multiplier };
+    });
+  }
+
+  private doesPolicyMatch(doc: ScoredDocument, rule: PolicyRule): boolean {
+    const valueLower = rule.value.toLowerCase();
+
+    switch (rule.target) {
+      case 'topic':
+        // Check if document content discusses the topic
+        return doc.content.toLowerCase().includes(valueLower);
+
+      case 'documentSource':
+        // Check metadata source field
+        return (doc.metadata?.source || '').toLowerCase().includes(valueLower);
+
+      case 'documentTag': {
+        // Check metadata tags
+        const tags: string[] = Array.isArray(doc.metadata?.tags)
+          ? doc.metadata.tags
+          : typeof doc.metadata?.tags === 'string'
+            ? [doc.metadata.tags]
+            : [];
+        return tags.some((t: string) => t.toLowerCase().includes(valueLower));
+      }
+
+      default:
+        return false;
+    }
+  }
+
   private async semanticSearch(collectionName: string, query: string, agentId: string, limit: number): Promise<string[]> {
+    const scored = await this.semanticSearchScored(collectionName, query, agentId, limit);
+    return scored.map((d) => d.content);
+  }
+
+  private async semanticSearchScored(collectionName: string, query: string, agentId: string, limit: number): Promise<ScoredDocument[]> {
     try {
       const response: AxiosResponse<ChromaQueryResponse> = await axios.post(`${this.chromaBaseUrl}/api/v1/collections/${collectionName}/query`, {
         query_texts: [query],
         n_results: limit,
         where: { agentId },
+        include: ['documents', 'metadatas', 'distances'],
       });
 
-      return response.data.results[0]?.documents || [];
+      const docs = response.data.results[0]?.documents || [];
+      const metas = response.data.results[0]?.metadatas || [];
+      const distances = response.data.results[0]?.distances || [];
+
+      return docs.map((content: string, i: number) => ({
+        content,
+        metadata: metas[i] || {},
+        score: distances[i] != null ? 1 / (1 + distances[i]) : 0.5,
+      }));
     } catch (error) {
       console.warn('Semantic search failed, falling back to empty results:', error);
       return [];
@@ -96,9 +186,13 @@ class RagService {
   }
 
   private async keywordSearch(collectionName: string, query: string, agentId: string, limit: number): Promise<string[]> {
+    const scored = await this.keywordSearchScored(collectionName, query, agentId, limit);
+    return scored.map((d) => d.content);
+  }
+
+  private async keywordSearchScored(collectionName: string, query: string, agentId: string, limit: number): Promise<ScoredDocument[]> {
     try {
       // Simple keyword-based search using ChromaDB metadata filtering
-      // In production, you might want to implement BM25 indexing here
       const queryWords = query.toLowerCase().split(/\s+/).filter(word => word.length > 2);
 
       if (queryWords.length === 0) {
@@ -108,20 +202,23 @@ class RagService {
       // Get more results than needed for BM25-like scoring
       const response: AxiosResponse<ChromaGetResponse> = await axios.post(`${this.chromaBaseUrl}/api/v1/collections/${collectionName}/get`, {
         where: { agentId },
-        limit: limit * 3, // Get more for scoring
+        limit: limit * 3,
+        include: ['documents', 'metadatas'],
       });
 
       const documents = response.data.documents || [];
+      const metadatas = response.data.metadatas || [];
 
       // Score documents using BM25-like algorithm
-      const scoredDocs = documents.map((doc: string) => ({
+      const scoredDocs: ScoredDocument[] = documents.map((doc: string, i: number) => ({
         content: doc,
-        score: this.calculateBM25Score(doc, queryWords)
+        metadata: metadatas[i] || {},
+        score: this.calculateBM25Score(doc, queryWords),
       }));
 
-      scoredDocs.sort((a: { content: string; score: number }, b: { content: string; score: number }) => b.score - a.score);
+      scoredDocs.sort((a, b) => b.score - a.score);
 
-      return scoredDocs.slice(0, limit).map((item: { content: string; score: number }) => item.content);
+      return scoredDocs.slice(0, limit);
     } catch (error) {
       console.warn('Keyword search failed:', error);
       return [];

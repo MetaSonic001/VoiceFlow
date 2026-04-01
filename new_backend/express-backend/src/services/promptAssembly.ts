@@ -1,23 +1,127 @@
 import { PrismaClient } from '@prisma/client';
+import { AssembledContext, PolicyRule } from './contextInjector';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dynamic Prompt Assembly — Task 18
+//
+// Consumes the full 5-layer AssembledContext (from ContextInjector) and
+// produces the final system prompt string fed into the LLM.
+//
+// Prompt structure (in order):
+//   1. Global safety rules (immutable)
+//   2. Tenant context + tenant policies
+//   3. Brand voice + brand topic constraints
+//   4. Agent persona + base template + custom instructions + agent policies
+//   5. Escalation rules (if any)
+//   6. Policy summary (merged, human-readable)
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Assembles a dynamic system prompt for an agent by combining:
- *   1. The agent template's base system prompt (with placeholders)
- *   2. The tenant's company information
- *   3. The agent's configuration (name, custom instructions, etc.)
- *
- * Placeholders replaced:
- *   {{company_name}}        — from tenant settings
- *   {{agent_name}}          — from agent record
- *   {{capabilities}}        — from template.defaultCapabilities, formatted as bullet list
- *   {{custom_instructions}} — from agentConfiguration.customInstructions (user-editable)
+ * Build the final system prompt from a fully assembled context.
+ * This is the primary entry point used by the query pipeline.
  */
+export function buildSystemPrompt(ctx: AssembledContext): string {
+  const sections: string[] = [];
+
+  // ── Section 1: Global safety rules ──────────────────────────────────────
+  sections.push(ctx.globalRules);
+
+  // ── Section 2: Tenant context ───────────────────────────────────────────
+  {
+    const parts: string[] = [];
+    parts.push(`ORGANISATION: ${ctx.tenantName}`);
+    if (ctx.tenantIndustry) parts.push(`Industry: ${ctx.tenantIndustry}`);
+    if (ctx.tenantPolicySummary) parts.push(ctx.tenantPolicySummary);
+    sections.push(`TENANT CONTEXT\n${parts.join('\n')}`);
+  }
+
+  // ── Section 3: Brand voice ──────────────────────────────────────────────
+  if (ctx.brandId) {
+    const parts: string[] = [];
+    if (ctx.brandName) parts.push(`Brand: ${ctx.brandName}`);
+    if (ctx.brandVoice) parts.push(`Voice & tone guidelines:\n${ctx.brandVoice}`);
+    if (ctx.brandAllowedTopics.length)
+      parts.push(`Allowed topics: ${ctx.brandAllowedTopics.join(', ')}`);
+    if (ctx.brandRestrictedTopics.length)
+      parts.push(`Restricted topics (do NOT discuss): ${ctx.brandRestrictedTopics.join(', ')}`);
+    sections.push(`BRAND GUIDELINES\n${parts.join('\n')}`);
+  }
+
+  // ── Section 4: Agent persona + template + instructions ──────────────────
+  {
+    const parts: string[] = [];
+    parts.push(`You are ${ctx.agentName}.`);
+    if (ctx.agentPersona) parts.push(ctx.agentPersona);
+
+    // Base system prompt from template (with placeholder replacement)
+    if (ctx.agentBasePrompt) {
+      let base = ctx.agentBasePrompt;
+      base = base.replace(/\{\{company_name\}\}/g, ctx.tenantName);
+      base = base.replace(/\{\{agent_name\}\}/g, ctx.agentName);
+      base = base.replace(
+        /\{\{capabilities\}\}/g,
+        ctx.agentCapabilities.map((c) => `• ${c}`).join('\n'),
+      );
+      base = base.replace(
+        /\{\{custom_instructions\}\}/g,
+        ctx.agentCustomInstructions ? `\n${ctx.agentCustomInstructions}` : '',
+      );
+      parts.push(base);
+    }
+
+    if (ctx.agentCustomInstructions && !ctx.agentBasePrompt) {
+      parts.push(`ADDITIONAL INSTRUCTIONS\n${ctx.agentCustomInstructions}`);
+    }
+
+    sections.push(`AGENT CONFIGURATION\n${parts.join('\n')}`);
+  }
+
+  // ── Section 5: Escalation rules ─────────────────────────────────────────
+  if (ctx.agentEscalationRules?.length) {
+    const escalation = ctx.agentEscalationRules
+      .map(
+        (r: any, i: number) =>
+          `${i + 1}. ${r.trigger || r.condition || 'Unknown trigger'} → ${r.action || 'escalate'}`,
+      )
+      .join('\n');
+    sections.push(`ESCALATION RULES\n${escalation}`);
+  }
+
+  // ── Section 6: Merged policy summary ────────────────────────────────────
+  const policyBlock = buildPolicySummaryBlock(ctx.mergedPolicyRules);
+  if (policyBlock) sections.push(policyBlock);
+
+  return sections.join('\n\n---\n\n');
+}
+
+function buildPolicySummaryBlock(rules: PolicyRule[]): string | null {
+  if (!rules.length) return null;
+  const restrict = rules.filter((r) => r.type === 'restrict');
+  const require_ = rules.filter((r) => r.type === 'require');
+
+  const parts: string[] = ['ACTIVE POLICY RULES'];
+  if (restrict.length)
+    parts.push(
+      'Restricted:\n' + restrict.map((r) => `• [${r.target}] ${r.value}`).join('\n'),
+    );
+  if (require_.length)
+    parts.push(
+      'Required (prioritise these):\n' +
+        require_.map((r) => `• [${r.target}] ${r.value}`).join('\n'),
+    );
+
+  return parts.join('\n');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Legacy function — kept for backwards compatibility with existing callers
+// that have not migrated to ContextInjector yet.
+// ─────────────────────────────────────────────────────────────────────────────
 export async function assembleSystemPrompt(
   prisma: PrismaClient,
   agentId: string,
   tenantId: string,
 ): Promise<string> {
-  // Load agent with template and configuration in one query
   const agent = await prisma.agent.findUnique({
     where: { id: agentId },
     include: {
@@ -31,12 +135,10 @@ export async function assembleSystemPrompt(
     return 'You are a helpful assistant.';
   }
 
-  // If agent has a hardcoded systemPrompt and no template, use it as-is (backwards compat)
   if (!agent.template && agent.systemPrompt) {
     return agent.systemPrompt;
   }
 
-  // If no template at all, fall back to generic + any description
   if (!agent.template) {
     const desc = agent.description || agent.configuration?.agentDescription || '';
     return desc
@@ -44,7 +146,6 @@ export async function assembleSystemPrompt(
       : 'You are a helpful assistant.';
   }
 
-  // ── Build the dynamic prompt ────────────────────────────────────────────
   const template = agent.template;
   const config = agent.configuration;
   const tenantSettings = (agent.tenant?.settings as Record<string, any>) || {};
@@ -57,24 +158,20 @@ export async function assembleSystemPrompt(
 
   const agentName = config?.agentName || agent.name || 'the assistant';
 
-  // Format capabilities as a bullet list
   const capabilities = Array.isArray(template.defaultCapabilities)
     ? (template.defaultCapabilities as string[]).map((c) => `• ${c}`).join('\n')
     : '';
 
-  // Custom instructions from the agent configuration
   const customInstructions = config?.customInstructions?.trim()
     ? `\nADDITIONAL INSTRUCTIONS\n${config.customInstructions.trim()}`
     : '';
 
-  // Replace placeholders
   let prompt = template.baseSystemPrompt;
   prompt = prompt.replace(/\{\{company_name\}\}/g, companyName);
   prompt = prompt.replace(/\{\{agent_name\}\}/g, agentName);
   prompt = prompt.replace(/\{\{capabilities\}\}/g, capabilities);
   prompt = prompt.replace(/\{\{custom_instructions\}\}/g, customInstructions);
 
-  // Append company context from tenant settings (industry, use case, etc.)
   const contextParts: string[] = [];
   if (tenantSettings.industry) contextParts.push(`Industry: ${tenantSettings.industry}`);
   if (tenantSettings.useCase) contextParts.push(`Primary use case: ${tenantSettings.useCase}`);
@@ -85,7 +182,6 @@ export async function assembleSystemPrompt(
     prompt += `\n\nCOMPANY CONTEXT\n${contextParts.join('\n')}`;
   }
 
-  // Append personality/tone from configuration
   if (config?.responseTone) {
     prompt += `\n\nResponse tone: ${config.responseTone}`;
   }

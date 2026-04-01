@@ -1,7 +1,10 @@
 import express, { Request, Response, NextFunction, Router } from 'express';
 import Joi from 'joi';
 import { PrismaClient } from '@prisma/client';
-import { assembleSystemPrompt } from '../services/promptAssembly';
+import Redis from 'ioredis';
+import RagService from '../services/ragService';
+import { assembleSystemPrompt, buildSystemPrompt } from '../services/promptAssembly';
+import { ContextInjector } from '../services/contextInjector';
 
 const router: Router = express.Router();
 
@@ -50,7 +53,7 @@ const validateTenantAccess = async (req: Request, res: Response, next: NextFunct
   next();
 };
 
-// Query agent with RAG
+// Query agent with RAG — full 5-layer context hierarchy
 router.post('/query', async (req: Request, res: Response) => {
   try {
     const { error, value } = querySchema.validate(req.body);
@@ -59,7 +62,8 @@ router.post('/query', async (req: Request, res: Response) => {
     }
 
     const prisma: PrismaClient = req.app.get('prisma');
-    const { query, agentId, sessionId } = value as QueryBody;
+    const redis: Redis = req.app.get('redis');
+    const { query, agentId, sessionId = 'default' } = value as QueryBody;
 
     // Verify agent belongs to tenant
     const agent = await prisma.agent.findFirst({
@@ -73,21 +77,44 @@ router.post('/query', async (req: Request, res: Response) => {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    // Assemble dynamic system prompt from template + config + company data
-    const systemPrompt = await assembleSystemPrompt(prisma, agentId, req.tenantId);
+    // ── Assemble full context hierarchy ────────────────────────────────
+    const injector = new ContextInjector(prisma, redis);
+    let systemPrompt: string;
+    let policyRules: any[] = [];
 
-    const ragService = require('../services/ragService');
+    try {
+      const ctx = await injector.assemble(req.tenantId, agentId, sessionId);
+      systemPrompt = buildSystemPrompt(ctx);
+      policyRules = ctx.mergedPolicyRules;
+    } catch {
+      // Fallback to legacy assembler
+      systemPrompt = await assembleSystemPrompt(prisma, agentId, req.tenantId);
+    }
+
     const startedAt = new Date();
-    const response = await ragService.processQuery(
-      req.tenantId,
-      agentId,
-      query,
-      { ...agent, systemPrompt },
-      sessionId
+    const contexts = await RagService.queryDocuments(
+      req.tenantId, agentId, query, 10, agent.tokenLimit || 4096, policyRules,
     );
+    const response = await RagService.generateResponse(
+      systemPrompt, contexts, query, agent.tokenLimit || 4096,
+    );
+
+    // Store conversation turn in Redis
+    const convKey = `conversation:${req.tenantId}:${agentId}:${sessionId}`;
+    try {
+      const rawConv = await redis.get(convKey);
+      let conversation = rawConv ? JSON.parse(rawConv) : [];
+      conversation.push({ role: 'user', content: query });
+      conversation.push({ role: 'assistant', content: response });
+      if (conversation.length > 20) conversation = conversation.slice(-20);
+      await redis.setex(convKey, 86400, JSON.stringify(conversation));
+    } catch (redisErr) {
+      console.warn('Redis error storing conversation:', redisErr);
+    }
+
     const endedAt = new Date();
 
-    // Fire-and-forget CallLog write — never block the response
+    // Fire-and-forget CallLog write
     prisma.callLog.create({
       data: {
         tenantId: req.tenantId,
@@ -102,7 +129,7 @@ router.post('/query', async (req: Request, res: Response) => {
     res.json({
       response: response,
       agentId: agentId,
-      sessionId: sessionId || 'default'
+      sessionId: sessionId
     });
   } catch (error) {
     console.error('Error processing RAG query:', error);

@@ -160,14 +160,23 @@ router.delete('/company-knowledge/:chunkId', async (req: Request, res: Response)
 router.post('/agent', async (req: Request, res: Response) => {
   try {
     const prisma: PrismaClient = req.app.get('prisma');
-    const { name, role, templateId, description, channels } = req.body;
+    const { name, role, templateId, description, channels, brandId } = req.body;
 
-    // Create the agent with optional template reference
+    // If brandId provided, verify it belongs to the same tenant
+    if (brandId) {
+      const brand = await prisma.brand.findFirst({ where: { id: brandId, tenantId: req.tenantId } });
+      if (!brand) {
+        return res.status(400).json({ error: 'Brand not found or does not belong to this tenant' });
+      }
+    }
+
+    // Create the agent with optional template and brand reference
     const agent = await prisma.agent.create({
       data: {
         name,
         description: description || role || undefined,
         templateId: templateId || undefined,
+        brandId: brandId || undefined,
         channels: channels || undefined,
         userId: req.userId,
         tenantId: req.tenantId,

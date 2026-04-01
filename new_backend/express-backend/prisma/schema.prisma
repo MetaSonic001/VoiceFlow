@@ -18,14 +18,15 @@ datasource db {
 }
 
 model Tenant {
-  id        String   @id @default(uuid())
-  name      String
-  domain    String?  @unique
-  apiKey    String   @unique @default(uuid())
-  settings  Json?
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(uuid())
+  name        String
+  domain      String?  @unique
+  apiKey      String   @unique @default(uuid())
+  settings    Json?
+  policyRules Json?    // Array of { type: allow|restrict|require, target: topic|documentSource|documentTag, value: string }
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   users    User[]
   brands   Brand[]
@@ -56,10 +57,15 @@ model User {
 }
 
 model Brand {
-  id        String   @id @default(uuid())
-  tenantId  String
-  name      String
-  createdAt DateTime @default(now())
+  id               String   @id @default(uuid())
+  tenantId         String
+  name             String
+  brandVoice       String?  @db.Text   // Describes tone and style (e.g. "Friendly, professional, no jargon")
+  allowedTopics    Json?    // String array — topics this brand may discuss
+  restrictedTopics Json?    // String array — topics this brand must NOT discuss
+  policyRules      Json?    // Array of { type: allow|restrict|require, target, value }
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @default(now()) @updatedAt
 
   tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   users  User[]
@@ -127,6 +133,8 @@ model AgentConfiguration {
   knowledgeBoundaries    Json?
   chromaCollectionName   String?
   customInstructions     String?  @db.Text
+  policyRules            Json?    // Agent-level policy overrides
+  escalationRules        Json?    // When to escalate to a human
   maxResponseLength      Int?     @default(500)
   confidenceThreshold    Float?   @default(0.7)
   createdAt              DateTime @default(now())

@@ -29,6 +29,7 @@ import usersRouter from './routes/users';
 import logsRouter from './routes/logs';
 import templatesRouter from './routes/templates';
 import ttsRouter from './routes/tts';
+import brandsRouter from './routes/brands';
 
 // Middleware imports
 import { createTenantRateLimit } from './middleware/rateLimit';
@@ -86,6 +87,7 @@ app.use('/api/users', clerkAuth.authenticate, usersRouter);
 app.use('/api/logs', clerkAuth.authenticate, logsRouter);
 app.use('/api/templates', clerkAuth.authenticate, templatesRouter);
 app.use('/api/tts', clerkAuth.authenticate, ttsRouter);
+app.use('/api/brands', clerkAuth.authenticate, brandsRouter);
 
 // API Documentation
 // app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs));
