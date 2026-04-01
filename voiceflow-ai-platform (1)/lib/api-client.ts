@@ -301,6 +301,35 @@ class ApiClient {
     })
   }
 
+  // ── Agent Templates ───────────────────────────────────────────────────────
+
+  async getAgentTemplates() {
+    return this.request<{
+      templates: Array<{
+        id: string
+        name: string
+        description: string
+        defaultCapabilities: string[]
+        suggestedKnowledgeCategories: string[]
+        defaultTools: string[]
+        icon: string | null
+      }>
+    }>('/api/templates')
+  }
+
+  async getAgentTemplate(id: string) {
+    return this.request<{
+      id: string
+      name: string
+      description: string
+      baseSystemPrompt: string
+      defaultCapabilities: string[]
+      suggestedKnowledgeCategories: string[]
+      defaultTools: string[]
+      icon: string | null
+    }>(`/api/templates/${id}`)
+  }
+
   async createAgent(data: AgentCreationData) {
     return this.request<{ agent_id: string }>("/onboarding/agent", {
       method: "POST",
@@ -724,6 +753,7 @@ export interface CompanyProfile {
 export interface AgentCreationData {
   name: string
   role: string
+  templateId?: string
   description?: string
   channels: string[]
 }
@@ -937,9 +967,7 @@ export interface CompanyProfile {
   description?: string
 }
 
-export interface AgentCreationData {
-  name: string
-}
+// AgentCreationData defined above (near line 724) — not duplicated here
 
 export interface KnowledgeUploadData {
   files?: File[]

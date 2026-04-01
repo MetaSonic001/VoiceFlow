@@ -116,7 +116,13 @@ export function OnboardingFlow() {
 
         // Step 2: create agent
         if (currentStep === 2 && stepData.agent) {
-          const res = await apiClient.createAgent({ name: stepData.agent.agentName, role: stepData.agent.role, channels: stepData.agent.channels })
+          const res = await apiClient.createAgent({
+            name: stepData.agent.agentName,
+            role: stepData.agent.role,
+            templateId: stepData.agent.templateId,
+            description: stepData.agent.description,
+            channels: stepData.agent.channels,
+          })
           const createdAgentId = (res as any)?.agent_id
           if (createdAgentId) {
             agentId = createdAgentId

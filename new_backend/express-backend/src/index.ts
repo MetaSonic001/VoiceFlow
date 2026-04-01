@@ -26,6 +26,7 @@ import runnerRouter from './routes/runner';
 import twilioRouter from './routes/twilio';
 import usersRouter from './routes/users';
 import logsRouter from './routes/logs';
+import templatesRouter from './routes/templates';
 
 // Middleware imports
 import { createTenantRateLimit } from './middleware/rateLimit';
@@ -108,6 +109,7 @@ app.use('/api/ingestion', clerkAuth.authenticate, ingestionRouter);
 app.use('/api/runner', clerkAuth.authenticate, runnerRouter);
 app.use('/api/users', clerkAuth.authenticate, usersRouter);
 app.use('/api/logs', clerkAuth.authenticate, logsRouter);
+app.use('/api/templates', clerkAuth.authenticate, templatesRouter);
 
 // API Documentation
 // app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs));
@@ -160,13 +162,17 @@ io.on('connection', (socket: Socket) => {
           });
 
           if (agent) {
+            // Assemble dynamic prompt from template + config
+            const { assembleSystemPrompt } = require('./services/promptAssembly');
+            const systemPrompt = await assembleSystemPrompt(prisma, agentId, tenantId);
+
             socket.customData.conversation.push({ role: 'user', content: transcript });
 
             const response = await ragService.processQuery(
               tenantId,
               agentId,
               transcript,
-              agent,
+              { ...agent, systemPrompt },
               socket.customData.conversation
             );
 

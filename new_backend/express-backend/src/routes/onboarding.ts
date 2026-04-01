@@ -159,13 +159,36 @@ router.delete('/company-knowledge/:chunkId', async (req: Request, res: Response)
 router.post('/agent', async (req: Request, res: Response) => {
   try {
     const prisma: PrismaClient = req.app.get('prisma');
-    const { name } = req.body;
+    const { name, role, templateId, description, channels } = req.body;
 
+    // Create the agent with optional template reference
     const agent = await prisma.agent.create({
       data: {
         name,
+        description: description || role || undefined,
+        templateId: templateId || undefined,
+        channels: channels || undefined,
         userId: req.userId,
         tenantId: req.tenantId,
+      },
+    });
+
+    // Create the corresponding agent configuration
+    const tenantSettings = (
+      await prisma.tenant.findUnique({ where: { id: req.tenantId } })
+    )?.settings as Record<string, any> | null;
+
+    await prisma.agentConfiguration.create({
+      data: {
+        agentId: agent.id,
+        templateId: templateId || undefined,
+        agentName: name,
+        agentRole: role || undefined,
+        agentDescription: description || undefined,
+        communicationChannels: channels || undefined,
+        companyName: tenantSettings?.companyName || undefined,
+        industry: tenantSettings?.industry || undefined,
+        primaryUseCase: tenantSettings?.useCase || undefined,
       },
     });
 

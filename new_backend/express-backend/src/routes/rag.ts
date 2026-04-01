@@ -1,6 +1,7 @@
 import express, { Request, Response, NextFunction, Router } from 'express';
 import Joi from 'joi';
 import { PrismaClient } from '@prisma/client';
+import { assembleSystemPrompt } from '../services/promptAssembly';
 
 const router: Router = express.Router();
 
@@ -72,13 +73,16 @@ router.post('/query', async (req: Request, res: Response) => {
       return res.status(403).json({ error: 'Access denied' });
     }
 
+    // Assemble dynamic system prompt from template + config + company data
+    const systemPrompt = await assembleSystemPrompt(prisma, agentId, req.tenantId);
+
     const ragService = require('../services/ragService');
     const startedAt = new Date();
     const response = await ragService.processQuery(
       req.tenantId,
       agentId,
       query,
-      agent,
+      { ...agent, systemPrompt },
       sessionId
     );
     const endedAt = new Date();

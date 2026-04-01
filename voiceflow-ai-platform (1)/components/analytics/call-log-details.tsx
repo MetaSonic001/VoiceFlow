@@ -1,95 +1,118 @@
 "use client"
 
+import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Separator } from "@/components/ui/separator"
+import { Textarea } from "@/components/ui/textarea"
 import { DashboardSidebar } from "@/components/dashboard/sidebar"
-import { ArrowLeft, Phone, MessageSquare, Clock, User, Tag, ThumbsUp, ThumbsDown } from "lucide-react"
+import {
+  ArrowLeft,
+  Phone,
+  Clock,
+  ThumbsUp,
+  ThumbsDown,
+  Flag,
+  Loader2,
+  CheckCircle,
+  Bot,
+  User,
+} from "lucide-react"
+import { apiClient } from "@/lib/api-client"
+import { cn } from "@/lib/utils"
 
-interface CallLog {
+interface CallLogEntry {
   id: string
-  type: string
-  customerInfo: string
-  agentName: string
-  startTime: string
-  duration: string
-  status: string
-  resolution: string
-  summary: string
-  sentiment: string
-  tags: string[]
+  tenantId: string
+  agentId: string
+  startedAt: string
+  endedAt: string | null
+  durationSeconds: number | null
+  transcript: string
+  rating: number | null
+  ratingNotes: string | null
+  flaggedForRetraining: boolean
+  createdAt: string
+  agent: { id: string; name: string }
+}
+
+interface TranscriptMessage {
+  speaker: "agent" | "customer"
+  message: string
+  timestamp?: string
 }
 
 interface CallLogDetailsProps {
-  log: CallLog
+  log: CallLogEntry
   onBack: () => void
+  onUpdated?: () => void
 }
 
-export function CallLogDetails({ log, onBack }: CallLogDetailsProps) {
-  // Mock conversation transcript
-  const transcript = [
-    {
-      speaker: "agent",
-      message: "Hello! Thank you for contacting us. How can I help you today?",
-      timestamp: "14:30:25",
-    },
-    {
-      speaker: "customer",
-      message: "Hi, I'm interested in your premium plan. Can you tell me about the pricing?",
-      timestamp: "14:30:32",
-    },
-    {
-      speaker: "agent",
-      message:
-        "I'd be happy to help you with information about our premium plan. Our premium plan is currently $29.99 per month and includes unlimited calls, advanced analytics, and priority support.",
-      timestamp: "14:30:45",
-    },
-    {
-      speaker: "customer",
-      message: "That sounds good. Are there any current promotions or discounts available?",
-      timestamp: "14:31:12",
-    },
-    {
-      speaker: "agent",
-      message:
-        "Yes! We're currently offering a 20% discount for the first 3 months for new customers. That would bring your first 3 months to $23.99 each.",
-      timestamp: "14:31:25",
-    },
-    { speaker: "customer", message: "Perfect! How do I sign up for that?", timestamp: "14:31:45" },
-    {
-      speaker: "agent",
-      message:
-        "I can help you get started right away. Would you like me to transfer you to our sales team to complete the signup process?",
-      timestamp: "14:31:52",
-    },
-    { speaker: "customer", message: "Yes, that would be great. Thank you for your help!", timestamp: "14:32:05" },
-    { speaker: "agent", message: "You're welcome! I'm transferring you now. Have a great day!", timestamp: "14:32:12" },
-  ]
+export function CallLogDetails({ log, onBack, onUpdated }: CallLogDetailsProps) {
+  const [rating, setRating] = useState<1 | -1 | null>(log.rating as 1 | -1 | null)
+  const [notes, setNotes] = useState(log.ratingNotes || "")
+  const [showNotes, setShowNotes] = useState(false)
+  const [ratingSubmitting, setRatingSubmitting] = useState(false)
+  const [ratingDone, setRatingDone] = useState(false)
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "completed":
-        return "bg-green-100 text-green-800 border-green-200"
-      case "escalated":
-        return "bg-yellow-100 text-yellow-800 border-yellow-200"
-      case "failed":
-        return "bg-red-100 text-red-800 border-red-200"
-      default:
-        return "bg-gray-100 text-gray-800 border-gray-200"
+  const [flagged, setFlagged] = useState(log.flaggedForRetraining)
+  const [flagging, setFlagging] = useState(false)
+
+  // Parse transcript — stored as JSON array or plain text
+  const messages: TranscriptMessage[] = (() => {
+    try {
+      const parsed = JSON.parse(log.transcript)
+      if (Array.isArray(parsed)) return parsed
+    } catch { /* not JSON */ }
+    // Fallback: treat whole transcript as a single agent message
+    return [{ speaker: "agent" as const, message: log.transcript }]
+  })()
+
+  const formatDuration = (seconds: number | null) => {
+    if (!seconds) return "—"
+    const m = Math.floor(seconds / 60)
+    const s = seconds % 60
+    return `${m}m ${s.toString().padStart(2, "0")}s`
+  }
+
+  const formatDateTime = (iso: string) =>
+    new Date(iso).toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+
+  const handleRatingClick = (value: 1 | -1) => {
+    setRating(value)
+    setShowNotes(true)
+  }
+
+  const handleSubmitRating = async () => {
+    if (!rating) return
+    setRatingSubmitting(true)
+    try {
+      await apiClient.rateCallLog(log.id, rating, notes || undefined)
+      setRatingDone(true)
+      onUpdated?.()
+    } catch {
+      // silent — UI already shows the selection
+    } finally {
+      setRatingSubmitting(false)
     }
   }
 
-  const getSentimentColor = (sentiment: string) => {
-    switch (sentiment) {
-      case "positive":
-        return "text-green-600"
-      case "negative":
-        return "text-red-600"
-      case "neutral":
-        return "text-gray-600"
-      default:
-        return "text-gray-600"
+  const handleFlag = async () => {
+    setFlagging(true)
+    try {
+      await apiClient.flagCallLogForRetraining(log.id)
+      setFlagged(true)
+      onUpdated?.()
+    } catch {
+      // silent
+    } finally {
+      setFlagging(false)
     }
   }
 
@@ -100,165 +123,187 @@ export function CallLogDetails({ log, onBack }: CallLogDetailsProps) {
         <div className="flex-1 ml-64">
           <div className="p-6">
             {/* Header */}
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center space-x-4">
-                <Button variant="ghost" onClick={onBack}>
-                  <ArrowLeft className="w-4 h-4 mr-2" />
-                  Back to Logs
-                </Button>
-                <div>
-                  <h1 className="text-2xl font-bold">Interaction Details</h1>
-                  <p className="text-muted-foreground">ID: {log.id}</p>
-                </div>
+            <div className="flex items-center gap-4 mb-6">
+              <Button variant="ghost" onClick={onBack}>
+                <ArrowLeft className="w-4 h-4 mr-2" />
+                Back to Logs
+              </Button>
+              <div className="flex-1">
+                <h1 className="text-2xl font-bold">Interaction Details</h1>
+                <p className="text-sm text-muted-foreground">ID: {log.id}</p>
               </div>
+              {flagged && (
+                <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200">
+                  <Flag className="w-3 h-3 mr-1" />
+                  Flagged for retraining
+                </Badge>
+              )}
             </div>
 
             <div className="grid lg:grid-cols-3 gap-6">
-              {/* Main Content */}
+              {/* Main — Transcript */}
               <div className="lg:col-span-2 space-y-6">
-                {/* Conversation Transcript */}
                 <Card>
                   <CardHeader>
                     <CardTitle>Conversation Transcript</CardTitle>
-                    <CardDescription>Full conversation between customer and AI agent</CardDescription>
+                    <CardDescription>
+                      {messages.length} message{messages.length !== 1 ? "s" : ""}
+                    </CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <div className="space-y-4 max-h-96 overflow-y-auto">
-                      {transcript.map((message, index) => (
+                    <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2">
+                      {messages.map((msg, i) => (
                         <div
-                          key={index}
-                          className={`flex ${message.speaker === "customer" ? "justify-end" : "justify-start"}`}
+                          key={i}
+                          className={cn(
+                            "flex gap-2",
+                            msg.speaker === "customer" ? "justify-end" : "justify-start"
+                          )}
                         >
-                          <div
-                            className={`max-w-xs lg:max-w-md p-3 rounded-lg ${
-                              message.speaker === "customer"
-                                ? "bg-accent text-accent-foreground"
-                                : "bg-muted text-muted-foreground"
-                            }`}
-                          >
-                            <div className="flex items-center space-x-2 mb-1">
-                              <span className="text-xs font-medium capitalize">{message.speaker}</span>
-                              <span className="text-xs opacity-70">{message.timestamp}</span>
+                          {msg.speaker === "agent" && (
+                            <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 mt-1">
+                              <Bot className="w-3.5 h-3.5 text-primary" />
                             </div>
-                            <p className="text-sm">{message.message}</p>
+                          )}
+                          <div
+                            className={cn(
+                              "max-w-[70%] p-3 rounded-2xl text-sm",
+                              msg.speaker === "customer"
+                                ? "bg-primary text-primary-foreground rounded-br-md"
+                                : "bg-muted rounded-bl-md"
+                            )}
+                          >
+                            {msg.timestamp && (
+                              <span className="text-[10px] opacity-60 block mb-1">{msg.timestamp}</span>
+                            )}
+                            {msg.message}
                           </div>
+                          {msg.speaker === "customer" && (
+                            <div className="w-7 h-7 rounded-full bg-muted flex items-center justify-center flex-shrink-0 mt-1">
+                              <User className="w-3.5 h-3.5 text-muted-foreground" />
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
                   </CardContent>
                 </Card>
 
-                {/* Summary & Analysis */}
+                {/* Rating widget */}
                 <Card>
                   <CardHeader>
-                    <CardTitle>AI Analysis</CardTitle>
-                    <CardDescription>Automated summary and insights</CardDescription>
+                    <CardTitle>Rate this conversation</CardTitle>
+                    <CardDescription>Help improve your agent by rating call quality</CardDescription>
                   </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div>
-                      <h4 className="font-medium mb-2">Summary</h4>
-                      <p className="text-sm text-muted-foreground">{log.summary}</p>
-                    </div>
-                    <Separator />
-                    <div>
-                      <h4 className="font-medium mb-2">Key Topics</h4>
-                      <div className="flex flex-wrap gap-2">
-                        {log.tags.map((tag) => (
-                          <Badge key={tag} variant="secondary">
-                            <Tag className="w-3 h-3 mr-1" />
-                            {tag}
-                          </Badge>
-                        ))}
+                  <CardContent>
+                    {ratingDone ? (
+                      <div className="flex items-center gap-2 text-green-600">
+                        <CheckCircle className="w-4 h-4" />
+                        Rating submitted — thank you!
                       </div>
-                    </div>
-                    <Separator />
-                    <div>
-                      <h4 className="font-medium mb-2">Customer Sentiment</h4>
-                      <div className="flex items-center space-x-2">
-                        {log.sentiment === "positive" ? (
-                          <ThumbsUp className="w-4 h-4 text-green-600" />
-                        ) : log.sentiment === "negative" ? (
-                          <ThumbsDown className="w-4 h-4 text-red-600" />
-                        ) : (
-                          <div className="w-4 h-4 bg-gray-400 rounded-full" />
+                    ) : (
+                      <div className="space-y-4">
+                        <div className="flex gap-3">
+                          <Button
+                            variant={rating === 1 ? "default" : "outline"}
+                            className={cn(
+                              "gap-2",
+                              rating === 1 && "bg-green-600 hover:bg-green-700"
+                            )}
+                            onClick={() => handleRatingClick(1)}
+                          >
+                            <ThumbsUp className="w-4 h-4" /> Good
+                          </Button>
+                          <Button
+                            variant={rating === -1 ? "default" : "outline"}
+                            className={cn(
+                              "gap-2",
+                              rating === -1 && "bg-red-600 hover:bg-red-700"
+                            )}
+                            onClick={() => handleRatingClick(-1)}
+                          >
+                            <ThumbsDown className="w-4 h-4" /> Bad
+                          </Button>
+                        </div>
+
+                        {showNotes && (
+                          <>
+                            <Textarea
+                              placeholder="Optional notes — what went well or wrong?"
+                              value={notes}
+                              onChange={(e) => setNotes(e.target.value)}
+                              rows={3}
+                            />
+                            <Button onClick={handleSubmitRating} disabled={ratingSubmitting || !rating}>
+                              {ratingSubmitting ? (
+                                <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Submitting…</>
+                              ) : (
+                                "Submit rating"
+                              )}
+                            </Button>
+                          </>
                         )}
-                        <span className={`font-medium capitalize ${getSentimentColor(log.sentiment)}`}>
-                          {log.sentiment}
-                        </span>
                       </div>
-                    </div>
+                    )}
                   </CardContent>
                 </Card>
               </div>
 
-              {/* Sidebar */}
+              {/* Sidebar — metadata + actions */}
               <div className="space-y-6">
-                {/* Interaction Info */}
                 <Card>
                   <CardHeader>
-                    <CardTitle>Interaction Info</CardTitle>
+                    <CardTitle>Call Metadata</CardTitle>
                   </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="flex items-center space-x-2">
-                      {log.type === "phone" ? (
-                        <Phone className="w-4 h-4 text-muted-foreground" />
-                      ) : (
-                        <MessageSquare className="w-4 h-4 text-muted-foreground" />
-                      )}
-                      <span className="text-sm font-medium capitalize">{log.type} Call</span>
+                  <CardContent className="space-y-3 text-sm">
+                    <div className="flex items-center gap-2">
+                      <Phone className="w-4 h-4 text-muted-foreground" />
+                      <span className="font-medium">{log.agent.name}</span>
                     </div>
-                    <div className="flex items-center space-x-2">
-                      <User className="w-4 h-4 text-muted-foreground" />
-                      <span className="text-sm">{log.customerInfo}</span>
-                    </div>
-                    <div className="flex items-center space-x-2">
+                    <div className="flex items-center gap-2">
                       <Clock className="w-4 h-4 text-muted-foreground" />
-                      <span className="text-sm">{log.startTime}</span>
+                      <span>{formatDateTime(log.startedAt)}</span>
                     </div>
                     <div>
-                      <span className="text-sm text-muted-foreground">Duration: </span>
-                      <span className="text-sm font-medium">{log.duration}</span>
+                      <span className="text-muted-foreground">Duration: </span>
+                      <span className="font-medium">{formatDuration(log.durationSeconds)}</span>
                     </div>
                     <div>
-                      <span className="text-sm text-muted-foreground">Status: </span>
-                      <Badge className={getStatusColor(log.status)} variant="outline">
-                        {log.status}
-                      </Badge>
+                      <span className="text-muted-foreground">Rating: </span>
+                      {rating === 1 ? (
+                        <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                          <ThumbsUp className="w-3 h-3 mr-1" /> Good
+                        </Badge>
+                      ) : rating === -1 ? (
+                        <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">
+                          <ThumbsDown className="w-3 h-3 mr-1" /> Bad
+                        </Badge>
+                      ) : (
+                        <span className="text-muted-foreground">Unrated</span>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
 
-                {/* Agent Info */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Agent Details</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-2">
-                    <div>
-                      <span className="text-sm text-muted-foreground">Agent: </span>
-                      <span className="text-sm font-medium">{log.agentName}</span>
-                    </div>
-                    <div>
-                      <span className="text-sm text-muted-foreground">Resolution: </span>
-                      <span className="text-sm font-medium capitalize">{log.resolution}</span>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* Actions */}
                 <Card>
                   <CardHeader>
                     <CardTitle>Actions</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-2">
-                    <Button variant="outline" size="sm" className="w-full bg-transparent">
-                      Export Transcript
-                    </Button>
-                    <Button variant="outline" size="sm" className="w-full bg-transparent">
-                      Flag for Review
-                    </Button>
-                    <Button variant="outline" size="sm" className="w-full bg-transparent">
-                      Add to Training
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full gap-2"
+                      onClick={handleFlag}
+                      disabled={flagged || flagging}
+                    >
+                      {flagging ? (
+                        <><Loader2 className="w-4 h-4 animate-spin" /> Flagging…</>
+                      ) : flagged ? (
+                        <><Flag className="w-4 h-4 text-orange-500" /> Flagged for retraining</>
+                      ) : (
+                        <><Flag className="w-4 h-4" /> Flag for retraining</>
+                      )}
                     </Button>
                   </CardContent>
                 </Card>
