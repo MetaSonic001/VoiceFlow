@@ -106,7 +106,7 @@ export function OnboardingWizard({ open, onOpenChange, onComplete, startStep }: 
           style={{ flexShrink: 0 }}
         >
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl sm:text-2xl font-bold">Setup Your AI Agent</h2>
+            <DialogTitle className="text-xl sm:text-2xl font-bold">Setup Your AI Agent</DialogTitle>
           </div>
 
           {/* Mobile Progress Bar */}

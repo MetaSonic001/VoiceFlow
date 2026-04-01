@@ -29,7 +29,9 @@ export default function ClerkSync() {
           const res = await r.json()
           if (res?.access_token) {
             localStorage.setItem('auth_token', res.access_token)
+            localStorage.setItem('clerk_token', res.access_token)
             localStorage.setItem('auth_user', JSON.stringify(res.user))
+            apiClient.setClerkToken(res.access_token)
 
             // Server now returns `needs_onboarding` when possible.
             // If true -> redirect to onboarding. If false -> redirect to dashboard. If null/undefined -> do nothing.

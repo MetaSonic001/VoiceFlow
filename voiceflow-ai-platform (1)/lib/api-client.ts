@@ -79,7 +79,7 @@ class ApiClient {
     try {
       // For client-side, we'll need to get the token from Clerk
       // This will be set by components using the apiClient
-      const token = (globalThis as any).clerkToken || localStorage.getItem("clerk_token")
+      const token = (globalThis as any).clerkToken || localStorage.getItem("clerk_token") || localStorage.getItem("auth_token")
       if (token) {
         config.headers = {
           ...config.headers,
