@@ -183,60 +183,63 @@ export default function KnowledgeBasePage() {
   const loadDocuments = async () => {
     try {
       setLoading(true)
-      const data = await apiClient.getKnowledgeBase()
-      setDocuments(data)
+      const raw = await apiClient.getKnowledgeBase()
+      // Backend returns array of Document records from Prisma
+      const docs = (Array.isArray(raw) ? raw : (raw as any)?.documents ?? []).map((d: any) => ({
+        id: d.id,
+        name: d.title || d.url || d.s3Path || 'Untitled',
+        type: inferDocType(d.title || d.url || ''),
+        size: d.metadata?.size ?? 0,
+        uploadedAt: d.createdAt,
+        lastModified: d.updatedAt || d.createdAt,
+        status: d.status === 'COMPLETED' ? 'ready' : d.status === 'FAILED' ? 'error' : 'processing',
+        tags: d.metadata?.tags || [],
+        category: d.metadata?.category || 'General',
+        description: d.content?.slice(0, 200) || '',
+      }))
+      setDocuments(docs)
     } catch (error) {
       console.error('Error loading documents:', error)
-      // Fallback to mock data
-      const mockDocuments: Document[] = [
-        {
-          id: 'doc-001',
-          name: 'User Manual.pdf',
-          type: 'pdf',
-          size: 2048576, // 2MB
-          uploadedAt: '2024-01-15T10:00:00Z',
-          lastModified: '2024-01-15T10:00:00Z',
-          status: 'ready',
-          tags: ['manual', 'user-guide', 'documentation'],
-          category: 'Documentation',
-          description: 'Complete user manual for the platform'
-        },
-        {
-          id: 'doc-002',
-          name: 'API Reference.docx',
-          type: 'docx',
-          size: 1048576, // 1MB
-          uploadedAt: '2024-01-14T15:30:00Z',
-          lastModified: '2024-01-14T16:00:00Z',
-          status: 'ready',
-          tags: ['api', 'reference', 'technical'],
-          category: 'Technical',
-          description: 'Comprehensive API documentation'
-        }
-      ]
-      setDocuments(mockDocuments)
+      setDocuments([])
     } finally {
       setLoading(false)
     }
   }
-  const loadCategories = async () => {
-    try {
-      // This would call a categories API endpoint
-      // const data = await apiClient.getDocumentCategories()
-      // For now, using mock data
-      const mockCategories: Category[] = [
-        { id: 'all', name: 'All Documents', count: 5, color: 'gray' },
-        { id: 'documentation', name: 'Documentation', count: 2, color: 'blue' },
-        { id: 'technical', name: 'Technical', count: 1, color: 'green' },
-        { id: 'media', name: 'Media', count: 1, color: 'purple' },
-        { id: 'training', name: 'Training', count: 1, color: 'orange' },
-        { id: 'support', name: 'Support', count: 1, color: 'red' }
-      ]
-      setCategories(mockCategories)
-    } catch (error) {
-      console.error('Failed to load categories:', error)
-    }
+
+  const inferDocType = (name: string): Document['type'] => {
+    const ext = name.split('.').pop()?.toLowerCase() || ''
+    if (['pdf'].includes(ext)) return 'pdf'
+    if (['doc', 'docx'].includes(ext)) return 'docx'
+    if (['txt', 'md', 'csv'].includes(ext)) return 'txt'
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(ext)) return 'image'
+    if (['mp4', 'avi', 'mov', 'webm'].includes(ext)) return 'video'
+    if (['mp3', 'wav', 'ogg'].includes(ext)) return 'audio'
+    return 'other'
   }
+  const loadCategories = async () => {
+    // Categories are derived from the loaded documents' categories
+    // No separate API call needed — recalculated when documents change
+  }
+
+  // Dynamically compute categories from documents
+  useEffect(() => {
+    const catMap = new Map<string, number>()
+    documents.forEach((d) => {
+      const cat = d.category || 'General'
+      catMap.set(cat, (catMap.get(cat) || 0) + 1)
+    })
+    const colors = ['blue', 'green', 'purple', 'orange', 'red', 'teal']
+    const derived: Category[] = [
+      { id: 'all', name: 'All Documents', count: documents.length, color: 'gray' },
+      ...Array.from(catMap, ([name, count], i) => ({
+        id: name.toLowerCase(),
+        name,
+        count,
+        color: colors[i % colors.length],
+      })),
+    ]
+    setCategories(derived)
+  }, [documents])
 
   const getFileIcon = (type: string) => {
     switch (type) {
@@ -279,17 +282,22 @@ export default function KnowledgeBasePage() {
   })
 
   const handleUpload = async (files: FileList) => {
-    // This would handle file upload to the backend
-    console.log('Uploading files:', files)
+    for (const file of Array.from(files)) {
+      try {
+        const formData = new FormData()
+        formData.append('file', file)
+        await apiClient.uploadDocument(formData)
+      } catch (err) {
+        console.error('Upload failed for', file.name, err)
+      }
+    }
     setShowUploadDialog(false)
-    // Refresh documents after upload
     loadDocuments()
   }
 
   const handleDelete = async (documentId: string) => {
     try {
-      // This would call a delete document API endpoint
-      // await apiClient.deleteDocument(documentId)
+      await apiClient.deleteDocument(documentId)
       setDocuments(prev => prev.filter(doc => doc.id !== documentId))
     } catch (error) {
       console.error('Failed to delete document:', error)

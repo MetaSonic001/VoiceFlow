@@ -23,20 +23,19 @@ export function PerformanceChart({ timeRange, agentId }: PerformanceChartProps) 
         setLoading(true)
         setError(null)
         const response = await apiClient.getPerformanceData(timeRange, agentId)
-        setData(response.data || [])
+        // Backend returns { data: [{ date, calls, chats, total }] }
+        // Map to performance shape: success_rate and response_time per day
+        const raw = response.data || []
+        const mapped = raw.map((d: any) => ({
+          date: d.date,
+          success_rate: d.total > 0 ? 100 : 0, // placeholder until per-day rating data is available
+          response_time: 0, // duration data per-day not available from this endpoint
+        }))
+        setData(mapped)
       } catch (err) {
         console.error('Error fetching performance data:', err)
         setError('Failed to load performance data')
-        // Fallback to mock data
-        setData([
-          { date: "Jan 1", successRate: 92, responseTime: 2.8, satisfaction: 4.5 },
-          { date: "Jan 2", successRate: 94, responseTime: 2.5, satisfaction: 4.6 },
-          { date: "Jan 3", successRate: 91, responseTime: 2.9, satisfaction: 4.4 },
-          { date: "Jan 4", successRate: 96, responseTime: 2.2, satisfaction: 4.8 },
-          { date: "Jan 5", successRate: 93, responseTime: 2.6, satisfaction: 4.7 },
-          { date: "Jan 6", successRate: 95, responseTime: 2.1, satisfaction: 4.9 },
-          { date: "Jan 7", successRate: 94, responseTime: 2.3, satisfaction: 4.7 },
-        ])
+        setData([])
       } finally {
         setLoading(false)
       }

@@ -61,12 +61,39 @@ router.get('/overview', async (req: Request, res: Response) => {
     }
     const callsPerDay = Object.entries(dayCounts).map(([date, count]) => ({ date, count }));
 
+    // Channel performance: phone vs chat
+    const phoneLogs = allLogs.filter((l: any) => l.callerPhone);
+    const chatLogs  = allLogs.filter((l: any) => !l.callerPhone);
+
+    // Get durations for channel-level stats
+    const phoneDurationLogs = await prisma.callLog.findMany({
+      where: { ...baseWhere, callerPhone: { not: null }, durationSeconds: { not: null } },
+      select: { durationSeconds: true },
+    });
+    const chatDurationLogs = await prisma.callLog.findMany({
+      where: { ...baseWhere, callerPhone: null, durationSeconds: { not: null } },
+      select: { durationSeconds: true },
+    });
+
+    const avgPhoneDur = phoneDurationLogs.length
+      ? Math.round(phoneDurationLogs.reduce((s, l) => s + l.durationSeconds!, 0) / phoneDurationLogs.length)
+      : 0;
+    const avgChatDur = chatDurationLogs.length
+      ? Math.round(chatDurationLogs.reduce((s, l) => s + l.durationSeconds!, 0) / chatDurationLogs.length)
+      : 0;
+
+    const fmtDur = (sec: number) => `${Math.floor(sec / 60)}m ${sec % 60}s`;
+
     res.json({
       totalInteractions: totalLogs,
       successRate,
       avgResponseTimeSec: Math.round(avgDurationSec * 10) / 10,
       callsPerDay,
       timeRange,
+      channelPerformance: {
+        phone: { count: phoneLogs.length, avgDuration: fmtDur(avgPhoneDur), successRate: successRate ?? 0 },
+        chat:  { count: chatLogs.length,  avgDuration: fmtDur(avgChatDur),  successRate: successRate ?? 0 },
+      },
     });
   } catch (error) {
     console.error('Error fetching analytics overview:', error);
@@ -74,95 +101,61 @@ router.get('/overview', async (req: Request, res: Response) => {
   }
 });
 
-// Get call logs
+// Get call logs (real data from CallLog table — prefer /api/logs for full features)
 router.get('/calls', async (req: Request, res: Response) => {
   try {
-    const { page = 1, limit = 50, search, status, type, agentId } = req.query;
+    const prisma: PrismaClient = req.app.get('prisma');
+    const { page = 1, limit = 50, search, agentId } = req.query;
 
-    // Mock call logs data - in production, this would query the database
-    const mockCallLogs = [
-      {
-        id: "call-001",
-        type: "phone",
-        customerInfo: "+1 (555) 987-6543",
-        agentName: "Customer Support Assistant",
-        agentId: "agent-1",
-        startTime: "2024-01-15T14:30:25Z",
-        duration: 204, // seconds
-        status: "completed",
-        resolution: "resolved",
-        summary: "Customer inquiry about product pricing and availability. Provided detailed information about current promotions.",
-        sentiment: "positive",
-        tags: ["pricing", "product-info"],
-        transcript: "Customer: Hi, I need information about your pricing...",
-      },
-      {
-        id: "call-002",
-        type: "chat",
-        customerInfo: "Anonymous User",
-        agentName: "Customer Support Assistant",
-        agentId: "agent-1",
-        startTime: "2024-01-15T14:25:12Z",
-        duration: 105,
-        status: "completed",
-        resolution: "resolved",
-        summary: "Password reset assistance. Guided customer through the reset process successfully.",
-        sentiment: "neutral",
-        tags: ["password-reset", "account"],
-        transcript: "Customer: I forgot my password...",
-      },
-      {
-        id: "call-003",
-        type: "phone",
-        customerInfo: "+1 (555) 123-9876",
-        agentName: "Sales Qualifier",
-        agentId: "agent-2",
-        startTime: "2024-01-15T14:20:08Z",
-        duration: 312,
-        status: "escalated",
-        resolution: "escalated",
-        summary: "Complex billing issue requiring human intervention. Customer had multiple questions about charges.",
-        sentiment: "negative",
-        tags: ["billing", "escalation"],
-        transcript: "Customer: I'm confused about my bill...",
-      },
-    ];
+    const pageNum  = Math.max(1, parseInt(page.toString()));
+    const limitNum = Math.min(200, Math.max(1, parseInt(limit.toString())));
+    const skip     = (pageNum - 1) * limitNum;
 
-    // Apply filters
-    let filteredLogs = mockCallLogs;
-
-    if (search) {
-      const searchTerm = search.toString().toLowerCase();
-      filteredLogs = filteredLogs.filter(log =>
-        log.customerInfo.toLowerCase().includes(searchTerm) ||
-        log.summary.toLowerCase().includes(searchTerm) ||
-        log.tags.some(tag => tag.toLowerCase().includes(searchTerm))
-      );
-    }
-
-    if (status && status !== 'all') {
-      filteredLogs = filteredLogs.filter(log => log.status === status);
-    }
-
-    if (type && type !== 'all') {
-      filteredLogs = filteredLogs.filter(log => log.type === type);
-    }
-
+    const where: any = { tenantId: req.tenantId };
     if (agentId && agentId !== 'all') {
-      filteredLogs = filteredLogs.filter(log => log.agentId === agentId);
+      where.agentId = agentId as string;
+    }
+    if (search) {
+      where.OR = [
+        { transcript: { contains: search as string, mode: 'insensitive' } },
+        { callerPhone: { contains: search as string } },
+      ];
     }
 
-    // Pagination
-    const startIndex = (parseInt(page.toString()) - 1) * parseInt(limit.toString());
-    const endIndex = startIndex + parseInt(limit.toString());
-    const paginatedLogs = filteredLogs.slice(startIndex, endIndex);
+    const [logs, total] = await Promise.all([
+      prisma.callLog.findMany({
+        where,
+        skip,
+        take: limitNum,
+        orderBy: { startedAt: 'desc' },
+        include: { agent: { select: { id: true, name: true } } },
+      }),
+      prisma.callLog.count({ where }),
+    ]);
+
+    // Map to the shape the frontend expects
+    const mappedLogs = logs.map((l: any) => ({
+      id: l.id,
+      type: l.callerPhone ? 'phone' : 'chat',
+      customerInfo: l.callerPhone || 'Web Chat',
+      agentName: l.agent?.name ?? 'Unknown',
+      agentId: l.agentId,
+      startTime: l.startedAt.toISOString(),
+      duration: l.durationSeconds ?? 0,
+      status: l.endedAt ? 'completed' : 'in-progress',
+      resolution: l.rating === 1 ? 'resolved' : l.rating === -1 ? 'escalated' : 'resolved',
+      summary: l.analysis && typeof l.analysis === 'object' ? (l.analysis as any).summary || '' : '',
+      sentiment: l.rating === 1 ? 'positive' : l.rating === -1 ? 'negative' : 'neutral',
+      tags: [],
+      transcript: l.transcript,
+    }));
 
     res.json({
-      logs: paginatedLogs,
-      total: filteredLogs.length,
-      page: parseInt(page.toString()),
-      limit: parseInt(limit.toString()),
-      totalPages: Math.ceil(filteredLogs.length / parseInt(limit.toString())),
+      logs: mappedLogs,
+      total,
+      page: pageNum,
+      limit: limitNum,
+      totalPages: Math.ceil(total / limitNum),
     });
   } catch (error) {
     console.error('Error fetching call logs:', error);
@@ -170,54 +163,79 @@ router.get('/calls', async (req: Request, res: Response) => {
   }
 });
 
-// Get realtime metrics
+// Get realtime metrics — derived from CallLog data in the last hour
 router.get('/realtime', async (req: Request, res: Response) => {
   try {
-    // Mock realtime data - in production, this would use WebSocket or polling
-    const realtimeData = {
-      activeCalls: Math.floor(Math.random() * 15) + 5,
-      activeChats: Math.floor(Math.random() * 20) + 10,
-      avgResponseTime: Math.round((Math.random() * 2 + 1.5) * 10) / 10,
-      successRate: Math.round((Math.random() * 10 + 85) * 10) / 10,
-      queuedInteractions: Math.floor(Math.random() * 10),
-      timestamp: new Date().toISOString(),
-    };
+    const prisma: PrismaClient = req.app.get('prisma');
+    const tenantId = req.tenantId;
 
-    res.json(realtimeData);
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+
+    const [recentCalls, recentChats, todayCalls, agents] = await Promise.all([
+      // Phone calls in last hour (callerPhone is not null)
+      prisma.callLog.count({ where: { tenantId, startedAt: { gte: oneHourAgo }, callerPhone: { not: null } } }),
+      // Chat interactions in last hour (callerPhone is null)
+      prisma.callLog.count({ where: { tenantId, startedAt: { gte: oneHourAgo }, callerPhone: null } }),
+      // All interactions today
+      prisma.callLog.count({ where: { tenantId, startedAt: { gte: today } } }),
+      // Number of configured agents
+      prisma.agent.count({ where: { tenantId } }),
+    ]);
+
+    res.json({
+      active_calls: recentCalls,
+      active_chats: recentChats,
+      queued_interactions: 0,
+      online_agents: agents,
+      today_total: todayCalls,
+      timestamp: new Date().toISOString(),
+    });
   } catch (error) {
     console.error('Error fetching realtime metrics:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// Get metrics chart data
+// Get metrics chart data — daily interaction counts from CallLog
 router.get('/metrics-chart', async (req: Request, res: Response) => {
   try {
+    const prisma: PrismaClient = req.app.get('prisma');
     const { timeRange = '7d', agentId } = req.query;
+    const tenantId = req.tenantId;
 
-    // Generate mock chart data
-    const chartData = [];
     const now = new Date();
-    const days = timeRange === '24h' ? 24 : timeRange === '7d' ? 7 : timeRange === '30d' ? 30 : 90;
+    const days = timeRange === '24h' ? 1 : timeRange === '7d' ? 7 : timeRange === '30d' ? 30 : 90;
+    const since = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
 
+    const where: any = { tenantId, startedAt: { gte: since } };
+    if (agentId && agentId !== 'all') where.agentId = agentId as string;
+
+    const logs = await prisma.callLog.findMany({
+      where,
+      select: { startedAt: true, callerPhone: true },
+    });
+
+    // Build date → {calls, chats} map
+    const dayCounts: Record<string, { calls: number; chats: number }> = {};
     for (let i = days - 1; i >= 0; i--) {
-      const date = new Date(now);
-      date.setDate(date.getDate() - i);
-
-      chartData.push({
-        date: date.toISOString().split('T')[0],
-        calls: Math.floor(Math.random() * 100) + 50,
-        chats: Math.floor(Math.random() * 150) + 75,
-        total: 0, // Will be calculated below
-        successRate: Math.round((Math.random() * 10 + 85) * 10) / 10,
-        avgResponseTime: Math.round((Math.random() * 2 + 1.5) * 10) / 10,
-      });
+      const d = new Date(now); d.setDate(d.getDate() - i);
+      dayCounts[d.toISOString().split('T')[0]] = { calls: 0, chats: 0 };
+    }
+    for (const log of logs) {
+      const key = log.startedAt.toISOString().split('T')[0];
+      if (key in dayCounts) {
+        if (log.callerPhone) dayCounts[key].calls++;
+        else dayCounts[key].chats++;
+      }
     }
 
-    // Calculate totals
-    chartData.forEach(day => {
-      day.total = day.calls + day.chats;
-    });
+    const chartData = Object.entries(dayCounts).map(([date, v]) => ({
+      date,
+      calls: v.calls,
+      chats: v.chats,
+      total: v.calls + v.chats,
+    }));
 
     res.json({ data: chartData });
   } catch (error) {
@@ -226,38 +244,45 @@ router.get('/metrics-chart', async (req: Request, res: Response) => {
   }
 });
 
-// Get agent comparison data
+// Get agent comparison data — real aggregation per agent
 router.get('/agent-comparison', async (req: Request, res: Response) => {
   try {
+    const prisma: PrismaClient = req.app.get('prisma');
     const { timeRange = '7d' } = req.query;
+    const tenantId = req.tenantId;
 
-    // Mock agent comparison data
-    const comparisonData = [
-      {
-        agentId: 'agent-1',
-        agentName: 'Customer Support Assistant',
-        totalInteractions: 5421,
-        successRate: 96.2,
-        avgResponseTime: 1.8,
-        customerSatisfaction: 4.8,
+    const days = timeRange === '24h' ? 1 : timeRange === '30d' ? 30 : timeRange === '90d' ? 90 : 7;
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    const agents = await prisma.agent.findMany({
+      where: { tenantId },
+      select: {
+        id: true,
+        name: true,
+        callLogs: {
+          where: { startedAt: { gte: since } },
+          select: { rating: true, durationSeconds: true },
+        },
       },
-      {
-        agentId: 'agent-2',
-        agentName: 'Sales Qualifier',
-        totalInteractions: 2134,
-        successRate: 89.7,
-        avgResponseTime: 2.2,
-        customerSatisfaction: 4.5,
-      },
-      {
-        agentId: 'agent-3',
-        agentName: 'HR Assistant',
-        totalInteractions: 987,
-        successRate: 94.1,
-        avgResponseTime: 2.5,
-        customerSatisfaction: 4.6,
-      },
-    ];
+    });
+
+    const comparisonData = agents.map((a) => {
+      const logs = a.callLogs;
+      const total = logs.length;
+      const rated = logs.filter((l) => l.rating !== null);
+      const thumbsUp = rated.filter((l) => l.rating === 1).length;
+      const durations = logs.filter((l) => l.durationSeconds !== null).map((l) => l.durationSeconds!);
+      const avgDuration = durations.length ? Math.round(durations.reduce((s, d) => s + d, 0) / durations.length * 10) / 10 : 0;
+
+      return {
+        agentId: a.id,
+        agentName: a.name,
+        totalInteractions: total,
+        successRate: rated.length > 0 ? Math.round((thumbsUp / rated.length) * 1000) / 10 : null,
+        avgResponseTime: avgDuration,
+        customerSatisfaction: null, // Not applicable without surveys
+      };
+    });
 
     res.json({ agents: comparisonData });
   } catch (error) {

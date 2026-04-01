@@ -22,16 +22,20 @@ export function RealtimeMetrics() {
         setLoading(true)
         setError(null)
         const data = await apiClient.getRealtimeMetrics()
-        setMetrics(data)
+        setMetrics({
+          active_calls: data.active_calls ?? 0,
+          active_chats: data.active_chats ?? 0,
+          queued_interactions: data.queued_interactions ?? 0,
+          online_agents: data.online_agents ?? 0,
+        })
       } catch (err) {
         console.error('Error fetching realtime metrics:', err)
         setError('Failed to load realtime metrics')
-        // Fallback to mock data
         setMetrics({
-          active_calls: 12,
-          active_chats: 8,
-          queued_interactions: 3,
-          online_agents: 3,
+          active_calls: 0,
+          active_chats: 0,
+          queued_interactions: 0,
+          online_agents: 0,
         })
       } finally {
         setLoading(false)

@@ -156,7 +156,8 @@ export function CallLogs() {
     ;(async () => {
       try {
         const res = await apiClient.getAgents({ limit: 100 })
-        const list = ((res as any).agents || []).map((a: any) => ({ id: a.id, name: a.name }))
+        const raw = Array.isArray(res) ? res : (res as any).agents || []
+        const list = raw.map((a: any) => ({ id: a.id, name: a.name }))
         setAgents(list)
       } catch {
         // Derive from mock

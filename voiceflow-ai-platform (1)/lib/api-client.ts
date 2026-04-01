@@ -544,12 +544,43 @@ class ApiClient {
   }
 
   // Analytics methods
-  async getAnalyticsOverview(params: { timeRange?: string; agentId?: string } = {}) {
-    const queryParams = new URLSearchParams();
-    Object.entries(params).forEach(([key, value]) => {
-      if (value !== undefined) queryParams.append(key, value.toString());
-    });
+  async getAnalyticsOverview(params: { timeRange?: string; agentId?: string } | string = {}, agentIdCompat?: string) {
+    // Support both object-style and positional args for backward compat
+    let queryObj: Record<string, string> = {};
+    if (typeof params === 'string') {
+      queryObj.timeRange = params;
+      if (agentIdCompat && agentIdCompat !== 'all') queryObj.agentId = agentIdCompat;
+    } else {
+      if (params.timeRange) queryObj.timeRange = params.timeRange;
+      if (params.agentId && params.agentId !== 'all') queryObj.agentId = params.agentId;
+    }
+    const queryParams = new URLSearchParams(queryObj);
     return this.request('/analytics/overview?' + queryParams.toString());
+  }
+
+  async getRealtimeMetrics() {
+    return this.request('/analytics/realtime');
+  }
+
+  async getMetricsChart(timeRange?: string, agentId?: string) {
+    const queryParams = new URLSearchParams();
+    if (timeRange) queryParams.append('timeRange', timeRange);
+    if (agentId && agentId !== 'all') queryParams.append('agentId', agentId);
+    return this.request('/analytics/metrics-chart?' + queryParams.toString());
+  }
+
+  async getPerformanceData(timeRange?: string, agentId?: string) {
+    // Performance data derived from metrics-chart — uses the same endpoint
+    const queryParams = new URLSearchParams();
+    if (timeRange) queryParams.append('timeRange', timeRange);
+    if (agentId && agentId !== 'all') queryParams.append('agentId', agentId);
+    return this.request('/analytics/metrics-chart?' + queryParams.toString());
+  }
+
+  async getAgentComparison(timeRange?: string) {
+    const queryParams = new URLSearchParams();
+    if (timeRange) queryParams.append('timeRange', timeRange);
+    return this.request('/analytics/agent-comparison?' + queryParams.toString());
   }
 
   async getChatLogs(params: { page?: number; limit?: number; search?: string; status?: string; agentId?: string } = {}) {
@@ -557,41 +588,7 @@ class ApiClient {
     Object.entries(params).forEach(([key, value]) => {
       if (value !== undefined) queryParams.append(key, value.toString());
     });
-    return this.request('/analytics/chats?' + queryParams.toString());
-  }
-
-  async getPerformanceMetrics(params: { timeRange?: string; agentId?: string } = {}) {
-    const queryParams = new URLSearchParams();
-    Object.entries(params).forEach(([key, value]) => {
-      if (value !== undefined) queryParams.append(key, value.toString());
-    });
-    return this.request('/analytics/performance?' + queryParams.toString());
-  }
-
-  // Reports methods
-  async generateReport(data: { type: string; dateRange: { from: string; to: string }; filters?: any }) {
-    return this.request<{ reportId: string; status: string }>('/reports/generate', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
-
-  async getReport(reportId: string) {
-    return this.request('/reports/' + reportId);
-  }
-
-  async getReports(params: { page?: number; limit?: number; type?: string } = {}) {
-    const queryParams = new URLSearchParams();
-    Object.entries(params).forEach(([key, value]) => {
-      if (value !== undefined) queryParams.append(key, value.toString());
-    });
-    return this.request('/reports?' + queryParams.toString());
-  }
-
-  async exportReport(reportId: string, format: 'pdf' | 'csv' | 'excel') {
-    return this.request(`/reports/${reportId}/export?format=${format}`, {
-      method: 'POST',
-    });
+    return this.request('/analytics/calls?' + queryParams.toString());
   }
 
   // Knowledge base methods
@@ -739,19 +736,7 @@ class ApiClient {
     });
   }
 
-  // Billing methods
-  async getBillingOverview() {
-    return this.request('/billing/overview');
-  }
-
-  async getInvoices(params: { page?: number; limit?: number; status?: string } = {}) {
-    const queryParams = new URLSearchParams();
-    Object.entries(params).forEach(([key, value]) => {
-      if (value !== undefined) queryParams.append(key, value.toString());
-    });
-    return this.request('/billing/invoices?' + queryParams.toString());
-  }
-
+  // Billing / Usage methods
   async getUsageStats(params: { timeRange?: string } = {}) {
     return this.request<{ agents: number; callLogs: number; documents: number }>('/analytics/usage');
   }

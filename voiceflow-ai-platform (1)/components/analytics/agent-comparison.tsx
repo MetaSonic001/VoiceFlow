@@ -18,34 +18,20 @@ export function AgentComparison() {
         setLoading(true)
         setError(null)
         const data = await apiClient.getAgentComparison()
-        setAgents(data.agents || [])
+        // Map backend shape to component shape
+        const mapped = (data.agents || []).map((a: any) => ({
+          id: a.agentId,
+          name: a.agentName,
+          interactions: a.totalInteractions ?? 0,
+          successRate: a.successRate ?? 0,
+          avgResponseTime: a.avgResponseTime ?? 0,
+          status: 'active',
+        }))
+        setAgents(mapped)
       } catch (err) {
         console.error('Error fetching agent comparison data:', err)
         setError('Failed to load agent comparison data')
-        // Fallback to mock data
-        setAgents([
-          {
-            name: "Customer Support Assistant",
-            interactions: 1247,
-            successRate: 94,
-            avgResponseTime: 2.3,
-            status: "active",
-          },
-          {
-            name: "Sales Qualifier",
-            interactions: 456,
-            successRate: 87,
-            avgResponseTime: 1.8,
-            status: "active",
-          },
-          {
-            name: "HR Assistant",
-            interactions: 156,
-            successRate: 91,
-            avgResponseTime: 3.1,
-            status: "paused",
-          },
-        ])
+        setAgents([])
       } finally {
         setLoading(false)
       }

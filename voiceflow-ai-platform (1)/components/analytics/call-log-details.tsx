@@ -62,7 +62,14 @@ export function CallLogDetails({ log, onBack, onUpdated }: CallLogDetailsProps) 
   const messages: TranscriptMessage[] = (() => {
     try {
       const parsed = JSON.parse(log.transcript)
-      if (Array.isArray(parsed)) return parsed
+      if (Array.isArray(parsed)) {
+        return parsed.map((m: any) => {
+          // Support both { speaker, message } and { role, content } formats
+          const speaker = m.speaker ?? (m.role === 'user' || m.role === 'customer' ? 'customer' : 'agent')
+          const message = m.message ?? m.content ?? ''
+          return { speaker, message, timestamp: m.timestamp } as TranscriptMessage
+        })
+      }
     } catch { /* not JSON */ }
     // Fallback: treat whole transcript as a single agent message
     return [{ speaker: "agent" as const, message: log.transcript }]

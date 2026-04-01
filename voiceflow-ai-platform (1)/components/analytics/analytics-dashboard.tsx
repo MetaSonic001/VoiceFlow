@@ -17,8 +17,19 @@ export function AnalyticsDashboard() {
   const [timeRange, setTimeRange] = useState("7d")
   const [selectedAgent, setSelectedAgent] = useState("all")
   const [analyticsData, setAnalyticsData] = useState<any>(null)
+  const [agents, setAgents] = useState<{ id: string; name: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  // Fetch tenant's agents for the dropdown
+  useEffect(() => {
+    apiClient.getAgents()
+      .then((data: any) => {
+        const list = Array.isArray(data) ? data : data?.agents ?? []
+        setAgents(list.map((a: any) => ({ id: a.id, name: a.name })))
+      })
+      .catch(() => setAgents([]))
+  }, [])
 
   useEffect(() => {
     const fetchAnalyticsData = async () => {
@@ -81,34 +92,26 @@ export function AnalyticsDashboard() {
     {
       title: "Total Interactions",
       value: analyticsData.totalInteractions?.toLocaleString() || "0",
-      change: "+15.2%", // This would come from API comparison
+      change: "", // Period-over-period comparison can be added later
       trend: "up",
       icon: Users,
       description: "Calls and chats combined",
     },
     {
       title: "Success Rate",
-      value: `${analyticsData.successRate || 0}%`,
-      change: "+2.1%",
+      value: analyticsData.successRate != null ? `${analyticsData.successRate}%` : "N/A",
+      change: "",
       trend: "up",
       icon: TrendingUp,
-      description: "Successfully resolved queries",
+      description: "Based on thumbs-up ratings",
     },
     {
-      title: "Avg Response Time",
-      value: `${analyticsData.avgResponseTime || 0}s`,
-      change: "-0.3s",
+      title: "Avg Duration",
+      value: `${analyticsData.avgResponseTimeSec || 0}s`,
+      change: "",
       trend: "up",
       icon: Clock,
-      description: "Average time to first response",
-    },
-    {
-      title: "Customer Satisfaction",
-      value: `${analyticsData.customerSatisfaction || 0}/5`,
-      change: "+0.2",
-      trend: "up",
-      icon: TrendingUp,
-      description: "Based on post-interaction surveys",
+      description: "Average call / chat duration",
     },
   ] : []
 
@@ -133,9 +136,9 @@ export function AnalyticsDashboard() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Agents</SelectItem>
-                    <SelectItem value="agent-1">Customer Support Assistant</SelectItem>
-                    <SelectItem value="agent-2">Sales Qualifier</SelectItem>
-                    <SelectItem value="agent-3">HR Assistant</SelectItem>
+                    {agents.map((a) => (
+                      <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
                 <Select value={timeRange} onValueChange={setTimeRange}>
@@ -160,7 +163,7 @@ export function AnalyticsDashboard() {
             <RealtimeMetrics />
 
             {/* Overview Metrics */}
-            <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+            <div className="grid md:grid-cols-3 gap-6 mb-6">
               {overviewMetrics.map((metric) => (
                 <Card key={metric.title}>
                   <CardHeader className="pb-2">

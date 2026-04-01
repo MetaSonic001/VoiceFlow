@@ -23,22 +23,12 @@ export function MetricsChart({ timeRange, agentId }: MetricsChartProps) {
         setLoading(true)
         setError(null)
         const response = await apiClient.getMetricsChart(timeRange, agentId)
-        // Transform the API response to chart format
-        // Assuming the API returns data in the format we need, or transform it
-        setData(response.datasets ? response.datasets : [])
+        // Backend returns { data: [{ date, calls, chats, total }] }
+        setData(response.data || [])
       } catch (err) {
         console.error('Error fetching metrics chart data:', err)
         setError('Failed to load chart data')
-        // Fallback to mock data
-        setData([
-          { date: "Jan 1", calls: 120, chats: 85, total: 205 },
-          { date: "Jan 2", calls: 145, chats: 92, total: 237 },
-          { date: "Jan 3", calls: 132, chats: 78, total: 210 },
-          { date: "Jan 4", calls: 168, chats: 105, total: 273 },
-          { date: "Jan 5", calls: 156, chats: 98, total: 254 },
-          { date: "Jan 6", calls: 189, chats: 112, total: 301 },
-          { date: "Jan 7", calls: 178, chats: 108, total: 286 },
-        ])
+        setData([])
       } finally {
         setLoading(false)
       }
@@ -80,13 +70,8 @@ export function MetricsChart({ timeRange, agentId }: MetricsChartProps) {
     )
   }
 
-  // Transform API data to Recharts format
-  const chartData = data.length > 0 ? data[0]?.data?.map((value: number, index: number) => ({
-    date: data[0]?.labels?.[index] || `Day ${index + 1}`,
-    calls: value,
-    chats: data[1]?.data?.[index] || 0,
-    total: value + (data[1]?.data?.[index] || 0)
-  })) || [] : []
+  // Data is already in { date, calls, chats, total } format from the API
+  const chartData = data
 
   return (
     <Card>

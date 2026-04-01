@@ -98,6 +98,7 @@ router.post('/chat', async (req: Request, res: Response) => {
       }
     }
 
+    const chatStart = new Date();
     const response = await ragService.processQuery(
       req.tenantId,
       agentId,
@@ -108,6 +109,24 @@ router.post('/chat', async (req: Request, res: Response) => {
       },
       sessionId
     );
+    const chatEnd = new Date();
+    const durationMs = chatEnd.getTime() - chatStart.getTime();
+
+    // Persist a lightweight CallLog for this web-chat exchange
+    prisma.callLog.create({
+      data: {
+        tenantId: req.tenantId,
+        agentId,
+        callerPhone: null, // web chat – no phone number
+        startedAt: chatStart,
+        endedAt: chatEnd,
+        durationSeconds: Math.round(durationMs / 1000),
+        transcript: JSON.stringify([
+          { role: 'user', content: message },
+          { role: 'assistant', content: response },
+        ]),
+      },
+    }).catch((err: unknown) => console.error('Failed to persist chat log:', err));
 
     res.json({
       response: response,
