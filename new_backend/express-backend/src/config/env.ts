@@ -16,8 +16,8 @@ const envSchema = Joi.object({
   // Clerk
   CLERK_SECRET_KEY: Joi.string().required(),
 
-  // Groq LLM
-  GROQ_API_KEY: Joi.string().required(),
+  // Groq LLM (platform fallback — tenants can bring their own key via Settings)
+  GROQ_API_KEY: Joi.string().optional(),
 
   // Twilio
   TWILIO_ACCOUNT_SID: Joi.string().optional(),

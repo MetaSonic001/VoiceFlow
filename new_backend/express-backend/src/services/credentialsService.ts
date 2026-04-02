@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { PrismaClient } from '@prisma/client';
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 12;  // 96 bits recommended for GCM
@@ -61,4 +62,21 @@ export function decryptCredential(encoded: string): string {
   ]);
 
   return decrypted.toString('utf8');
+}
+
+/**
+ * Retrieve the tenant's own Groq API key (decrypted), or null if not configured.
+ * Callers should fall back to process.env.GROQ_API_KEY when this returns null.
+ */
+export async function getTenantGroqKey(prisma: PrismaClient, tenantId: string): Promise<string | null> {
+  try {
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+    const settings = (tenant?.settings as Record<string, any>) || {};
+    if (settings.groqApiKey) {
+      return decryptCredential(settings.groqApiKey);
+    }
+  } catch {
+    // Decryption failure or DB error — fall back to platform key
+  }
+  return null;
 }

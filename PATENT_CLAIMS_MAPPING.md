@@ -31,19 +31,22 @@ Inbound call (Twilio) / WebRTC → Tenant resolution → ContextInjector (5-laye
 | 6. Vector store query | `src/services/ragService.ts` | `queryDocuments(tenantId, agentId, query, topK, maxTokens, policyRules)` | Collection: `tenant_{tenantId}`, where: `{ agentId }` |
 | 7. Policy scoring | `src/services/ragService.ts` | `applyPolicyScoring(docs, rules)` | restrict=×0.05, require=×2.0, allow=×1.0 |
 | 8. Prompt assembly | `src/services/promptAssembly.ts` | `buildSystemPrompt(ctx)` | 7-section prompt: safety → tenant → brand → agent → few-shot → escalation → policy |
-| 9. LLM generation | `src/services/ragService.ts` | `generateResponse(systemPrompt, context, query, tokenLimit)` | Groq API (`grok-beta` model) |
+| 9. LLM generation | `src/services/ragService.ts` | `generateResponse(systemPrompt, context, query, conversationHistory, tokenLimit, model)` | Groq API (`llama-3.3-70b-versatile` default; per-tenant model via `resolveModel()`) |
 | 10. TTS synthesis | `src/services/ttsService.ts` | `synthesiseForCall(text, voiceId)` | Chatterbox TTS or AWS Polly fallback |
 | 11. Response delivery | `src/routes/twilioVoice.ts` | TwiML `<Say>` + `<Gather>` loop | Continues conversation |
 | 12. Call ended | `src/routes/twilioVoice.ts` | `POST /twilio/voice/status` | Persists CallLog + async call analysis |
+
+**Per-tenant LLM model selection:** `src/services/ragService.ts` — `resolveModel(agent)` reads `agent.llmPreferences.model` and validates against a 4-model Groq production allowlist (`llama-3.3-70b-versatile`, `llama-3.1-8b-instant`, `openai/gpt-oss-120b`, `openai/gpt-oss-20b`). Falls back to `llama-3.3-70b-versatile` if not set or invalid. Model is passed to `generateResponse()` in all code paths.
 
 **WebRTC alternative path (Claim 1 variant):**
 
 | Step | File | Notes |
 |------|------|-------|
 | 1. Browser connects | `src/services/webrtcService.ts` | Socket.IO on `/ws` with `{ agentId, tenantId }` |
-| 2-9. Same pipeline | Same services | ContextInjector → RAG → Policy → Prompt → LLM |
-| 10. Response text | via Socket.IO `agent:response` event | Client uses Web Speech API for TTS |
-| 11. CallLog persisted | `webrtcService.ts` on `disconnect` | Same schema as Twilio calls |
+| 2-9. Same pipeline | Same services | ContextInjector → RAG → Policy → Prompt → LLM (conversation history included) |
+| 10. Server-side STT | `webrtcService.ts` | Groq Whisper `whisper-large-v3-turbo` transcribes client audio |
+| 11. Server-side TTS | `src/services/ttsService.ts` | `synthesiseForWebRTC(text, voiceId)` via Chatterbox TTS; audio URL returned to client |
+| 12. CallLog persisted | `webrtcService.ts` on `disconnect` | Same schema as Twilio calls |
 
 ---
 
@@ -59,7 +62,7 @@ Inbound call (Twilio) / WebRTC → Tenant resolution → ContextInjector (5-laye
 | 2. Tenant | `Prisma: Tenant.settings`, `Tenant.policyRules` | Org name, industry, use case, tenant policies |
 | 3. Brand | `Prisma: Brand.brandVoice`, `Brand.allowedTopics`, `Brand.restrictedTopics`, `Brand.policyRules` | Brand voice guidelines, topic constraints |
 | 4. Agent | `Prisma: AgentTemplate.baseSystemPrompt`, `AgentConfiguration.*`, `Agent.systemPrompt` | Persona, template, custom instructions, capabilities |
-| 5. Session | `Redis: conversation:{tenantId}:{agentId}:{sessionId}` | Last 20 conversation turns |
+| 5. Session | `Redis: conversation:{tenantId}:{agentId}:{sessionId}` | Last 20 conversation turns (passed through to LLM as `conversationHistory` in all code paths: Twilio, WebRTC, chat, widget) |
 
 **Merge strategy:** Lower layers override higher for same `(target, value)` key. Global rules are immutable (`mergePolicyRules()` method, line ~231).
 
@@ -153,7 +156,7 @@ Inbound call (Twilio) / WebRTC → Tenant resolution → ContextInjector (5-laye
 | Channel | Implementation | File |
 |---------|---------------|------|
 | **Twilio voice** | TwiML webhooks, `<Gather>` + `<Say>` loop | `src/routes/twilioVoice.ts` |
-| **WebRTC browser calls** | Socket.IO signaling, Web Speech API | `src/services/webrtcService.ts` |
+| **WebRTC browser calls** | Socket.IO signaling, Groq Whisper STT + Chatterbox TTS (server-side) | `src/services/webrtcService.ts` |
 | **Web chat** | REST API `POST /api/runner/chat` | `src/routes/runner.ts` |
 | **Embeddable widget** | Self-contained JS snippet | `src/routes/widget.ts` (`GET /api/widget/:agentId/embed.js`) |
 
@@ -235,9 +238,9 @@ All channels share the same RAG pipeline: ContextInjector → queryDocuments →
 
 **Signaling:** `src/services/webrtcService.ts` — Socket.IO server on `/ws`
 **Widget:** `src/routes/widget.ts` — Embeddable `<script>` tag
-**Browser STT:** Web Speech API (`SpeechRecognition`) for client-side transcription
-**Browser TTS:** Web Speech API (`SpeechSynthesisUtterance`) for client-side speech
-**Pipeline:** Same ContextInjector → RAG → Policy → Prompt → LLM as Twilio calls
+**Server STT:** Groq Whisper (`whisper-large-v3-turbo`) — client sends audio via Socket.IO binary, server transcribes
+**Server TTS:** Chatterbox TTS via `synthesiseForWebRTC()` — server generates speech, returns audio URL to client
+**Pipeline:** Same ContextInjector → RAG → Policy → Prompt → LLM as Twilio calls (conversation history included in all paths)
 
 ---
 
@@ -247,8 +250,7 @@ All channels share the same RAG pipeline: ContextInjector → queryDocuments →
 |-------|-----|-------------|
 | Fine-tuning | Only in-context learning (few-shot) is implemented | Full model fine-tuning via LoRA/QLoRA not implemented (by design — too slow/expensive for MVP) |
 | Multi-language | Agent `language` field exists in onboarding | No automatic language detection or translation pipeline |
-| Real-time streaming | WebRTC signaling is turn-based (text in, text out) | True audio streaming (WebRTC audio tracks) not implemented — uses Web Speech API as bridge |
-| Custom TTS voices | Voice cloning endpoint exists (`POST /api/tts/clone-voice`) | Chatterbox TTS integration works but voice cloning quality depends on reference audio |
+| Custom TTS voices | Voice cloning endpoint exists (`POST /api/tts/clone-voice`) with quality validation | Chatterbox TTS integration works; upload validated for format, size, and duration with actionable feedback |
 
 ---
 
@@ -301,7 +303,7 @@ All channels share the same RAG pipeline: ContextInjector → queryDocuments →
          └────────┬─────────┘
                   ▼
          ┌──────────────────┐
-         │   TTS Synthesis   │ ◄── Chatterbox / Polly / Web Speech
+         │   TTS Synthesis   │ ◄── Chatterbox / Polly (Twilio & WebRTC: server-side)
          └────────┬─────────┘
                   ▼
          ┌──────────────────┐

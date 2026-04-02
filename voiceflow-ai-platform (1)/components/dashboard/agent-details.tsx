@@ -1,11 +1,15 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { ArrowLeft, Phone, MessageSquare, Settings, BarChart3, Play, Pause } from "lucide-react"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Label } from "@/components/ui/label"
+import { Separator } from "@/components/ui/separator"
+import { ArrowLeft, Phone, MessageSquare, Settings, BarChart3, Play, Pause, Loader2, CheckCircle, Brain } from "lucide-react"
+import { apiClient } from "@/lib/api-client"
 
 interface Agent {
   id: string
@@ -20,6 +24,18 @@ interface Agent {
   avgResponseTime: string
   lastActive: string
   createdAt: string
+  llmPreferences?: { model?: string } | null
+  tokenLimit?: number | null
+  contextWindowStrategy?: string | null
+}
+
+interface GroqModel {
+  id: string
+  name: string
+  speed: string
+  contextWindow: number
+  maxCompletionTokens: number
+  description: string
 }
 
 interface AgentDetailsProps {
@@ -29,6 +45,47 @@ interface AgentDetailsProps {
 
 export function AgentDetails({ agent, onBack }: AgentDetailsProps) {
   const [activeTab, setActiveTab] = useState("overview")
+
+  // LLM settings state
+  const [availableModels, setAvailableModels] = useState<GroqModel[]>([])
+  const [selectedModel, setSelectedModel] = useState(agent.llmPreferences?.model || 'llama-3.3-70b-versatile')
+  const [selectedTokenLimit, setSelectedTokenLimit] = useState(String(agent.tokenLimit || 4096))
+  const [selectedStrategy, setSelectedStrategy] = useState(agent.contextWindowStrategy || 'condense')
+  const [settingsSaving, setSettingsSaving] = useState(false)
+  const [settingsMessage, setSettingsMessage] = useState('')
+
+  useEffect(() => {
+    apiClient.getGroqModels()
+      .then(data => setAvailableModels(data.models))
+      .catch(() => {
+        // Fallback if endpoint not reachable
+        setAvailableModels([
+          { id: 'llama-3.3-70b-versatile', name: 'Meta Llama 3.3 70B', speed: '280 T/sec', contextWindow: 131072, maxCompletionTokens: 32768, description: 'Best quality' },
+          { id: 'llama-3.1-8b-instant', name: 'Meta Llama 3.1 8B', speed: '560 T/sec', contextWindow: 131072, maxCompletionTokens: 131072, description: 'Fastest' },
+          { id: 'openai/gpt-oss-120b', name: 'OpenAI GPT OSS 120B', speed: '500 T/sec', contextWindow: 131072, maxCompletionTokens: 65536, description: 'Balanced' },
+          { id: 'openai/gpt-oss-20b', name: 'OpenAI GPT OSS 20B', speed: '1000 T/sec', contextWindow: 131072, maxCompletionTokens: 65536, description: 'Ultra-fast' },
+        ])
+      })
+  }, [])
+
+  const saveLlmSettings = async () => {
+    setSettingsSaving(true)
+    setSettingsMessage('')
+    try {
+      await apiClient.updateAgent(agent.id, {
+        llmPreferences: { model: selectedModel },
+        tokenLimit: parseInt(selectedTokenLimit, 10),
+        contextWindowStrategy: selectedStrategy,
+      })
+      setSettingsMessage('Settings saved!')
+      setTimeout(() => setSettingsMessage(''), 3000)
+    } catch {
+      setSettingsMessage('Failed to save settings')
+      setTimeout(() => setSettingsMessage(''), 3000)
+    } finally {
+      setSettingsSaving(false)
+    }
+  }
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -293,13 +350,92 @@ export function AgentDetails({ agent, onBack }: AgentDetailsProps) {
         <TabsContent value="settings">
           <Card>
             <CardHeader>
-              <CardTitle>Agent Settings</CardTitle>
-              <CardDescription>Configure your agent's behavior and preferences</CardDescription>
+              <CardTitle className="flex items-center space-x-2">
+                <Brain className="w-5 h-5" />
+                <span>LLM &amp; Inference Settings</span>
+              </CardTitle>
+              <CardDescription>Choose which Groq model this agent uses and configure token limits.</CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="text-center py-12">
-                <Settings className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
-                <p className="text-muted-foreground">Settings panel will be implemented in the next phase</p>
+            <CardContent className="space-y-6">
+              {settingsMessage && (
+                <div className={`flex items-center gap-2 p-3 rounded-lg ${settingsMessage.includes('saved') ? 'bg-green-50 border border-green-200 text-green-800' : 'bg-red-50 border border-red-200 text-red-800'}`}>
+                  <CheckCircle className="w-4 h-4" />
+                  <span className="text-sm">{settingsMessage}</span>
+                </div>
+              )}
+
+              {/* Model selection */}
+              <div className="space-y-3">
+                <Label>Groq Model</Label>
+                <Select value={selectedModel} onValueChange={setSelectedModel}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a model" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableModels.map((m) => (
+                      <SelectItem key={m.id} value={m.id}>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{m.name}</span>
+                          <span className="text-xs text-muted-foreground">({m.speed})</span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {availableModels.find(m => m.id === selectedModel) && (
+                  <p className="text-xs text-muted-foreground">
+                    {availableModels.find(m => m.id === selectedModel)!.description}
+                    {' — '}Context: {(availableModels.find(m => m.id === selectedModel)!.contextWindow / 1024).toFixed(0)}K tokens
+                  </p>
+                )}
+              </div>
+
+              <Separator />
+
+              {/* Token limit */}
+              <div className="space-y-3">
+                <Label>Max Token Limit</Label>
+                <Select value={selectedTokenLimit} onValueChange={setSelectedTokenLimit}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="2048">2,048 tokens (fast, short answers)</SelectItem>
+                    <SelectItem value="4096">4,096 tokens (default)</SelectItem>
+                    <SelectItem value="8192">8,192 tokens (detailed answers)</SelectItem>
+                    <SelectItem value="16384">16,384 tokens (long-form)</SelectItem>
+                    <SelectItem value="32768">32,768 tokens (maximum)</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Controls the maximum response length. Higher limits use more API credits.
+                </p>
+              </div>
+
+              <Separator />
+
+              {/* Context window strategy */}
+              <div className="space-y-3">
+                <Label>Context Window Strategy</Label>
+                <Select value={selectedStrategy} onValueChange={setSelectedStrategy}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="condense">Condense (rank &amp; trim to fit)</SelectItem>
+                    <SelectItem value="truncate">Truncate (cut off oldest context)</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  How retrieved knowledge chunks are managed when they exceed the token limit.
+                </p>
+              </div>
+
+              <div className="pt-4">
+                <Button onClick={saveLlmSettings} disabled={settingsSaving}>
+                  {settingsSaving && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                  Save Settings
+                </Button>
               </div>
             </CardContent>
           </Card>

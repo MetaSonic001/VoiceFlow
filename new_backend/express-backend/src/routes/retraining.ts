@@ -125,7 +125,19 @@ router.delete('/:id', async (req: Request, res: Response) => {
 
 // ─── POST /api/retraining/process ─────────────────────────────────────────────
 // Manually trigger the retraining pipeline (normally runs nightly).
+// Also aliased as /process-now for backward compatibility with API docs.
 router.post('/process', async (req: Request, res: Response) => {
+  try {
+    const prisma: PrismaClient = req.app.get('prisma');
+    const count = await processFlaggedCallLogs(prisma);
+    res.json({ processed: true, examplesCreated: count });
+  } catch (error) {
+    console.error('Error running retraining pipeline:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.post('/process-now', async (req: Request, res: Response) => {
   try {
     const prisma: PrismaClient = req.app.get('prisma');
     const count = await processFlaggedCallLogs(prisma);

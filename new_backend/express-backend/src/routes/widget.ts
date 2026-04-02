@@ -52,9 +52,12 @@ router.get('/:agentId', async (req: Request, res: Response) => {
  * GET /api/widget/:agentId/embed.js
  *
  * Returns a self-contained JavaScript snippet that businesses embed
- * on their websites. It creates a floating call button, connects
- * to the WebRTC signaling layer via Socket.IO, and uses the
- * browser's Web Speech API for speech recognition + synthesis.
+ * on their websites. Creates a floating call button, connects via
+ * Socket.IO, captures real audio via MediaRecorder, sends it to the
+ * server for STT (Groq Whisper) + RAG + TTS (Chatterbox), and plays
+ * the response audio back to the user.
+ *
+ * Falls back to a text input if the browser lacks MediaRecorder/mic access.
  */
 router.get('/:agentId/embed.js', async (req: Request, res: Response) => {
   const backendUrl = `${req.protocol}://${req.get('host')}`;
@@ -69,23 +72,64 @@ router.get('/:agentId/embed.js', async (req: Request, res: Response) => {
   var AGENT_ID = "${agentId}";
   var config = null;
   var socket = null;
-  var recognition = null;
-  var synthesis = window.speechSynthesis;
-  var isListening = false;
+  var mediaRecorder = null;
+  var audioChunks = [];
+  var micStream = null;
   var isConnected = false;
+  var isRecording = false;
+  var isProcessing = false;
+  var hasMicSupport = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
+
+  // ── Styles ──────────────────────────────────────────────────────────
+  var css = document.createElement("style");
+  css.textContent = [
+    "#vf-call-btn{position:fixed;bottom:24px;right:24px;width:56px;height:56px;border-radius:50%;background:#4F46E5;color:white;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.3);z-index:99999;transition:all 0.2s;border:none;}",
+    "#vf-call-btn:hover{transform:scale(1.1);}",
+    "#vf-panel{position:fixed;bottom:92px;right:24px;width:340px;background:white;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,0.2);z-index:99998;display:none;font-family:-apple-system,BlinkMacSystemFont,sans-serif;overflow:hidden;}",
+    "#vf-panel *{box-sizing:border-box;}",
+    ".vf-header{background:#4F46E5;color:white;padding:16px;}",
+    ".vf-header-name{font-weight:600;font-size:16px;}",
+    ".vf-status{font-size:12px;opacity:0.8;margin-top:4px;}",
+    ".vf-transcript{padding:12px 16px;max-height:300px;overflow-y:auto;font-size:14px;color:#333;min-height:80px;}",
+    ".vf-msg{margin-bottom:10px;padding:8px 12px;border-radius:8px;max-width:85%;}",
+    ".vf-msg-user{background:#F3F4F6;margin-left:auto;text-align:right;}",
+    ".vf-msg-agent{background:#EEF2FF;}",
+    ".vf-msg-label{font-size:11px;color:#888;margin-bottom:2px;}",
+    ".vf-controls{padding:12px 16px;border-top:1px solid #eee;display:flex;gap:8px;align-items:center;}",
+    ".vf-btn{padding:10px 16px;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500;transition:all 0.15s;}",
+    ".vf-mic{flex:1;background:#4F46E5;color:white;display:flex;align-items:center;justify-content:center;gap:6px;}",
+    ".vf-mic:disabled{opacity:0.6;cursor:not-allowed;}",
+    ".vf-mic.recording{background:#EF4444;animation:vf-pulse 1.5s infinite;}",
+    ".vf-end{background:#EF4444;color:white;display:none;}",
+    ".vf-text-row{display:none;gap:8px;padding:0 16px 12px;}",
+    ".vf-text-input{flex:1;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px;outline:none;}",
+    ".vf-text-input:focus{border-color:#4F46E5;}",
+    ".vf-text-send{background:#4F46E5;color:white;border:none;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:14px;}",
+    "@keyframes vf-pulse{0%,100%{opacity:1;}50%{opacity:0.7;}}"
+  ].join("\\n");
+  document.head.appendChild(css);
 
   // ── Create widget UI ────────────────────────────────────────────────
-  var btn = document.createElement("div");
+  var btn = document.createElement("button");
   btn.id = "vf-call-btn";
   btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>';
-  btn.style.cssText = "position:fixed;bottom:24px;right:24px;width:56px;height:56px;border-radius:50%;background:#4F46E5;color:white;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.3);z-index:99999;transition:all 0.2s;";
-  btn.onmouseenter = function() { btn.style.transform = "scale(1.1)"; };
-  btn.onmouseleave = function() { btn.style.transform = "scale(1)"; };
 
   var panel = document.createElement("div");
-  panel.id = "vf-call-panel";
-  panel.style.cssText = "position:fixed;bottom:92px;right:24px;width:320px;background:white;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,0.2);z-index:99998;display:none;font-family:-apple-system,BlinkMacSystemFont,sans-serif;overflow:hidden;";
-  panel.innerHTML = '<div style="background:#4F46E5;color:white;padding:16px;"><div style="font-weight:600;font-size:16px;">AI Voice Assistant</div><div id="vf-status" style="font-size:12px;opacity:0.8;margin-top:4px;">Click to start talking</div></div><div id="vf-transcript" style="padding:16px;max-height:300px;overflow-y:auto;font-size:14px;color:#333;"></div><div style="padding:12px 16px;border-top:1px solid #eee;display:flex;gap:8px;"><button id="vf-mic-btn" style="flex:1;padding:10px;border:none;border-radius:8px;background:#4F46E5;color:white;cursor:pointer;font-size:14px;font-weight:500;">Start Call</button><button id="vf-end-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#EF4444;color:white;cursor:pointer;font-size:14px;font-weight:500;display:none;">End</button></div>';
+  panel.id = "vf-panel";
+  panel.innerHTML =
+    '<div class="vf-header">' +
+      '<div class="vf-header-name">AI Voice Assistant</div>' +
+      '<div class="vf-status" id="vf-status">Click to start a voice call</div>' +
+    '</div>' +
+    '<div class="vf-transcript" id="vf-transcript"></div>' +
+    '<div class="vf-controls">' +
+      '<button class="vf-btn vf-mic" id="vf-mic">Start Call</button>' +
+      '<button class="vf-btn vf-end" id="vf-end">End</button>' +
+    '</div>' +
+    '<div class="vf-text-row" id="vf-text-row">' +
+      '<input class="vf-text-input" id="vf-text-input" placeholder="Type a message..." />' +
+      '<button class="vf-text-send" id="vf-text-send">Send</button>' +
+    '</div>';
 
   document.body.appendChild(btn);
   document.body.appendChild(panel);
@@ -96,7 +140,15 @@ router.get('/:agentId/embed.js', async (req: Request, res: Response) => {
     panel.style.display = panelOpen ? "block" : "none";
   };
 
-  // ── Load Socket.IO from backend ─────────────────────────────────────
+  var micBtn = document.getElementById("vf-mic");
+  var endBtn = document.getElementById("vf-end");
+  var statusEl = document.getElementById("vf-status");
+  var transcriptEl = document.getElementById("vf-transcript");
+  var textRow = document.getElementById("vf-text-row");
+  var textInput = document.getElementById("vf-text-input");
+  var textSendBtn = document.getElementById("vf-text-send");
+
+  // ── Load Socket.IO client from backend ──────────────────────────────
   var s = document.createElement("script");
   s.src = BACKEND + "/socket.io/socket.io.js";
   s.onload = function() { console.log("[VoiceFlow] Widget ready"); };
@@ -107,112 +159,208 @@ router.get('/:agentId/embed.js', async (req: Request, res: Response) => {
     .then(function(r) { return r.json(); })
     .then(function(c) {
       config = c;
-      var header = panel.querySelector("div > div:first-child");
+      var header = panel.querySelector(".vf-header-name");
       if (header) header.textContent = c.agentName || "AI Voice Assistant";
     })
     .catch(function(e) { console.error("[VoiceFlow] Config error:", e); });
 
-  // ── Socket + Speech handlers ────────────────────────────────────────
-  var micBtn = document.getElementById("vf-mic-btn");
-  var endBtn = document.getElementById("vf-end-btn");
-  var statusEl = document.getElementById("vf-status");
-  var transcriptEl = document.getElementById("vf-transcript");
+  // ── Helpers ─────────────────────────────────────────────────────────
+  function setStatus(text) { statusEl.textContent = text; }
 
   function addMessage(role, text) {
     var div = document.createElement("div");
-    div.style.cssText = "margin-bottom:12px;padding:8px 12px;border-radius:8px;" +
-      (role === "user"
-        ? "background:#F3F4F6;text-align:right;"
-        : "background:#EEF2FF;");
-    div.innerHTML = "<div style='font-size:11px;color:#888;margin-bottom:2px;'>" +
-      (role === "user" ? "You" : config ? config.agentName : "Agent") +
-      "</div><div>" + text + "</div>";
+    div.className = "vf-msg " + (role === "user" ? "vf-msg-user" : "vf-msg-agent");
+    div.innerHTML =
+      '<div class="vf-msg-label">' + (role === "user" ? "You" : (config ? config.agentName : "Agent")) + '</div>' +
+      '<div>' + text + '</div>';
     transcriptEl.appendChild(div);
     transcriptEl.scrollTop = transcriptEl.scrollHeight;
   }
 
+  function getSupportedMimeType() {
+    var types = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"];
+    for (var i = 0; i < types.length; i++) {
+      if (MediaRecorder.isTypeSupported(types[i])) return types[i];
+    }
+    return "";
+  }
+
+  // ── Socket.IO connection ────────────────────────────────────────────
   function connect() {
     if (!config || !window.io) return;
     socket = window.io(BACKEND, {
       path: "/ws",
       query: { agentId: config.agentId, tenantId: config.tenantId },
     });
+
     socket.on("session:ready", function() {
       isConnected = true;
-      statusEl.textContent = "Connected — listening...";
-      startListening();
+      if (hasMicSupport) {
+        setStatus("Connected — tap mic to talk");
+        micBtn.textContent = "\\uD83C\\uDF99 Tap to Talk";
+      } else {
+        setStatus("Connected — type your message");
+        micBtn.style.display = "none";
+        textRow.style.display = "flex";
+      }
+      endBtn.style.display = "block";
     });
+
+    socket.on("status", function(data) {
+      if (data.state === "transcribing") setStatus("Transcribing your speech...");
+      else if (data.state === "thinking") setStatus("Thinking...");
+    });
+
     socket.on("agent:response", function(data) {
+      isProcessing = false;
+      micBtn.disabled = false;
+
+      if (data.transcript) addMessage("user", data.transcript);
       addMessage("agent", data.text);
-      speak(data.text);
-      // Resume listening after agent finishes speaking
-      setTimeout(function() { if (isConnected) startListening(); }, 500);
+
+      if (data.audioUrl) {
+        setStatus("Agent speaking...");
+        var audio = new Audio(data.audioUrl);
+        audio.onended = function() { setReady(); };
+        audio.onerror = function() { setReady(); };
+        audio.play().catch(function() { setReady(); });
+      } else {
+        setReady();
+      }
     });
+
+    socket.on("error", function(data) {
+      setStatus("Error: " + (data.message || "unknown"));
+    });
+
     socket.on("disconnect", function() {
       isConnected = false;
-      statusEl.textContent = "Disconnected";
+      isRecording = false;
+      isProcessing = false;
+      setStatus("Disconnected");
+      micBtn.textContent = "Start Call";
+      micBtn.className = "vf-btn vf-mic";
+      endBtn.style.display = "none";
+      textRow.style.display = "none";
     });
   }
 
-  function startListening() {
-    if (!("webkitSpeechRecognition" in window) && !("SpeechRecognition" in window)) {
-      statusEl.textContent = "Speech recognition not supported in this browser";
-      return;
+  function setReady() {
+    if (!isConnected) return;
+    if (hasMicSupport) {
+      setStatus("Tap mic to talk");
+      micBtn.textContent = "\\uD83C\\uDF99 Tap to Talk";
+      micBtn.className = "vf-btn vf-mic";
+    } else {
+      setStatus("Type your message");
     }
-    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    recognition = new SR();
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.lang = "en-US";
-    recognition.onresult = function(event) {
-      var text = event.results[0][0].transcript;
-      addMessage("user", text);
-      statusEl.textContent = "Processing...";
-      if (socket && isConnected) {
-        socket.emit("audio:transcript", { text: text });
-      }
-    };
-    recognition.onerror = function() {
-      if (isConnected) setTimeout(startListening, 1000);
-    };
-    recognition.onend = function() {
-      // Don't auto-restart here — we restart after agent responds
-    };
-    isListening = true;
-    statusEl.textContent = "Listening...";
-    recognition.start();
   }
 
-  function speak(text) {
-    if (!synthesis) return;
-    synthesis.cancel();
-    var utter = new SpeechSynthesisUtterance(text);
-    utter.rate = 1;
-    utter.pitch = 1;
-    synthesis.speak(utter);
+  // ── Audio recording ─────────────────────────────────────────────────
+  function startRecording() {
+    if (isRecording || isProcessing || !isConnected) return;
+    navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 16000 }
+    }).then(function(stream) {
+      micStream = stream;
+      audioChunks = [];
+      var mimeType = getSupportedMimeType();
+      mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType: mimeType } : {});
+      mediaRecorder.ondataavailable = function(e) {
+        if (e.data && e.data.size > 0) audioChunks.push(e.data);
+      };
+      mediaRecorder.onstop = function() {
+        var blob = new Blob(audioChunks, { type: mediaRecorder.mimeType });
+        sendAudio(blob, mediaRecorder.mimeType);
+        if (micStream) {
+          micStream.getTracks().forEach(function(t) { t.stop(); });
+          micStream = null;
+        }
+      };
+      mediaRecorder.start();
+      isRecording = true;
+      micBtn.textContent = "\\u23F9 Tap to Send";
+      micBtn.className = "vf-btn vf-mic recording";
+      setStatus("Recording — tap when done");
+    }).catch(function() {
+      setStatus("Microphone access denied — use text instead");
+      hasMicSupport = false;
+      micBtn.style.display = "none";
+      textRow.style.display = "flex";
+    });
   }
 
+  function stopRecording() {
+    if (!isRecording || !mediaRecorder) return;
+    mediaRecorder.stop();
+    isRecording = false;
+    isProcessing = true;
+    micBtn.textContent = "Processing...";
+    micBtn.className = "vf-btn vf-mic";
+    micBtn.disabled = true;
+    setStatus("Processing your audio...");
+  }
+
+  function sendAudio(blob, mimeType) {
+    if (!socket || !isConnected) return;
+    blob.arrayBuffer().then(function(buffer) {
+      socket.emit("audio:data", buffer, { mimeType: mimeType || "audio/webm" });
+    });
+  }
+
+  // ── Text fallback ───────────────────────────────────────────────────
+  function sendText() {
+    var text = textInput.value.trim();
+    if (!text || !socket || !isConnected || isProcessing) return;
+    addMessage("user", text);
+    textInput.value = "";
+    isProcessing = true;
+    setStatus("Processing...");
+    socket.emit("audio:transcript", { text: text });
+  }
+
+  // ── Call management ─────────────────────────────────────────────────
   function endCall() {
     isConnected = false;
-    isListening = false;
-    if (recognition) { try { recognition.stop(); } catch(e){} }
+    isRecording = false;
+    isProcessing = false;
+    if (mediaRecorder && mediaRecorder.state !== "inactive") {
+      try { mediaRecorder.stop(); } catch(e) {}
+    }
+    if (micStream) {
+      micStream.getTracks().forEach(function(t) { t.stop(); });
+      micStream = null;
+    }
     if (socket) { socket.disconnect(); socket = null; }
-    statusEl.textContent = "Call ended";
+    setStatus("Call ended");
     micBtn.textContent = "Start Call";
-    micBtn.style.background = "#4F46E5";
+    micBtn.className = "vf-btn vf-mic";
+    micBtn.disabled = false;
+    micBtn.style.display = "block";
     endBtn.style.display = "none";
+    textRow.style.display = "none";
   }
 
+  // ── Event handlers ──────────────────────────────────────────────────
   micBtn.onclick = function() {
-    if (isConnected) return;
-    transcriptEl.innerHTML = "";
-    statusEl.textContent = "Connecting...";
-    micBtn.textContent = "Listening...";
-    micBtn.style.background = "#22C55E";
-    endBtn.style.display = "block";
-    connect();
+    if (!isConnected) {
+      transcriptEl.innerHTML = "";
+      setStatus("Connecting...");
+      micBtn.textContent = "Connecting...";
+      connect();
+    } else if (isRecording) {
+      stopRecording();
+    } else {
+      startRecording();
+    }
   };
+
   endBtn.onclick = endCall;
+
+  textSendBtn.onclick = sendText;
+  textInput.onkeydown = function(e) {
+    if (e.key === "Enter") sendText();
+  };
 })();
 `;
 

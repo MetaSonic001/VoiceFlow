@@ -9,6 +9,7 @@ import { ContextInjector } from '../services/contextInjector';
 import { buildSystemPrompt } from '../services/promptAssembly';
 import { TwilioMediaService, TwilioMediaConfig } from '../services/twilioMediaService';
 import { getTenantTwilioCreds } from '../services/twilioClientService';
+import { getTenantGroqKey } from '../services/credentialsService';
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -106,11 +107,16 @@ router.post('/chat', async (req: Request, res: Response) => {
     const injector = new ContextInjector(prisma, redis);
     let systemPrompt: string;
     let policyRules: any[] = [];
+    let conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+    let model = 'llama-3.3-70b-versatile';
 
     try {
       const ctx = await injector.assemble(req.tenantId, agentId, sessionId);
       systemPrompt = buildSystemPrompt(ctx);
       policyRules = ctx.mergedPolicyRules;
+      conversationHistory = ctx.conversationHistory;
+      const prefs = (agent as any)?.llmPreferences as any;
+      if (prefs?.model) model = prefs.model;
     } catch {
       // Fallback if context assembly fails (e.g. test agents without full data)
       systemPrompt = agent!.systemPrompt || 'You are a helpful AI assistant.';
@@ -118,11 +124,12 @@ router.post('/chat', async (req: Request, res: Response) => {
 
     // Query RAG with policy-scored retrieval
     const chatStart = new Date();
+    const tenantGroqKey = await getTenantGroqKey(prisma, req.tenantId);
     const contexts = await ragService.queryDocuments(
       req.tenantId, agentId, message, 10, agent!.tokenLimit || 4096, policyRules,
     );
     const response = await ragService.generateResponse(
-      systemPrompt, contexts, message, agent!.tokenLimit || 4096,
+      systemPrompt, contexts, message, agent!.tokenLimit || 4096, conversationHistory, model, tenantGroqKey || undefined,
     );
 
     // Store conversation turn in Redis

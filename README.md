@@ -2,7 +2,7 @@
 
 A multi-tenant SaaS platform for building, deploying, and managing AI-powered voice and chat agents. Businesses onboard through a guided wizard, upload their knowledge base, and receive a domain-specific AI agent that answers customer queries over phone (Twilio), browser-based WebRTC calls, or a web chat interface — using Retrieval-Augmented Generation (RAG) over their own documents with hierarchical context injection and policy-based retrieval scoring.
 
-> **Status (July 2025):** The full pipeline is functional end-to-end: 7-step onboarding → document ingestion → per-tenant vector isolation → 5-layer context injection → policy-scored retrieval → dynamic 7-section prompt assembly → Groq LLM generation (per-tenant model selection, conversation history in context) → TTS → multi-channel delivery (Twilio voice, WebRTC, web chat, embeddable widget, **per-agent REST API for third-party integration**). Analytics use real DB queries. A retraining pipeline captures bad calls and injects learned corrections as few-shot examples. Admin pipeline management with real CRUD. Interactive API docs via Scalar at `/api-docs`. See [Implementation Status](#implementation-status) for the full breakdown.
+> **Status (April 2026):** The full pipeline is functional end-to-end: 7-step onboarding → document ingestion → per-tenant vector isolation → 5-layer context injection → policy-scored retrieval → dynamic 7-section prompt assembly → Groq LLM generation (per-tenant model selection, conversation history in all code paths) → TTS → multi-channel delivery (Twilio voice, **real server-side audio WebRTC** with Groq Whisper STT + Chatterbox TTS, web chat, embeddable widget, **per-agent REST API for third-party integration**). Analytics use real DB queries. A retraining pipeline captures bad calls and injects learned corrections as few-shot examples. Admin pipeline management with real CRUD. Interactive API docs via Scalar at `/api-docs`. See [Implementation Status](#implementation-status) for the full breakdown.
 
 ---
 
@@ -612,7 +612,7 @@ cp "voiceflow-ai-platform (1)/.env.example" "voiceflow-ai-platform (1)/.env.loca
 
 Required values to fill in:
 - `CLERK_SECRET_KEY` and `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` from Clerk dashboard
-- `GROQ_API_KEY` from Groq console
+- `GROQ_API_KEY` from Groq console (optional — platform fallback; tenants can bring their own)
 - `CREDENTIALS_ENCRYPTION_KEY` from Step 2
 - `DATABASE_URL` (default matches docker-compose: `postgresql://vf_admin:vf_secure_2025!@localhost:5433/voiceflow_prod`)
 
@@ -684,8 +684,8 @@ TWILIO_WEBHOOK_BASE_URL=https://your-subdomain.ngrok-free.app
 | `REDIS_HOST` | **Yes** | `localhost` | Redis host |
 | `REDIS_PORT` | No | `6379` | Redis port |
 | `CLERK_SECRET_KEY` | **Yes** | — | Clerk secret for JWT verification |
-| `GROQ_API_KEY` | **Yes** | — | LLM inference via Groq |
-| `CREDENTIALS_ENCRYPTION_KEY` | No* | — | 64-char hex string for AES-256-GCM encryption of tenant Twilio creds. Required if tenants save Twilio credentials. |
+| `GROQ_API_KEY` | No* | — | Platform fallback LLM key. Optional if all tenants provide their own via Settings → Integrations. |
+| `CREDENTIALS_ENCRYPTION_KEY` | No* | — | 64-char hex string for AES-256-GCM encryption of tenant credentials (Twilio & Groq API keys). Required if tenants save credentials via Settings. |
 | `CHROMA_HOST` | No | `localhost` | ChromaDB host |
 | `CHROMA_PORT` | No | `8002` | ChromaDB port |
 | `CHROMA_URL` | No | `http://localhost:8002` | ChromaDB full URL (used by ragService) |
@@ -870,10 +870,11 @@ x-tenant-id: <tenant_uuid>
 | Method | Endpoint | Description |
 |---|---|---|
 | GET | `/api/retraining` | List retraining queue (filter by status, agentId) |
-| PUT | `/api/retraining/:id` | Edit ideal response |
-| POST | `/api/retraining/:id/approve` | Approve example for prompt injection |
-| POST | `/api/retraining/:id/reject` | Reject example |
-| POST | `/api/retraining/process-now` | Manually trigger flagged call processing |
+| GET | `/api/retraining/stats` | Dashboard counts: pending, approved, rejected, flaggedNotProcessed |
+| PATCH | `/api/retraining/:id` | Edit ideal response and/or change status (pending/approved/rejected) |
+| DELETE | `/api/retraining/:id` | Remove a retraining example |
+| POST | `/api/retraining/process` | Manually trigger flagged call processing (immediate, no wait for nightly cron) |
+| POST | `/api/retraining/process-now` | Alias for `/process` |
 
 ### Widget (public — no auth)
 | Method | Endpoint | Description |
@@ -945,13 +946,13 @@ A complete breakdown of what works versus what needs attention.
 | Onboarding progress (server-side) | GET/POST/DELETE `/onboarding/progress` for resume |
 | Deploy gating | Frontend checks Twilio credential status before allowing deploy |
 | **Retraining pipeline** | Nightly cron extracts flagged calls → admin review queue → approved examples injected as few-shot learning |
-| **WebRTC browser calls** | Socket.IO `/voice` namespace, same RAG pipeline as Twilio, no Twilio dependency |
-| **Embeddable call widget** | Public `<script>` tag serves floating call button with Socket.IO WebRTC connection |
+| **WebRTC voice calls (server-side audio)** | Real audio pipeline: MediaRecorder → Groq Whisper STT → RAG → Chatterbox TTS → audio playback. Text fallback for no-mic browsers. |
+| **Embeddable call widget** | Public `<script>` tag serves push-to-talk widget with real audio capture/playback (no Web Speech API dependency) |
 | **Retraining admin UI** | `/dashboard/retraining` — filter, edit, approve/reject, manual trigger |
 | **Widget management UI** | `/dashboard/widget` — per-agent embed code with copy-to-clipboard |
 | **Scalar API documentation** | Interactive API explorer at `/api-docs` with OpenAPI 3.0 spec |
-| **Conversation history in LLM** | Last 20 turns from Redis passed into Groq messages array — agent remembers session context |
-| **Per-tenant LLM model selection** | `resolveModel()` reads `agent.llmPreferences.model` with allowlist of 8 Groq models; default `llama-3.3-70b-versatile` |
+| **Conversation history in LLM (all paths)** | Last 20 turns from Redis/ContextInjector passed into Groq messages array in ALL code paths: /chat, WebRTC, widget REST API, processQuery |
+| **Per-tenant LLM model selection** | `resolveModel()` reads `agent.llmPreferences.model` with allowlist of 4 Groq production models; default `llama-3.3-70b-versatile` |
 | **Admin pipeline management** | Real Prisma CRUD: create/read/update/delete pipelines, async trigger with stage execution |
 | **Per-agent REST API** | Public session-based endpoints for third-party website integration (create session → send messages → get transcript → end session) |
 | **SSR-safe ApiClient** | All `localStorage` access guarded with `typeof window !== 'undefined'` — no SSR crashes |
@@ -961,9 +962,9 @@ A complete breakdown of what works versus what needs attention.
 
 | Component | What Exists | What's Missing |
 |---|---|---|
-| WebRTC audio streaming | Socket.IO signaling + text-based exchange | Uses Web Speech API for STT/TTS in browser — not true WebRTC audio tracks |
 | Multi-language support | Agent `language` field in onboarding | No automatic language detection or translation pipeline |
 | Voice cloning | `POST /api/tts/clone-voice` endpoint + Chatterbox integration | Quality depends on reference audio; no fine-tuning of cloned voices |
+| True WebRTC peer connections | Server-side STT/TTS over Socket.IO binary transport | Uses Socket.IO binary frames, not RTCPeerConnection — works through all firewalls but adds ~1s latency vs true WebRTC |
 
 ### Not Yet Implemented (Frontend Exists, No Backend)
 
@@ -1266,8 +1267,8 @@ See `PATENT_CLAIMS_MAPPING.md` for the full claim-to-code trace document.
 | 3 | Tenant metadata includes policies, compliance, persona | **Done** — Tenant.policyRules, Brand.policyRules, AgentConfiguration.policyRules + escalationRules loaded per request |
 | 4 | Per-agent sub-stores within a tenant | **Done** via `agentId` metadata filter in ChromaDB |
 | 5 | Policy-based filtering of retrieved chunks | **Done** — `applyPolicyScoring()` in ragService.ts with restrict/require/allow multipliers |
-| 6 | Conversation state loaded and incorporated into prompt | Partial — Redis history loaded by ContextInjector (Layer 5) but not yet passed to Groq messages array |
-| 7 | Dynamic LLM model selection per tenant config | Not implemented — hardcoded to `grok-beta` for all tenants |
+| 6 | Conversation state loaded and incorporated into prompt | **Done** — Last 20 turns from Redis passed into Groq messages array in all code paths (Twilio, WebRTC, chat, widget) |
+| 7 | Dynamic LLM model selection per tenant config | **Done** — `resolveModel()` validates `agent.llmPreferences.model` against 4 Groq production models; default `llama-3.3-70b-versatile` |
 | 8 | Policy-weighted similarity scores modifying retrieval | **Done** — same as Claim 5, via `doesPolicyMatch()` + multiplicative weights |
 | 9 | Dynamic prompt assembly (not static template) | **Done** — `buildSystemPrompt()` in promptAssembly.ts, 7 sections with `{{placeholder}}` replacement |
 | 10 | Real-time ingestion without downtime | **Done** — FastAPI background task ingestion |
@@ -1309,8 +1310,7 @@ A forward-looking assessment of what needs to happen to take VoiceFlow from "wor
 | **Billing / Stripe integration** | 2 wk | Frontend page exists at `/dashboard/billing`; needs Stripe subscriptions, usage metering, invoice generation |
 | **Email notifications** | 1 wk | Frontend page exists at `/dashboard/notifications`; needs backend email service (SendGrid/SES) + in-app notification store |
 | **Backup / restore** | 1 wk | Frontend page exists at `/dashboard/backup`; needs PostgreSQL dump + ChromaDB export logic |
-| **Real ASR for WebRTC** | 3 days | Current WebRTC uses browser Web Speech API; add server-side Whisper/Vosk for production-quality transcription |
-| **WebRTC audio tracks** | 1 wk | Current implementation is text-based over Socket.IO; upgrade to true WebRTC peer connections with audio MediaStreams |
+| **True RTCPeerConnection audio** | 1 wk | Current implementation sends audio via Socket.IO binary; upgrade to RTCPeerConnection with STUN/TURN for lower latency |
 | **Rate limit configuration UI** | 2 days | Rate limiting works but limits are hardcoded; needs admin API to configure per-tenant limits |
 | **Multi-language detection** | 3 days | Agent `language` field exists; add client language detection + prompt translation |
 | **Automated testing** | 2 wk | No test suite for backend routes or frontend pages; need unit + integration tests |
@@ -1338,7 +1338,7 @@ If you start all 4 services (`docker-compose up -d`, Express backend, FastAPI in
 3. Documents are scraped/processed → embedded → stored in `tenant_{id}` ChromaDB collection
 4. Ask questions via web chat → full 5-layer context injection → policy-scored retrieval → 7-section prompt → Groq LLM → text response
 5. Call via Twilio → same pipeline → Chatterbox TTS → voice response → conversation loops
-6. Call via WebRTC widget → embeddable `<script>` tag → Socket.IO → same pipeline → text/audio response
+6. Call via WebRTC widget → embeddable `<script>` tag → MediaRecorder captures audio → server-side Groq Whisper STT → RAG pipeline → Chatterbox TTS → audio response played back
 7. **Integrate via REST API** → any third-party website can create sessions, send messages, and get AI responses via 4 public endpoints per agent — no embed script needed
 8. Agent remembers conversation context → last 20 turns from Redis included in every LLM call
 9. Per-tenant model selection → each agent can use a different Groq model from the allowlist

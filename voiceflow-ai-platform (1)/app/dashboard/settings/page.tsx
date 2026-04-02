@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
-import { AlertCircle, CheckCircle, Key, Shield, Bell, Database, Zap, Globe, Loader2, ExternalLink, Trash2, Volume2 } from "lucide-react"
+import { AlertCircle, CheckCircle, Key, Shield, Bell, Database, Zap, Globe, Loader2, ExternalLink, Trash2, Volume2, Brain } from "lucide-react"
 import { apiClient } from "@/lib/api-client"
 import { VoiceSelector } from "@/components/voice-selector"
 
@@ -47,6 +47,18 @@ export default function SettingsPage() {
   const [twilioSaving, setTwilioSaving] = useState(false)
   const [twilioError, setTwilioError] = useState('')
 
+  // Groq Cloud API key state
+  const [groqApiKey, setGroqApiKey] = useState('')
+  const [groqStatus, setGroqStatus] = useState<{
+    configured: boolean
+    maskedKey?: string
+    verified?: boolean
+    updatedAt?: string
+    usingPlatformKey: boolean
+  }>({ configured: false, usingPlatformKey: true })
+  const [groqSaving, setGroqSaving] = useState(false)
+  const [groqError, setGroqError] = useState('')
+
   // Agent voice state
   const [agentVoiceId, setAgentVoiceId] = useState<string | null>(null)
   const [voiceSaving, setVoiceSaving] = useState(false)
@@ -68,6 +80,7 @@ export default function SettingsPage() {
     loadSettings()
     loadApiKeys()
     loadTwilioStatus()
+    loadGroqStatus()
   }, [])
 
   const loadSettings = async () => {
@@ -125,6 +138,54 @@ export default function SettingsPage() {
       setTimeout(() => setMessage(''), 3000)
     } catch (error) {
       setTwilioError('Failed to remove credentials')
+    }
+  }
+
+  // ── Groq Cloud handlers ─────────────────────────────────────────────────
+
+  const loadGroqStatus = async () => {
+    try {
+      const status = await apiClient.getGroqKeyStatus()
+      setGroqStatus(status)
+    } catch (error) {
+      console.error('Failed to load Groq status:', error)
+    }
+  }
+
+  const saveGroqKey = async () => {
+    if (!groqApiKey.trim()) {
+      setGroqError('API key is required')
+      return
+    }
+    if (!groqApiKey.startsWith('gsk_')) {
+      setGroqError('Groq API keys start with gsk_')
+      return
+    }
+    setGroqSaving(true)
+    setGroqError('')
+    try {
+      await apiClient.saveGroqApiKey({ apiKey: groqApiKey.trim() })
+      setGroqApiKey('')
+      setMessage('Groq API key verified and saved!')
+      setTimeout(() => setMessage(''), 3000)
+      await loadGroqStatus()
+    } catch (error: any) {
+      const msg = error?.response?.error || error?.message || 'Failed to save Groq key'
+      setGroqError(msg)
+    } finally {
+      setGroqSaving(false)
+    }
+  }
+
+  const removeGroqKey = async () => {
+    try {
+      await apiClient.deleteGroqApiKey()
+      setGroqApiKey('')
+      setGroqStatus({ configured: false, usingPlatformKey: true })
+      setMessage('Groq API key removed — using platform default')
+      setTimeout(() => setMessage(''), 3000)
+    } catch (error) {
+      setGroqError('Failed to remove key')
     }
   }
 
@@ -482,6 +543,97 @@ export default function SettingsPage() {
                         className="ml-auto text-sm text-muted-foreground hover:text-foreground flex items-center gap-1"
                       >
                         Open Twilio Console
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Groq Cloud API Key */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center space-x-2">
+                      <Brain className="w-5 h-5" />
+                      <span>Groq Cloud API Key</span>
+                    </CardTitle>
+                    <CardDescription>
+                      Bring your own Groq Cloud API key for LLM inference and speech-to-text.
+                      If not configured, the platform&apos;s shared key is used.
+                      Credentials are encrypted at rest with AES-256-GCM.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {/* Status indicator */}
+                    {groqStatus.configured ? (
+                      <div className="flex items-center gap-2 p-3 rounded-lg bg-green-50 border border-green-200 text-green-800">
+                        <CheckCircle className="w-4 h-4" />
+                        <span className="text-sm font-medium">
+                          Your key: {groqStatus.maskedKey}
+                        </span>
+                        {groqStatus.updatedAt && (
+                          <span className="text-xs text-green-600 ml-auto">
+                            Updated {new Date(groqStatus.updatedAt).toLocaleDateString()}
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 p-3 rounded-lg bg-blue-50 border border-blue-200 text-blue-800">
+                        <Zap className="w-4 h-4" />
+                        <span className="text-sm">Using platform shared key — add your own for dedicated rate limits.</span>
+                      </div>
+                    )}
+
+                    {groqError && (
+                      <div className="flex items-center gap-2 p-3 rounded-lg bg-red-50 border border-red-200 text-red-800">
+                        <AlertCircle className="w-4 h-4" />
+                        <span className="text-sm">{groqError}</span>
+                      </div>
+                    )}
+
+                    <div className="space-y-2">
+                      <Label htmlFor="groq-key">API Key</Label>
+                      <Input
+                        id="groq-key"
+                        type="password"
+                        value={groqApiKey}
+                        onChange={(e) => setGroqApiKey(e.target.value)}
+                        placeholder={groqStatus.configured ? '••••••••••••••••••••••••••••••••' : 'gsk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'}
+                        autoComplete="off"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        {groqStatus.configured
+                          ? 'Key is stored securely. Enter a new one to replace it.'
+                          : 'Get your API key from the Groq Cloud console.'}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2 pt-2">
+                      <Button
+                        onClick={saveGroqKey}
+                        disabled={groqSaving}
+                      >
+                        {groqSaving && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                        {groqStatus.configured ? 'Update Key' : 'Verify & Save'}
+                      </Button>
+
+                      {groqStatus.configured && (
+                        <Button
+                          variant="outline"
+                          onClick={removeGroqKey}
+                          className="text-red-600 hover:text-red-700"
+                        >
+                          <Trash2 className="w-4 h-4 mr-2" />
+                          Remove Key
+                        </Button>
+                      )}
+
+                      <a
+                        href="https://console.groq.com/keys"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="ml-auto text-sm text-muted-foreground hover:text-foreground flex items-center gap-1"
+                      >
+                        Open Groq Console
                         <ExternalLink className="w-3 h-3" />
                       </a>
                     </div>

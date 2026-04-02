@@ -39,7 +39,7 @@ Phone Call → Twilio → Webhook → Socket.IO → Vosk ASR → RagService (Gro
    TWILIO_AUTH_TOKEN=your_auth_token
    TWILIO_PHONE_NUMBER=+18283838255
    TWILIO_PHONE_NUMBER_SID=your_phone_number_sid
-   GROQ_API_KEY=your_groq_api_key
+   GROQ_API_KEY=your_groq_api_key  # optional platform fallback; tenants bring their own
    ```
 
 ### 3. Install Dependencies

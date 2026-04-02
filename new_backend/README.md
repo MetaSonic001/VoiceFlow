@@ -29,7 +29,8 @@ cp express-backend/.env.example express-backend/.env
 cp ingestion-service/.env.example ingestion-service/.env
 ```
 
-Fill in `CLERK_SECRET_KEY`, `GROQ_API_KEY`, and `CREDENTIALS_ENCRYPTION_KEY` in `express-backend/.env`.
+Fill in `CLERK_SECRET_KEY` and `CREDENTIALS_ENCRYPTION_KEY` in `express-backend/.env`.
+`GROQ_API_KEY` is optional — each tenant can enter their own Groq key in Settings → Integrations.
 
 Generate the encryption key:
 ```bash

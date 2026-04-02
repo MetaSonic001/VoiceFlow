@@ -301,9 +301,11 @@ class RagService {
     userQuery: string,
     tokenLimit: number = 4096,
     conversationHistory: ConversationMessage[] = [],
-    model: string = 'grok-beta',
+    model: string = 'llama-3.3-70b-versatile',
+    groqApiKey?: string,
   ): Promise<string> {
     try {
+      const apiKey = groqApiKey || this.groqApiKey;
       // Estimate token count and condense if needed
       const historyText = conversationHistory.map(m => m.content).join(' ');
       const estimatedTokens = this.estimateTokens(systemPrompt + context.join(' ') + historyText + userQuery);
@@ -338,7 +340,7 @@ class RagService {
         },
         {
           headers: {
-            'Authorization': `Bearer ${this.groqApiKey}`,
+            'Authorization': `Bearer ${apiKey}`,
             'Content-Type': 'application/json',
           },
           timeout: 30000, // 30 second timeout
@@ -352,7 +354,7 @@ class RagService {
     }
   }
 
-  async processQuery(tenantId: string, agentId: string, query: string, agent: Agent, sessionId: string = 'default'): Promise<string> {
+  async processQuery(tenantId: string, agentId: string, query: string, agent: Agent, sessionId: string = 'default', groqApiKey?: string): Promise<string> {
     try {
       // Get conversation history from Redis
       const conversationKey = `conversation:${tenantId}:${agentId}:${sessionId}`;
@@ -382,6 +384,7 @@ class RagService {
         agent.tokenLimit || 4096,
         conversation,
         model,
+        groqApiKey,
       );
 
       // Add current query + response to conversation
@@ -509,17 +512,18 @@ class RagService {
     return truncated.trim();
   }
 
-  /** Allowed Groq models — prevents arbitrary model injection. */
+  /** Allowed Groq production models — prevents arbitrary model injection. */
   private static ALLOWED_MODELS = new Set([
-    'grok-beta',
-    'llama-3.1-8b-instant',
-    'llama-3.1-70b-versatile',
     'llama-3.3-70b-versatile',
-    'llama3-8b-8192',
-    'llama3-70b-8192',
-    'mixtral-8x7b-32768',
-    'gemma2-9b-it',
+    'llama-3.1-8b-instant',
+    'openai/gpt-oss-120b',
+    'openai/gpt-oss-20b',
   ]);
+
+  /** Return the set of allowed model IDs (for validation elsewhere). */
+  static getAllowedModels(): string[] {
+    return Array.from(RagService.ALLOWED_MODELS);
+  }
 
   private resolveModel(agent: Agent): string {
     const preferred = agent.llmPreferences?.model;

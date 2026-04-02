@@ -7,6 +7,7 @@ import RagService from '../services/ragService';
 import { analyzeCall } from '../services/callAnalysis';
 import { getTwilioAuthTokenForValidation } from '../services/twilioClientService';
 import { synthesiseForCall } from '../services/ttsService';
+import { getTenantGroqKey } from '../services/credentialsService';
 
 const router = Router();
 const { VoiceResponse } = twilio.twiml;
@@ -225,6 +226,7 @@ router.post('/respond', async (req: Request, res: Response) => {
     // ── RAG pipeline ─────────────────────────────────────────────────────
     const systemPrompt = await assembleSystemPrompt(prisma, session.agentId, session.tenantId);
     const ragAgent = { systemPrompt, tokenLimit: agent?.tokenLimit || 4096 };
+    const tenantGroqKey = await getTenantGroqKey(prisma, session.tenantId);
 
     const aiResponse = await RagService.processQuery(
       session.tenantId,
@@ -232,6 +234,7 @@ router.post('/respond', async (req: Request, res: Response) => {
       speechResult,
       ragAgent,
       callSid, // Use CallSid as the RAG session ID
+      tenantGroqKey || undefined,
     );
 
     // Synthesise AI response with the agent's configured voice

@@ -699,6 +699,42 @@ class ApiClient {
     return this.request<{ success: boolean }>('/api/settings/twilio', { method: 'DELETE' })
   }
 
+  // ── Groq Cloud API Key (per-tenant) ─────────────────────────────────────
+
+  async saveGroqApiKey(data: { apiKey: string }) {
+    return this.request<{ success: boolean; message: string; maskedKey: string }>(
+      '/api/settings/groq',
+      { method: 'POST', body: JSON.stringify(data) },
+    )
+  }
+
+  async getGroqKeyStatus() {
+    return this.request<{
+      configured: boolean
+      maskedKey?: string
+      verified?: boolean
+      updatedAt?: string
+      usingPlatformKey: boolean
+    }>('/api/settings/groq')
+  }
+
+  async deleteGroqApiKey() {
+    return this.request<{ success: boolean }>('/api/settings/groq', { method: 'DELETE' })
+  }
+
+  async getGroqModels() {
+    return this.request<{
+      models: Array<{
+        id: string
+        name: string
+        speed: string
+        contextWindow: number
+        maxCompletionTokens: number
+        description: string
+      }>
+    }>('/api/settings/groq/models')
+  }
+
   // ── TTS / Voice ─────────────────────────────────────────────────────────
 
   async getPresetVoices() {
@@ -901,6 +937,9 @@ export interface AgentUpdateData {
   description?: string
   voice_config?: VoicePersonalityData
   channel_config?: ChannelSetupData
+  llmPreferences?: { model?: string }
+  tokenLimit?: number
+  contextWindowStrategy?: string
 }
 
 export interface AnalyticsOverview {

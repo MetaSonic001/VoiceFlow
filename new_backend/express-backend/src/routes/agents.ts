@@ -37,7 +37,7 @@ const createAgentSchema = Joi.object({
   name: Joi.string().required(),
   systemPrompt: Joi.string().allow(''),
   voiceType: Joi.string().valid('male', 'female').default('female'),
-  llmPreferences: Joi.object().default({ model: 'grok' }),
+  llmPreferences: Joi.object().default({ model: 'llama-3.3-70b-versatile' }),
   tokenLimit: Joi.number().integer().min(1000).max(128000).default(4096),
   contextWindowStrategy: Joi.string().valid('condense', 'truncate').default('condense')
 });
