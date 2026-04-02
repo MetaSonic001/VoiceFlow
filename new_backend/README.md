@@ -177,7 +177,7 @@ NEXT_PUBLIC_API_URL=http://localhost:8000
 
 - **Multi-tenant**: Each user gets isolated Chroma collections (`tenant_<userId>`)
 - **RAG Pipeline**: Chroma retrieval + Groq LLM generation
-- **Voice**: Twilio Media Streams with real-time ASR/TTS
+- **Voice**: Twilio TwiML Gather loop + Groq Whisper STT + Chatterbox TTS
 - **Ingestion**: URL scraping with Crawl4AI + Playwright fallback
 - **Persistence**: All data stored in Docker volumes</content>
 <parameter name="filePath">c:\VoiceFlow\new_backend\README.md

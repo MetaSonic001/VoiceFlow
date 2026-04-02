@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
 Script to download required models for VoiceFlow.
-Downloads Vosk speech recognition model and sentence transformer embedding model.
+Downloads sentence transformer embedding model for the ingestion service.
+
+Note: Vosk is no longer used — STT is handled by Groq Whisper API.
+      TTS is handled by the Chatterbox microservice (port 8003).
 """
 
 import os
@@ -124,16 +127,13 @@ def main():
     models_dir = Path("models")
     models_dir.mkdir(exist_ok=True)
 
-    # Download models
-    print("\n1. Downloading Vosk speech recognition model...")
-    download_vosk_model()
+    # Note: Vosk model download removed — STT now uses Groq Whisper API
 
-    print("\n2. Downloading sentence transformer embedding model...")
+    print("\n1. Downloading sentence transformer embedding model...")
     download_embedding_model()
 
-    print("\n✅ All models downloaded successfully!")
+    print("\n\u2705 All models downloaded successfully!")
     print("\nModel locations:")
-    print(f"  - Vosk: models/vosk-model/")
     print(f"  - Embeddings: models/all-MiniLM-L6-v2/")
 
 if __name__ == "__main__":

@@ -154,8 +154,7 @@ export function VoiceAgentInterface({}: VoiceAgentInterfaceProps) {
     try {
       setIsPlaying(true)
 
-      // For now, use Web Speech API as fallback
-      // In production, you'd fetch TTS audio from backend
+      // Browser-side TTS fallback (speechSynthesis) when backend TTS is unavailable
       if ('speechSynthesis' in window) {
         const utterance = new SpeechSynthesisUtterance(text)
         utterance.rate = 0.9

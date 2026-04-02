@@ -341,7 +341,7 @@ export function AgentDetails({ agent, onBack }: AgentDetailsProps) {
             <CardContent>
               <div className="text-center py-12">
                 <BarChart3 className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
-                <p className="text-muted-foreground">Analytics dashboard will be implemented in the next phase</p>
+                <p className="text-muted-foreground">View this agent's analytics on the main Analytics page</p>
               </div>
             </CardContent>
           </Card>

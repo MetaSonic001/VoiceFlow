@@ -7,7 +7,7 @@
 # ChromaDB persistent store
 chroma_db/
 
-# Vosk model directory
+# Model directory
 models/
 
 # Test audio and simulator artifacts
