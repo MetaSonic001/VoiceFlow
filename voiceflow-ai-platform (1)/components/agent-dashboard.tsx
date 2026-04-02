@@ -14,7 +14,7 @@ import { LiveActivityFeed } from "@/components/dashboard/live-activity-feed"
 import { RealtimeMetrics } from "@/components/dashboard/realtime-metrics"
 import { LiveConversations } from "@/components/dashboard/live-conversations"
 import { QuickActions } from "@/components/dashboard/quick-actions"
-import { Search, Plus, Filter, Activity, Phone, MessageCircle, Users, TrendingUp, Loader2 } from "lucide-react"
+import { Search, Plus, Filter, Activity, Phone, MessageCircle, Users, TrendingUp, Loader2, Rocket, Link2, Copy, BarChart3, CheckCircle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { apiClient } from '@/lib/api-client'
 import { useClerk } from '@clerk/nextjs'
@@ -195,6 +195,24 @@ export function AgentDashboard() {
   const totalCurrentChats = agents.reduce((sum, agent) => sum + (agent.currentChats || 0), 0)
   const totalTodayInteractions = agents.reduce((sum, agent) => sum + (agent.todayInteractions || 0), 0)
 
+  // First-run detection: user finished onboarding, has agents, but no interactions yet
+  const hasAgents = agents.length > 0
+  const isFirstRun = hasAgents && agents.every(a => (a.totalCalls || 0) === 0 && (a.totalChats || 0) === 0)
+  const firstAgent = agents[0]
+  const [testLinkCopied, setTestLinkCopied] = useState(false)
+
+  const backendUrl = typeof window !== 'undefined'
+    ? (process.env.NEXT_PUBLIC_API_URL || `${window.location.protocol}//${window.location.hostname}:8000`)
+    : 'http://localhost:8000'
+
+  const copyTestLink = () => {
+    if (!firstAgent) return
+    const widgetUrl = `${backendUrl}/api/widget/${firstAgent.id}/embed.js`
+    navigator.clipboard.writeText(widgetUrl)
+    setTestLinkCopied(true)
+    setTimeout(() => setTestLinkCopied(false), 2000)
+  }
+
   return (
     <div className="min-h-screen bg-background">
       <div className="p-6">
@@ -228,6 +246,99 @@ export function AgentDashboard() {
             )}
             {!selectedAgent ? (
               <>
+                {/* ── First-Run Welcome State ──────────────────────────────── */}
+                {isFirstRun && !loading && (
+                  <div className="mb-8 space-y-6">
+                    {/* Welcome hero */}
+                    <Card className="border-2 border-primary/20 bg-gradient-to-br from-primary/5 via-background to-accent/5">
+                      <CardContent className="p-8">
+                        <div className="flex items-start gap-6">
+                          <div className="rounded-full bg-primary/10 p-4">
+                            <Rocket className="w-8 h-8 text-primary" />
+                          </div>
+                          <div className="flex-1">
+                            <h2 className="text-2xl font-bold mb-2">Your agent is ready — time to test it!</h2>
+                            <p className="text-muted-foreground mb-4">
+                              <span className="font-medium">{firstAgent?.name || 'Your agent'}</span> is deployed and waiting for its first conversation.
+                              Share the test link below with your team, or try it yourself using the web chat.
+                            </p>
+
+                            {/* Shareable test link */}
+                            <div className="flex items-center gap-3 mb-6">
+                              <div className="flex-1 bg-muted/50 rounded-lg px-4 py-2.5 font-mono text-sm truncate border">
+                                {backendUrl}/api/widget/{firstAgent?.id}/embed.js
+                              </div>
+                              <Button variant="outline" size="sm" onClick={copyTestLink} className="shrink-0">
+                                {testLinkCopied ? (
+                                  <><CheckCircle className="w-4 h-4 mr-2 text-green-600" />Copied!</>
+                                ) : (
+                                  <><Copy className="w-4 h-4 mr-2" />Copy Widget URL</>
+                                )}
+                              </Button>
+                            </div>
+
+                            {/* Quick-start actions */}
+                            <div className="flex items-center gap-3">
+                              <Button onClick={() => {
+                                if (firstAgent) setSelectedAgent(firstAgent.id)
+                              }}>
+                                <MessageCircle className="w-4 h-4 mr-2" />
+                                Open Agent &amp; Chat
+                              </Button>
+                              <Button variant="outline" onClick={() => window.open(`${backendUrl}/api/widget/${firstAgent?.id}/embed.js`, '_blank')}>
+                                <Link2 className="w-4 h-4 mr-2" />
+                                Preview Widget
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    {/* What the dashboard will show */}
+                    <div className="grid md:grid-cols-3 gap-4">
+                      <Card className="border-dashed">
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                            <Phone className="w-4 h-4" />
+                            Call Analytics
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <p className="text-xs text-muted-foreground">
+                            After your first calls, you'll see duration, success rate, and per-agent comparison charts here.
+                          </p>
+                        </CardContent>
+                      </Card>
+                      <Card className="border-dashed">
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                            <BarChart3 className="w-4 h-4" />
+                            Real-Time Metrics
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <p className="text-xs text-muted-foreground">
+                            Live call and chat counts, response times, and success rates will appear as interactions happen.
+                          </p>
+                        </CardContent>
+                      </Card>
+                      <Card className="border-dashed">
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                            <TrendingUp className="w-4 h-4" />
+                            Trends &amp; Insights
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <p className="text-xs text-muted-foreground">
+                            Daily/weekly trend charts and flagged calls for retraining will populate once you have conversation data.
+                          </p>
+                        </CardContent>
+                      </Card>
+                    </div>
+                  </div>
+                )}
                 {/* Header with Real-time Status */}
                 <div className="flex items-center justify-between mb-6">
                   <div>
@@ -402,7 +513,19 @@ export function AgentDashboard() {
 
                 {filteredAgents.length === 0 && !loading && (
                   <div className="text-center py-12">
-                    <p className="text-muted-foreground">No agents found matching your criteria.</p>
+                    {agents.length === 0 ? (
+                      <>
+                        <Rocket className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
+                        <h3 className="text-lg font-semibold mb-2">No agents yet</h3>
+                        <p className="text-muted-foreground mb-4">Create your first AI agent to get started.</p>
+                        <Button onClick={() => setShowCreateDialog(true)}>
+                          <Plus className="w-4 h-4 mr-2" />
+                          Create Agent
+                        </Button>
+                      </>
+                    ) : (
+                      <p className="text-muted-foreground">No agents found matching your criteria.</p>
+                    )}
                   </div>
                 )}
                 {/* Pagination Controls */}
