@@ -107,8 +107,8 @@ export function AgentDashboard() {
         search: searchQuery || undefined,
         status: statusFilter !== 'all' ? statusFilter : undefined
       })
-      setAgents(response.agents)
-      setTotal(response.total)
+      setAgents(response.agents ?? [])
+      setTotal(response.total ?? 0)
     } catch (err) {
       console.error('Failed to fetch agents:', err)
       setError(apiClient.safeParseError(err))
@@ -182,7 +182,7 @@ export function AgentDashboard() {
 
   // First-run detection: user finished onboarding, has agents, but no interactions yet
   const hasAgents = agents.length > 0
-  const isFirstRun = hasAgents && agents.every(a => (a.totalCalls || 0) === 0 && (a.totalChats || 0) === 0)
+  const isFirstRun = hasAgents && agents.every(a => (a.totalCalls ?? 0) === 0 && (a.totalChats ?? 0) === 0)
   const firstAgent = agents[0]
   const [testLinkCopied, setTestLinkCopied] = useState(false)
 
@@ -201,344 +201,344 @@ export function AgentDashboard() {
   return (
     <div className="min-h-screen bg-background">
       <div className="p-6">
-            {/* Resume Onboarding Banner (persistent) */}
-            {showResumeBanner && (
-              <div aria-label="Resume onboarding banner" className="mb-4 p-4 rounded-lg bg-gradient-to-r from-primary/10 to-accent/5 border border-primary/10 flex items-center justify-between">
-                <div>
-                  <div className="font-semibold">Continue setting up your AI Agent</div>
-                  <div className="text-sm text-muted-foreground">We saved your progress — resume onboarding where you left off.</div>
-                  {resumeAgentName && (
-                    <div className="mt-2 text-sm">
-                      <span className="font-medium">Agent:</span> <span className="ml-2">{resumeAgentName}</span>
-                    </div>
-                  )}
+        {/* Resume Onboarding Banner (persistent) */}
+        {showResumeBanner && (
+          <div aria-label="Resume onboarding banner" className="mb-4 p-4 rounded-lg bg-gradient-to-r from-primary/10 to-accent/5 border border-primary/10 flex items-center justify-between">
+            <div>
+              <div className="font-semibold">Continue setting up your AI Agent</div>
+              <div className="text-sm text-muted-foreground">We saved your progress — resume onboarding where you left off.</div>
+              {resumeAgentName && (
+                <div className="mt-2 text-sm">
+                  <span className="font-medium">Agent:</span> <span className="ml-2">{resumeAgentName}</span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Button aria-label="Resume onboarding" variant="outline" onClick={() => {
-                    // Open the onboarding wizard modal and open at the saved step
-                    setShowCreateDialog(true)
-                  }}>
-                    Continue Onboarding
-                  </Button>
-                  <Button aria-label="Open full onboarding page" onClick={() => {
-                    // Also give a route option to the full onboarding flow page
-                    window.location.href = '/onboarding'
-                  }}>
-                    Open Onboarding Page
-                  </Button>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <Button aria-label="Resume onboarding" variant="outline" onClick={() => {
+                // Open the onboarding wizard modal and open at the saved step
+                setShowCreateDialog(true)
+              }}>
+                Continue Onboarding
+              </Button>
+              <Button aria-label="Open full onboarding page" onClick={() => {
+                // Also give a route option to the full onboarding flow page
+                window.location.href = '/onboarding'
+              }}>
+                Open Onboarding Page
+              </Button>
+            </div>
+          </div>
+        )}
+        {!selectedAgent ? (
+          <>
+            {/* ── First-Run Welcome State ──────────────────────────────── */}
+            {isFirstRun && !loading && (
+              <div className="mb-8 space-y-6">
+                {/* Welcome hero */}
+                <Card className="border-2 border-primary/20 bg-gradient-to-br from-primary/5 via-background to-accent/5">
+                  <CardContent className="p-8">
+                    <div className="flex items-start gap-6">
+                      <div className="rounded-full bg-primary/10 p-4">
+                        <Rocket className="w-8 h-8 text-primary" />
+                      </div>
+                      <div className="flex-1">
+                        <h2 className="text-2xl font-bold mb-2">Your agent is ready — time to test it!</h2>
+                        <p className="text-muted-foreground mb-4">
+                          <span className="font-medium">{firstAgent?.name || 'Your agent'}</span> is deployed and waiting for its first conversation.
+                          Share the test link below with your team, or try it yourself using the web chat.
+                        </p>
+
+                        {/* Shareable test link */}
+                        <div className="flex items-center gap-3 mb-6">
+                          <div className="flex-1 bg-muted/50 rounded-lg px-4 py-2.5 font-mono text-sm truncate border">
+                            {backendUrl}/api/widget/{firstAgent?.id}/embed.js
+                          </div>
+                          <Button variant="outline" size="sm" onClick={copyTestLink} className="shrink-0">
+                            {testLinkCopied ? (
+                              <><CheckCircle className="w-4 h-4 mr-2 text-green-600" />Copied!</>
+                            ) : (
+                              <><Copy className="w-4 h-4 mr-2" />Copy Widget URL</>
+                            )}
+                          </Button>
+                        </div>
+
+                        {/* Quick-start actions */}
+                        <div className="flex items-center gap-3">
+                          <Button onClick={() => {
+                            if (firstAgent) setSelectedAgent(firstAgent.id)
+                          }}>
+                            <MessageCircle className="w-4 h-4 mr-2" />
+                            Open Agent &amp; Chat
+                          </Button>
+                          <Button variant="outline" onClick={() => window.open(`${backendUrl}/api/widget/${firstAgent?.id}/embed.js`, '_blank')}>
+                            <Link2 className="w-4 h-4 mr-2" />
+                            Preview Widget
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* What the dashboard will show */}
+                <div className="grid md:grid-cols-3 gap-4">
+                  <Card className="border-dashed">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                        <Phone className="w-4 h-4" />
+                        Call Analytics
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-xs text-muted-foreground">
+                        After your first calls, you'll see duration, success rate, and per-agent comparison charts here.
+                      </p>
+                    </CardContent>
+                  </Card>
+                  <Card className="border-dashed">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                        <BarChart3 className="w-4 h-4" />
+                        Real-Time Metrics
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-xs text-muted-foreground">
+                        Live call and chat counts, response times, and success rates will appear as interactions happen.
+                      </p>
+                    </CardContent>
+                  </Card>
+                  <Card className="border-dashed">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                        <TrendingUp className="w-4 h-4" />
+                        Trends &amp; Insights
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-xs text-muted-foreground">
+                        Daily/weekly trend charts and flagged calls for retraining will populate once you have conversation data.
+                      </p>
+                    </CardContent>
+                  </Card>
                 </div>
               </div>
             )}
-            {!selectedAgent ? (
-              <>
-                {/* ── First-Run Welcome State ──────────────────────────────── */}
-                {isFirstRun && !loading && (
-                  <div className="mb-8 space-y-6">
-                    {/* Welcome hero */}
-                    <Card className="border-2 border-primary/20 bg-gradient-to-br from-primary/5 via-background to-accent/5">
-                      <CardContent className="p-8">
-                        <div className="flex items-start gap-6">
-                          <div className="rounded-full bg-primary/10 p-4">
-                            <Rocket className="w-8 h-8 text-primary" />
-                          </div>
-                          <div className="flex-1">
-                            <h2 className="text-2xl font-bold mb-2">Your agent is ready — time to test it!</h2>
-                            <p className="text-muted-foreground mb-4">
-                              <span className="font-medium">{firstAgent?.name || 'Your agent'}</span> is deployed and waiting for its first conversation.
-                              Share the test link below with your team, or try it yourself using the web chat.
-                            </p>
+            {/* Header with Real-time Status */}
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <div className="flex items-center gap-3">
+                  <h1 className="text-3xl font-bold">AI Agents</h1>
+                  <Badge variant={isConnected ? "default" : "destructive"} className="flex items-center gap-1">
+                    <Activity className="w-3 h-3" />
+                    {isConnected ? "Live" : "Offline"}
+                  </Badge>
+                </div>
+                <p className="text-muted-foreground">Manage and monitor your conversational AI agents</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <QuickActions />
+                <Button onClick={() => setShowCreateDialog(true)}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Create Agent
+                </Button>
+              </div>
+            </div>
 
-                            {/* Shareable test link */}
-                            <div className="flex items-center gap-3 mb-6">
-                              <div className="flex-1 bg-muted/50 rounded-lg px-4 py-2.5 font-mono text-sm truncate border">
-                                {backendUrl}/api/widget/{firstAgent?.id}/embed.js
-                              </div>
-                              <Button variant="outline" size="sm" onClick={copyTestLink} className="shrink-0">
-                                {testLinkCopied ? (
-                                  <><CheckCircle className="w-4 h-4 mr-2 text-green-600" />Copied!</>
-                                ) : (
-                                  <><Copy className="w-4 h-4 mr-2" />Copy Widget URL</>
-                                )}
-                              </Button>
-                            </div>
+            {/* Real-time Metrics Row */}
+            <div className="grid md:grid-cols-6 gap-4 mb-6">
+              <Card className="hover:shadow-md hover:scale-102 transition-transform duration-150">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                    <Users className="w-4 h-4" />
+                    Active Agents
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{totalActiveAgents}</div>
+                  <p className="text-xs text-muted-foreground">of {agents.length} total</p>
+                </CardContent>
+              </Card>
 
-                            {/* Quick-start actions */}
-                            <div className="flex items-center gap-3">
-                              <Button onClick={() => {
-                                if (firstAgent) setSelectedAgent(firstAgent.id)
-                              }}>
-                                <MessageCircle className="w-4 h-4 mr-2" />
-                                Open Agent &amp; Chat
-                              </Button>
-                              <Button variant="outline" onClick={() => window.open(`${backendUrl}/api/widget/${firstAgent?.id}/embed.js`, '_blank')}>
-                                <Link2 className="w-4 h-4 mr-2" />
-                                Preview Widget
-                              </Button>
-                            </div>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
+              <Card className="hover:shadow-md hover:scale-102 transition-transform duration-150">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                    <Phone className="w-4 h-4" />
+                    Live Calls
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-green-600">{totalCurrentCalls}</div>
+                  <p className="text-xs text-muted-foreground">active now</p>
+                </CardContent>
+              </Card>
 
-                    {/* What the dashboard will show */}
-                    <div className="grid md:grid-cols-3 gap-4">
-                      <Card className="border-dashed">
-                        <CardHeader className="pb-2">
-                          <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                            <Phone className="w-4 h-4" />
-                            Call Analytics
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                          <p className="text-xs text-muted-foreground">
-                            After your first calls, you'll see duration, success rate, and per-agent comparison charts here.
-                          </p>
-                        </CardContent>
-                      </Card>
-                      <Card className="border-dashed">
-                        <CardHeader className="pb-2">
-                          <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                            <BarChart3 className="w-4 h-4" />
-                            Real-Time Metrics
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                          <p className="text-xs text-muted-foreground">
-                            Live call and chat counts, response times, and success rates will appear as interactions happen.
-                          </p>
-                        </CardContent>
-                      </Card>
-                      <Card className="border-dashed">
-                        <CardHeader className="pb-2">
-                          <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                            <TrendingUp className="w-4 h-4" />
-                            Trends &amp; Insights
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                          <p className="text-xs text-muted-foreground">
-                            Daily/weekly trend charts and flagged calls for retraining will populate once you have conversation data.
-                          </p>
-                        </CardContent>
-                      </Card>
-                    </div>
+              <Card className="hover:shadow-md hover:scale-102 transition-transform duration-150">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                    <MessageCircle className="w-4 h-4" />
+                    Live Chats
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-blue-600">{totalCurrentChats}</div>
+                  <p className="text-xs text-muted-foreground">active now</p>
+                </CardContent>
+              </Card>
+
+              <Card className="hover:shadow-md hover:scale-102 transition-transform duration-150">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                    <TrendingUp className="w-4 h-4" />
+                    Today
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{totalTodayInteractions}</div>
+                  <p className="text-xs text-green-600">+12% vs yesterday</p>
+                </CardContent>
+              </Card>
+
+              <Card className="hover:shadow-md hover:scale-102 transition-transform duration-150">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">Avg Success Rate</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">
+                    {Math.round(agents.reduce((sum, agent) => sum + agent.successRate, 0) / agents.length)}%
                   </div>
-                )}
-                {/* Header with Real-time Status */}
-                <div className="flex items-center justify-between mb-6">
-                  <div>
-                    <div className="flex items-center gap-3">
-                      <h1 className="text-3xl font-bold">AI Agents</h1>
-                      <Badge variant={isConnected ? "default" : "destructive"} className="flex items-center gap-1">
-                        <Activity className="w-3 h-3" />
-                        {isConnected ? "Live" : "Offline"}
-                      </Badge>
-                    </div>
-                    <p className="text-muted-foreground">Manage and monitor your conversational AI agents</p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <QuickActions />
+                  <p className="text-xs text-green-600">+2% from last month</p>
+                </CardContent>
+              </Card>
+
+              <Card className="hover:shadow-md hover:scale-102 transition-transform duration-150">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">Avg Response</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">2.1s</div>
+                  <p className="text-xs text-green-600">-0.3s improvement</p>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Real-time Activity Section */}
+            <div className="grid lg:grid-cols-3 gap-6 mb-6">
+              <div className="lg:col-span-2">
+                <RealtimeMetrics />
+              </div>
+              <div>
+                <LiveActivityFeed />
+              </div>
+            </div>
+
+            {/* Live Conversations Section */}
+            <div className="mb-6">
+              <LiveConversations />
+            </div>
+
+            {/* Filters */}
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center space-x-4">
+                <div className="relative flex-1 max-w-sm">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search agents..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-10"
+                  />
+                </div>
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger className="w-40">
+                    <Filter className="w-4 h-4 mr-2" />
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Status</SelectItem>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="paused">Paused</SelectItem>
+                    <SelectItem value="draft">Draft</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {error && (
+                <Badge variant="destructive" className="ml-4">
+                  {error}
+                </Badge>
+              )}
+            </div>
+
+            {/* Agents Grid */}
+            {loading ? (
+              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {[1, 2, 3].map((i) => (
+                  <Card key={i} className="animate-pulse">
+                    <CardHeader>
+                      <div className="h-4 bg-muted rounded w-3/4"></div>
+                      <div className="h-3 bg-muted rounded w-1/2"></div>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-2">
+                        <div className="h-3 bg-muted rounded"></div>
+                        <div className="h-3 bg-muted rounded w-2/3"></div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <motion.div variants={containerVariants} initial="hidden" animate="show" exit="exit" className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {filteredAgents.map((agent) => (
+                  <AgentCard key={agent.id} agent={agent} onSelect={() => setSelectedAgent(agent.id)} />
+                ))}
+              </motion.div>
+            )}
+
+            {filteredAgents.length === 0 && !loading && (
+              <div className="text-center py-12">
+                {agents.length === 0 ? (
+                  <>
+                    <Rocket className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
+                    <h3 className="text-lg font-semibold mb-2">No agents yet</h3>
+                    <p className="text-muted-foreground mb-4">Create your first AI agent to get started.</p>
                     <Button onClick={() => setShowCreateDialog(true)}>
                       <Plus className="w-4 h-4 mr-2" />
                       Create Agent
                     </Button>
-                  </div>
-                </div>
-
-                {/* Real-time Metrics Row */}
-                <div className="grid md:grid-cols-6 gap-4 mb-6">
-                  <Card className="hover:shadow-md hover:scale-102 transition-transform duration-150">
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                        <Users className="w-4 h-4" />
-                        Active Agents
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-2xl font-bold">{totalActiveAgents}</div>
-                      <p className="text-xs text-muted-foreground">of {agents.length} total</p>
-                    </CardContent>
-                  </Card>
-
-                  <Card className="hover:shadow-md hover:scale-102 transition-transform duration-150">
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                        <Phone className="w-4 h-4" />
-                        Live Calls
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-2xl font-bold text-green-600">{totalCurrentCalls}</div>
-                      <p className="text-xs text-muted-foreground">active now</p>
-                    </CardContent>
-                  </Card>
-
-                  <Card className="hover:shadow-md hover:scale-102 transition-transform duration-150">
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                        <MessageCircle className="w-4 h-4" />
-                        Live Chats
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-2xl font-bold text-blue-600">{totalCurrentChats}</div>
-                      <p className="text-xs text-muted-foreground">active now</p>
-                    </CardContent>
-                  </Card>
-
-                  <Card className="hover:shadow-md hover:scale-102 transition-transform duration-150">
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                        <TrendingUp className="w-4 h-4" />
-                        Today
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-2xl font-bold">{totalTodayInteractions}</div>
-                      <p className="text-xs text-green-600">+12% vs yesterday</p>
-                    </CardContent>
-                  </Card>
-
-                  <Card className="hover:shadow-md hover:scale-102 transition-transform duration-150">
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm font-medium text-muted-foreground">Avg Success Rate</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-2xl font-bold">
-                        {Math.round(agents.reduce((sum, agent) => sum + agent.successRate, 0) / agents.length)}%
-                      </div>
-                      <p className="text-xs text-green-600">+2% from last month</p>
-                    </CardContent>
-                  </Card>
-
-                  <Card className="hover:shadow-md hover:scale-102 transition-transform duration-150">
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm font-medium text-muted-foreground">Avg Response</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-2xl font-bold">2.1s</div>
-                      <p className="text-xs text-green-600">-0.3s improvement</p>
-                    </CardContent>
-                  </Card>
-                </div>
-
-                {/* Real-time Activity Section */}
-                <div className="grid lg:grid-cols-3 gap-6 mb-6">
-                  <div className="lg:col-span-2">
-                    <RealtimeMetrics />
-                  </div>
-                  <div>
-                    <LiveActivityFeed />
-                  </div>
-                </div>
-
-                {/* Live Conversations Section */}
-                <div className="mb-6">
-                  <LiveConversations />
-                </div>
-
-                {/* Filters */}
-                <div className="flex items-center justify-between mb-6">
-                  <div className="flex items-center space-x-4">
-                    <div className="relative flex-1 max-w-sm">
-                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                      <Input
-                        placeholder="Search agents..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        className="pl-10"
-                      />
-                    </div>
-                    <Select value={statusFilter} onValueChange={setStatusFilter}>
-                      <SelectTrigger className="w-40">
-                        <Filter className="w-4 h-4 mr-2" />
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All Status</SelectItem>
-                        <SelectItem value="active">Active</SelectItem>
-                        <SelectItem value="paused">Paused</SelectItem>
-                        <SelectItem value="draft">Draft</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {error && (
-                    <Badge variant="destructive" className="ml-4">
-                      {error}
-                    </Badge>
-                  )}
-                </div>
-
-                {/* Agents Grid */}
-                {loading ? (
-                  <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {[1, 2, 3].map((i) => (
-                      <Card key={i} className="animate-pulse">
-                        <CardHeader>
-                          <div className="h-4 bg-muted rounded w-3/4"></div>
-                          <div className="h-3 bg-muted rounded w-1/2"></div>
-                        </CardHeader>
-                        <CardContent>
-                          <div className="space-y-2">
-                            <div className="h-3 bg-muted rounded"></div>
-                            <div className="h-3 bg-muted rounded w-2/3"></div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
+                  </>
                 ) : (
-                  <motion.div variants={containerVariants} initial="hidden" animate="show" exit="exit" className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {filteredAgents.map((agent) => (
-                      <AgentCard key={agent.id} agent={agent} onSelect={() => setSelectedAgent(agent.id)} />
-                    ))}
-                  </motion.div>
+                  <p className="text-muted-foreground">No agents found matching your criteria.</p>
                 )}
-
-                {filteredAgents.length === 0 && !loading && (
-                  <div className="text-center py-12">
-                    {agents.length === 0 ? (
-                      <>
-                        <Rocket className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
-                        <h3 className="text-lg font-semibold mb-2">No agents yet</h3>
-                        <p className="text-muted-foreground mb-4">Create your first AI agent to get started.</p>
-                        <Button onClick={() => setShowCreateDialog(true)}>
-                          <Plus className="w-4 h-4 mr-2" />
-                          Create Agent
-                        </Button>
-                      </>
-                    ) : (
-                      <p className="text-muted-foreground">No agents found matching your criteria.</p>
-                    )}
-                  </div>
-                )}
-                {/* Pagination Controls */}
-                {total !== null && (
-                  <div className="mt-6 flex items-center justify-between">
-                    <div className="text-sm text-muted-foreground">Showing page {page} • {total} agents</div>
-                    <div className="flex items-center space-x-2">
-                      <Button disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Prev</Button>
-                      <Button disabled={page * limit >= (total || 0)} onClick={() => setPage((p) => p + 1)}>Next</Button>
-                    </div>
-                  </div>
-                )}
-              </>
-            ) : (
-              <AgentDetails agent={selectedAgentData!} onBack={() => setSelectedAgent(null)} />
+              </div>
             )}
-          </div>
+            {/* Pagination Controls */}
+            {total !== null && (
+              <div className="mt-6 flex items-center justify-between">
+                <div className="text-sm text-muted-foreground">Showing page {page} • {total} agents</div>
+                <div className="flex items-center space-x-2">
+                  <Button disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Prev</Button>
+                  <Button disabled={page * limit >= (total || 0)} onClick={() => setPage((p) => p + 1)}>Next</Button>
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <AgentDetails agent={selectedAgentData!} onBack={() => setSelectedAgent(null)} />
+        )}
+      </div>
 
-      <OnboardingWizard 
-        open={showCreateDialog} 
+      <OnboardingWizard
+        open={showCreateDialog}
         onOpenChange={setShowCreateDialog}
         startStep={wizardStartStep}
         onComplete={() => {
           // Refresh agents list or add new agent to state
           console.log('Agent creation completed')
             // Clear any saved onboarding progress server-side so the resume banner hides
-            ;(async () => {
-              try { await apiClient.deleteOnboardingProgress() } catch (e) {}
+            ; (async () => {
+              try { await apiClient.deleteOnboardingProgress() } catch (e) { }
               setShowResumeBanner(false)
               setWizardStartStep(undefined)
               loadAgents()
