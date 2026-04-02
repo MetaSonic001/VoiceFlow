@@ -10,10 +10,11 @@ const isProtectedRoute = createRouteMatcher([
 ]);
 
 const isApiRoute = createRouteMatcher(['/api/(.*)']);
+const isAuthRoute = createRouteMatcher(['/api/auth/(.*)']);
 
 export default clerkMiddleware(async (auth, req: NextRequest) => {
-  // Handle tenant isolation for API routes
-  if (isApiRoute(req)) {
+  // Handle tenant isolation for API routes (exempt auth routes — tenant doesn't exist yet during sync)
+  if (isApiRoute(req) && !isAuthRoute(req)) {
     const tenantId = req.headers.get('x-tenant-id');
 
     if (!tenantId) {

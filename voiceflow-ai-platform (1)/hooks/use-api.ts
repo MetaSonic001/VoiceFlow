@@ -115,47 +115,22 @@ export function useApiMutation<T, P>(apiCall: (params: P) => Promise<T>) {
   return { mutate, loading, error }
 }
 
-// Auth hooks
+// Auth hooks — Clerk is the single auth source.
+// This hook reads the cached user profile from localStorage (set by ClerkSync).
 export function useAuth() {
-  const [user, setUser] = useState(null)
+  const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        const token = localStorage.getItem("auth_token")
-        if (token) {
-          const userData = await apiClient.getCurrentUser()
-          setUser(userData)
-        }
-      } catch (error) {
-        localStorage.removeItem("auth_token")
-      } finally {
-        setLoading(false)
-      }
+    try {
+      const raw = localStorage.getItem('auth_user')
+      if (raw) setUser(JSON.parse(raw))
+    } catch {
+      // ignore
+    } finally {
+      setLoading(false)
     }
-
-    checkAuth()
   }, [])
 
-  const login = async (email: string, password: string) => {
-    const response = await apiClient.login(email, password)
-    localStorage.setItem("auth_token", response.token)
-    setUser(response.user)
-    return response
-  }
-
-  const signup = async (email: string, password: string, companyName: string) => {
-    const response = await apiClient.signup(email, password, companyName)
-    localStorage.setItem("auth_token", response.token)
-    setUser(response.user)
-    return response
-  }
-
-  const logout = () => {
-    localStorage.removeItem("auth_token")
-    setUser(null)
-  }
-
-  return { user, loading, login, signup, logout }
+  return { user, loading }
 }

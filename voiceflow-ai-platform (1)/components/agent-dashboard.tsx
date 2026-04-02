@@ -17,7 +17,6 @@ import { QuickActions } from "@/components/dashboard/quick-actions"
 import { Search, Plus, Filter, Activity, Phone, MessageCircle, Users, TrendingUp, Loader2, Rocket, Link2, Copy, BarChart3, CheckCircle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { apiClient } from '@/lib/api-client'
-import { useClerk } from '@clerk/nextjs'
 
 const mockAgents = [
   {
@@ -84,22 +83,8 @@ export function AgentDashboard() {
   const [page, setPage] = useState(1)
   const [limit, setLimit] = useState(12)
   const [total, setTotal] = useState<number | null>(null)
-  const clerk = useClerk()
 
-  // Set Clerk token for API calls
-  useEffect(() => {
-    const setToken = async () => {
-      try {
-        const token = await clerk.session?.getToken()
-        if (token) {
-          apiClient.setClerkToken(token)
-        }
-      } catch (error) {
-        console.warn('Failed to get Clerk token:', error)
-      }
-    }
-    setToken()
-  }, [clerk])
+  // Token provider is set globally by ClerkSync — no per-component setup needed
 
   // Mock realtime metrics since we removed the backend dependency
   const realtimeMetrics = {

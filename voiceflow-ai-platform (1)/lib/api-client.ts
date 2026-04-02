@@ -17,6 +17,7 @@ export class ApiError extends Error {
 class ApiClient {
   private baseUrl: string
   private tenantId: string | null = null
+  private tokenProvider: (() => Promise<string | null>) | null = null
 
   constructor(baseUrl: string = API_BASE_URL) {
     this.baseUrl = baseUrl
@@ -38,27 +39,12 @@ class ApiClient {
     this.tenantId = tenantId
   }
 
-  setClerkToken(token: string) {
-    ;(globalThis as any).clerkToken = token
-    if (typeof window !== 'undefined') {
-      localStorage.setItem("clerk_token", token)
-    }
+  // Called once from ClerkSync to wire up fresh-token retrieval on every request
+  setTokenProvider(provider: () => Promise<string | null>) {
+    this.tokenProvider = provider
   }
 
-  private async getClerkToken(): Promise<string | null> {
-    try {
-      // Import Clerk dynamically to avoid SSR issues
-      const { useAuth } = await import('@clerk/nextjs')
-      // This is a workaround since we can't use hooks in class methods
-      // We'll need to pass the token from components
-      return null
-    } catch (error) {
-      console.warn('Clerk not available:', error)
-      return null
-    }
-  }
-
-  private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  private async request<T>(endpoint: string, options: RequestInit = {}, _isRetry = false): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`
 
     const config: RequestInit = {
@@ -77,11 +63,9 @@ class ApiClient {
       }
     }
 
-    // Add Clerk JWT token
+    // Get a fresh Clerk JWT for every request
     try {
-      // For client-side, we'll need to get the token from Clerk
-      // This will be set by components using the apiClient
-      const token = (globalThis as any).clerkToken || (typeof window !== 'undefined' ? localStorage.getItem("clerk_token") || localStorage.getItem("auth_token") : null)
+      const token = this.tokenProvider ? await this.tokenProvider() : null
       if (token) {
         config.headers = {
           ...config.headers,
@@ -96,6 +80,10 @@ class ApiClient {
       const response = await fetch(url, config)
 
       if (!response.ok) {
+        // On 401, retry once with a fresh token (handles edge case of token expiring mid-flight)
+        if (response.status === 401 && !_isRetry && this.tokenProvider) {
+          return this.request<T>(endpoint, options, true)
+        }
         const errorData = await response.json().catch(() => ({}))
         throw new ApiError(errorData.message || `HTTP ${response.status}`, response.status, errorData)
       }
@@ -118,65 +106,21 @@ class ApiClient {
   }
 
   // Auth endpoints
-  // Auth helpers that persist token + user locally
-  private persistAuth(token: string, user: any) {
+  // Legacy auth helpers kept as no-ops; Clerk is the only auth source now.
+  private persistAuth(_token: string, user: any) {
     if (typeof window === 'undefined') return
-    if (token) localStorage.setItem('auth_token', token)
     if (user) {
       localStorage.setItem('auth_user', JSON.stringify(user))
-      // Set tenant ID for API requests
       if (user.tenantId) {
         this.setTenantId(user.tenantId)
       }
     }
   }
 
-  async login(email: string, password: string) {
-    const res = await this.request<{ access_token: string; user: User }>('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ email, password }),
-    })
-    this.persistAuth(res.access_token, res.user)
-    return res
-  }
-
-  async signup(email: string, password: string) {
-    const res = await this.request<{ access_token: string; user: User }>('/auth/signup', {
-      method: 'POST',
-      body: JSON.stringify({ email, password }),
-    })
-    this.persistAuth(res.access_token, res.user)
-    return res
-  }
-
-  async guestLogin() {
-    const res = await this.request<{ access_token: string; user: User }>('/auth/guest', {
-      method: 'POST',
-    })
-    this.persistAuth(res.access_token, res.user)
-    return res
-  }
-
-  async logout() {
-    // remove local persisted token and call server for symmetry
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('auth_token')
-      localStorage.removeItem('auth_user')
-    }
-    try {
-      await this.request<{ success: boolean }>('/auth/logout', { method: 'POST' })
-    } catch (err) {
-      // ignore network errors on logout
-    }
-    return { success: true }
-  }
-
   async getCurrentUser() {
-    // prefer token-derived user from localStorage
-    const raw = localStorage.getItem('auth_user')
+    const raw = typeof window !== 'undefined' ? localStorage.getItem('auth_user') : null
     if (raw) return JSON.parse(raw)
-    const res = await this.request<{ user: User }>('/auth/me')
-    return res.user
+    return null
   }
 
   // Onboarding endpoints
