@@ -1,5 +1,5 @@
 import swaggerJSDoc from 'swagger-jsdoc';
-import swaggerUi from 'swagger-ui-express';
+import { apiReference } from '@scalar/express-api-reference';
 
 const options = {
   definition: {
@@ -133,4 +133,4 @@ const options = {
 
 const specs = swaggerJSDoc(options);
 
-export { swaggerUi, specs };
+export { apiReference, specs };

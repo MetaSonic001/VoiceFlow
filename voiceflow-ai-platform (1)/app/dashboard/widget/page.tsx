@@ -5,7 +5,7 @@ import { DashboardSidebar } from "@/components/dashboard/sidebar"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Copy, Check, Globe, Phone } from "lucide-react"
+import { Copy, Check, Globe, Phone, Code2 } from "lucide-react"
 import { apiClient } from "@/lib/api-client"
 
 interface Agent {
@@ -19,8 +19,9 @@ export default function WidgetPage() {
   const [agents, setAgents] = useState<Agent[]>([])
   const [loading, setLoading] = useState(true)
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  const [showApiDocs, setShowApiDocs] = useState<string | null>(null)
 
-  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000"
+  const backendUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
   useEffect(() => {
     loadAgents()
@@ -142,6 +143,66 @@ export default function WidgetPage() {
                           )}
                         </Button>
                       </div>
+                    </div>
+
+                    <div className="mt-4 border-t pt-4">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setShowApiDocs(showApiDocs === agent.id ? null : agent.id)}
+                        className="gap-2"
+                      >
+                        <Code2 className="w-4 h-4" />
+                        {showApiDocs === agent.id ? "Hide" : "Show"} REST API
+                      </Button>
+
+                      {showApiDocs === agent.id && (
+                        <div className="mt-4 space-y-4">
+                          <div className="text-xs font-semibold text-muted-foreground">REST API — INTEGRATE IN YOUR OWN APP</div>
+                          <p className="text-xs text-muted-foreground">
+                            Use these endpoints to integrate the AI voice agent into your own frontend or backend.
+                            No authentication needed — the agentId is the public key.
+                          </p>
+
+                          <div className="space-y-3 text-xs font-mono">
+                            <div className="bg-muted rounded-lg p-4 space-y-2">
+                              <div className="font-semibold text-foreground">1. Create a session</div>
+                              <pre className="text-muted-foreground whitespace-pre-wrap">{`POST ${backendUrl}/api/widget/${agent.id}/sessions
+
+Response: { "sessionId": "api_xxx", "agentId": "${agent.id}", "agentName": "${agent.name}", "wsEndpoint": "..." }`}</pre>
+                            </div>
+
+                            <div className="bg-muted rounded-lg p-4 space-y-2">
+                              <div className="font-semibold text-foreground">2. Send a message</div>
+                              <pre className="text-muted-foreground whitespace-pre-wrap">{`POST ${backendUrl}/api/widget/${agent.id}/sessions/{sessionId}/message
+Content-Type: application/json
+{ "text": "What are your business hours?" }
+
+Response: { "response": "Our business hours are...", "sessionId": "..." }`}</pre>
+                            </div>
+
+                            <div className="bg-muted rounded-lg p-4 space-y-2">
+                              <div className="font-semibold text-foreground">3. Get session transcript</div>
+                              <pre className="text-muted-foreground whitespace-pre-wrap">{`GET ${backendUrl}/api/widget/${agent.id}/sessions/{sessionId}
+
+Response: { "messages": [{ "role": "user", "content": "..." }, ...] }`}</pre>
+                            </div>
+
+                            <div className="bg-muted rounded-lg p-4 space-y-2">
+                              <div className="font-semibold text-foreground">4. End session</div>
+                              <pre className="text-muted-foreground whitespace-pre-wrap">{`DELETE ${backendUrl}/api/widget/${agent.id}/sessions/{sessionId}
+
+Response: { "success": true }`}</pre>
+                            </div>
+                          </div>
+
+                          <p className="text-xs text-muted-foreground">
+                            For real-time voice, connect to the WebSocket endpoint returned in step 1
+                            using Socket.IO with <code className="bg-muted px-1 rounded">path: &quot;/ws&quot;</code> and query params 
+                            <code className="bg-muted px-1 rounded">{`{ agentId: "${agent.id}", tenantId: "..." }`}</code>.
+                          </p>
+                        </div>
+                      )}
                     </div>
                   </CardContent>
                 </Card>

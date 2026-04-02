@@ -14,7 +14,7 @@ export async function handler(req: Request, { params }: { params: { path: string
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
   }
 
-  const backendUrl = process.env.NEW_BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+  const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000'
   const url = `${backendUrl.replace(/\/$/, '')}/api/runner/${path}`
 
   const headers: Record<string, string> = {}

@@ -5,6 +5,7 @@ import { PolicyRule } from './contextInjector';
 interface Agent {
   systemPrompt?: string;
   tokenLimit?: number;
+  llmPreferences?: { provider?: string; model?: string } | null;
 }
 
 interface ConversationMessage {
@@ -294,10 +295,18 @@ class RagService {
     return score;
   }
 
-  async generateResponse(systemPrompt: string, context: string[], userQuery: string, tokenLimit: number = 4096): Promise<string> {
+  async generateResponse(
+    systemPrompt: string,
+    context: string[],
+    userQuery: string,
+    tokenLimit: number = 4096,
+    conversationHistory: ConversationMessage[] = [],
+    model: string = 'grok-beta',
+  ): Promise<string> {
     try {
       // Estimate token count and condense if needed
-      const estimatedTokens = this.estimateTokens(systemPrompt + context.join(' ') + userQuery);
+      const historyText = conversationHistory.map(m => m.content).join(' ');
+      const estimatedTokens = this.estimateTokens(systemPrompt + context.join(' ') + historyText + userQuery);
 
       let finalContext = context;
       if (estimatedTokens > tokenLimit * 0.8) { // Leave 20% buffer
@@ -305,15 +314,24 @@ class RagService {
       }
 
       const contextText = finalContext.join('\n\n');
-      const messages = [
+
+      // Build messages array with conversation history
+      const messages: Array<{ role: string; content: string }> = [
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: `Context:\n${contextText}\n\n${userQuery}` },
       ];
+
+      // Add conversation history (already trimmed to last 20 by caller)
+      for (const msg of conversationHistory) {
+        messages.push({ role: msg.role, content: msg.content });
+      }
+
+      // Add current user query with retrieved context
+      messages.push({ role: 'user', content: `Context:\n${contextText}\n\n${userQuery}` });
 
       const response: AxiosResponse<GroqResponse> = await axios.post(
         `${this.groqBaseUrl}/chat/completions`,
         {
-          model: 'grok-beta',
+          model,
           messages,
           max_tokens: Math.min(1000, Math.floor(tokenLimit * 0.2)), // Reserve tokens for response
           temperature: 0.7,
@@ -352,18 +370,22 @@ class RagService {
       // Query documents
       const contexts = await this.queryDocuments(tenantId, agentId, query, 10);
 
-      // Add current query to conversation
-      conversation.push({ role: 'user', content: query });
+      // Resolve LLM model from agent preferences
+      const model = this.resolveModel(agent);
 
-      // Generate response
+      // Pass existing conversation history to the LLM for session continuity,
+      // THEN add the current exchange after we get the response.
       const response = await this.generateResponse(
         agent.systemPrompt || 'You are a helpful assistant.',
         contexts,
         query,
-        agent.tokenLimit || 4096
+        agent.tokenLimit || 4096,
+        conversation,
+        model,
       );
 
-      // Add response to conversation
+      // Add current query + response to conversation
+      conversation.push({ role: 'user', content: query });
       conversation.push({ role: 'assistant', content: response });
 
       // Keep only last 20 messages to prevent context bloat
@@ -485,6 +507,26 @@ class RagService {
     }
 
     return truncated.trim();
+  }
+
+  /** Allowed Groq models — prevents arbitrary model injection. */
+  private static ALLOWED_MODELS = new Set([
+    'grok-beta',
+    'llama-3.1-8b-instant',
+    'llama-3.1-70b-versatile',
+    'llama-3.3-70b-versatile',
+    'llama3-8b-8192',
+    'llama3-70b-8192',
+    'mixtral-8x7b-32768',
+    'gemma2-9b-it',
+  ]);
+
+  private resolveModel(agent: Agent): string {
+    const preferred = agent.llmPreferences?.model;
+    if (preferred && RagService.ALLOWED_MODELS.has(preferred)) {
+      return preferred;
+    }
+    return 'llama-3.3-70b-versatile';
   }
 
   async cleanup(): Promise<void> {

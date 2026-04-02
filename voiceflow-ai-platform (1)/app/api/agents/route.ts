@@ -15,7 +15,7 @@ export async function GET(req: Request) {
 
   try {
     // Call the new backend /api/agents endpoint
-    const backendUrl = process.env.NEW_BACKEND_URL || 'http://localhost:8000'
+    const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000'
     const backendKey = process.env.BACKEND_API_KEY || ''
 
     const backendReqUrl = new URL(`${backendUrl.replace(/\/$/, '')}/api/agents`)

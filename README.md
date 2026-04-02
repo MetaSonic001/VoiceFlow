@@ -2,7 +2,7 @@
 
 A multi-tenant SaaS platform for building, deploying, and managing AI-powered voice and chat agents. Businesses onboard through a guided wizard, upload their knowledge base, and receive a domain-specific AI agent that answers customer queries over phone (Twilio), browser-based WebRTC calls, or a web chat interface — using Retrieval-Augmented Generation (RAG) over their own documents with hierarchical context injection and policy-based retrieval scoring.
 
-> **Status (June 2025):** The full pipeline is functional end-to-end: 7-step onboarding → document ingestion → per-tenant vector isolation → 5-layer context injection → policy-scored retrieval → dynamic 7-section prompt assembly → Groq LLM generation → TTS → multi-channel delivery (Twilio voice, WebRTC, web chat, embeddable widget). Analytics use real DB queries. A retraining pipeline captures bad calls and injects learned corrections as few-shot examples. See [Implementation Status](#implementation-status) for the full breakdown.
+> **Status (July 2025):** The full pipeline is functional end-to-end: 7-step onboarding → document ingestion → per-tenant vector isolation → 5-layer context injection → policy-scored retrieval → dynamic 7-section prompt assembly → Groq LLM generation (per-tenant model selection, conversation history in context) → TTS → multi-channel delivery (Twilio voice, WebRTC, web chat, embeddable widget, **per-agent REST API for third-party integration**). Analytics use real DB queries. A retraining pipeline captures bad calls and injects learned corrections as few-shot examples. Admin pipeline management with real CRUD. Interactive API docs via Scalar at `/api-docs`. See [Implementation Status](#implementation-status) for the full breakdown.
 
 ---
 
@@ -880,6 +880,27 @@ x-tenant-id: <tenant_uuid>
 |---|---|---|
 | GET | `/api/widget/:agentId` | Widget config JSON (name, greeting, colors) |
 | GET | `/api/widget/:agentId/embed.js` | Embeddable JavaScript widget |
+| POST | `/api/widget/:agentId/sessions` | Create a new conversation session (returns sessionId) |
+| POST | `/api/widget/:agentId/sessions/:sessionId/message` | Send a message and get AI response (full RAG pipeline) |
+| GET | `/api/widget/:agentId/sessions/:sessionId` | Get session transcript |
+| DELETE | `/api/widget/:agentId/sessions/:sessionId` | End session and persist as CallLog |
+
+### Admin — Pipeline Management
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/admin/pipelines` | Create a new pipeline |
+| GET | `/admin/pipelines` | List all pipelines for tenant |
+| PUT | `/admin/pipelines/:id` | Update pipeline name/stages |
+| DELETE | `/admin/pipelines/:id` | Delete a pipeline |
+| POST | `/admin/pipelines/trigger` | Trigger pipeline execution |
+| GET | `/admin/pipeline_agents` | List tenant agents in pipeline format |
+| POST | `/admin/pipeline_agents` | Validate agent belongs to tenant |
+
+### API Documentation
+```
+GET /api-docs              →  Scalar interactive API reference UI
+GET /api-docs/openapi.json →  Raw OpenAPI 3.0 specification
+```
 
 ### Health
 ```
@@ -928,6 +949,13 @@ A complete breakdown of what works versus what needs attention.
 | **Embeddable call widget** | Public `<script>` tag serves floating call button with Socket.IO WebRTC connection |
 | **Retraining admin UI** | `/dashboard/retraining` — filter, edit, approve/reject, manual trigger |
 | **Widget management UI** | `/dashboard/widget` — per-agent embed code with copy-to-clipboard |
+| **Scalar API documentation** | Interactive API explorer at `/api-docs` with OpenAPI 3.0 spec |
+| **Conversation history in LLM** | Last 20 turns from Redis passed into Groq messages array — agent remembers session context |
+| **Per-tenant LLM model selection** | `resolveModel()` reads `agent.llmPreferences.model` with allowlist of 8 Groq models; default `llama-3.3-70b-versatile` |
+| **Admin pipeline management** | Real Prisma CRUD: create/read/update/delete pipelines, async trigger with stage execution |
+| **Per-agent REST API** | Public session-based endpoints for third-party website integration (create session → send messages → get transcript → end session) |
+| **SSR-safe ApiClient** | All `localStorage` access guarded with `typeof window !== 'undefined'` — no SSR crashes |
+| **Consolidated env vars** | Server-side uses `BACKEND_URL`, client-side uses `NEXT_PUBLIC_API_URL` — no more fragmented vars |
 
 ### Partially Implemented
 
@@ -936,8 +964,6 @@ A complete breakdown of what works versus what needs attention.
 | WebRTC audio streaming | Socket.IO signaling + text-based exchange | Uses Web Speech API for STT/TTS in browser — not true WebRTC audio tracks |
 | Multi-language support | Agent `language` field in onboarding | No automatic language detection or translation pipeline |
 | Voice cloning | `POST /api/tts/clone-voice` endpoint + Chatterbox integration | Quality depends on reference audio; no fine-tuning of cloned voices |
-| Dynamic LLM model selection | `llmPreferences` JSON field on Agent | Hardcoded to `grok-beta` — per-tenant model routing not implemented |
-| Admin pipelines page | Full frontend UI exists | No dedicated backend pipeline management API |
 
 ### Not Yet Implemented (Frontend Exists, No Backend)
 
@@ -951,11 +977,8 @@ A complete breakdown of what works versus what needs attention.
 
 | Issue | Severity | Impact |
 |---|---|---|
-| Conversation history not passed to LLM | Medium | Redis stores 20 turns but `generateResponse()` only sends `[system, user]` — no history in messages array (context injector loads session but it's not yet passed into the Groq messages array) |
 | TypeScript build errors suppressed | Low | `next.config.mjs` has `typescript: { ignoreBuildErrors: true }` |
-| `localStorage` in ApiClient constructor | Low | Throws during SSR; Clerk token getter always returns `null` server-side |
-| Inconsistent backend URL env vars | Low | Frontend uses `BACKEND_URL`, `NEW_BACKEND_URL`, and `NEXT_PUBLIC_API_URL` interchangeably |
-| Prisma migration not run for new models | Blocking | `RetrainingExample` model and `retrained` field on CallLog exist in schema but require `npx prisma migrate dev` before first use |
+| Prisma migration not run for new models | Blocking | `RetrainingExample`, `Pipeline` models and `retrained` field on CallLog exist in schema but require `npx prisma migrate dev` before first use |
 
 ---
 
@@ -963,7 +986,7 @@ A complete breakdown of what works versus what needs attention.
 
 ### PostgreSQL — Unified Prisma Schema (`new_backend/express-backend/prisma/schema.prisma`)
 
-10 models:
+11 models:
 
 ```
 Tenant
@@ -1028,6 +1051,12 @@ RetrainingExample
   status (String: pending | approved | rejected),
   approvedAt?, approvedBy?, createdAt, updatedAt
   → belongs to: Tenant, Agent, CallLog
+
+Pipeline
+  id (cuid), tenantId, name, stages (JSON — array of stage objects),
+  status (String: idle | running | completed | failed),
+  lastRunAt?, createdAt, updatedAt
+  → belongs to: Tenant
 ```
 
 ### ChromaDB
@@ -1050,6 +1079,8 @@ Collection name: "tenant_{tenantId}"
 ```
 conversation:{tenantId}:{agentId}:{sessionId}  → JSON array of messages (TTL: 24h)
 twilio:session:{CallSid}                       → JSON { agentId, tenantId, callSid } (TTL: 1h)
+widget:session:{sessionId}                     → JSON { agentId, tenantId, createdAt } (TTL: 1h)
+widget:conversation:{sessionId}                → JSON array of messages (TTL: 24h)
 job:{jobId}                                    → ingestion job status string
 job:{jobId}:progress                           → "0"–"100" percent
 rate_limit:{tenantId}:{endpoint}               → request count (TTL: 15m)
@@ -1267,10 +1298,7 @@ A forward-looking assessment of what needs to happen to take VoiceFlow from "wor
 
 | Item | Effort | Description |
 |---|---|---|
-| **Run Prisma migration** | 5 min | `npx prisma migrate dev` — RetrainingExample model + `retrained` field on CallLog need actual DB tables |
-| **Pass conversation history to LLM** | 1 hr | ContextInjector loads session turns (Layer 5) but they're not in the Groq `messages` array — agent has no memory within a session |
-| **Fix ApiClient SSR crash** | 1 hr | `localStorage` access in constructor throws on server. Guard with `typeof window` check |
-| **Consolidate backend URL env vars** | 30 min | Pick one of `BACKEND_URL` / `NEW_BACKEND_URL` / `NEXT_PUBLIC_API_URL` and delete the others |
+| **Run Prisma migration** | 5 min | `npx prisma migrate dev` — RetrainingExample, Pipeline models + `retrained` field on CallLog need actual DB tables |
 | **Remove `ignoreBuildErrors`** | 2-4 hr | Fix all TypeScript errors so `next build` passes without suppressing type checks |
 | **Production JWT_SECRET** | 5 min | Current default is `"dev-secret"` — must be a real random secret in production |
 
@@ -1281,10 +1309,8 @@ A forward-looking assessment of what needs to happen to take VoiceFlow from "wor
 | **Billing / Stripe integration** | 2 wk | Frontend page exists at `/dashboard/billing`; needs Stripe subscriptions, usage metering, invoice generation |
 | **Email notifications** | 1 wk | Frontend page exists at `/dashboard/notifications`; needs backend email service (SendGrid/SES) + in-app notification store |
 | **Backup / restore** | 1 wk | Frontend page exists at `/dashboard/backup`; needs PostgreSQL dump + ChromaDB export logic |
-| **Per-tenant LLM model selection** | 2 days | `llmPreferences` field on Agent exists but all queries go to `grok-beta`; route by tenant config |
 | **Real ASR for WebRTC** | 3 days | Current WebRTC uses browser Web Speech API; add server-side Whisper/Vosk for production-quality transcription |
 | **WebRTC audio tracks** | 1 wk | Current implementation is text-based over Socket.IO; upgrade to true WebRTC peer connections with audio MediaStreams |
-| **Admin pipeline management API** | 3 days | Frontend at `/admin/pipelines` exists; needs backend CRUD for ingestion pipeline configs |
 | **Rate limit configuration UI** | 2 days | Rate limiting works but limits are hardcoded; needs admin API to configure per-tenant limits |
 | **Multi-language detection** | 3 days | Agent `language` field exists; add client language detection + prompt translation |
 | **Automated testing** | 2 wk | No test suite for backend routes or frontend pages; need unit + integration tests |
@@ -1313,9 +1339,14 @@ If you start all 4 services (`docker-compose up -d`, Express backend, FastAPI in
 4. Ask questions via web chat → full 5-layer context injection → policy-scored retrieval → 7-section prompt → Groq LLM → text response
 5. Call via Twilio → same pipeline → Chatterbox TTS → voice response → conversation loops
 6. Call via WebRTC widget → embeddable `<script>` tag → Socket.IO → same pipeline → text/audio response
-7. Flag bad calls → nightly extraction → admin reviews/edits ideal responses → approved examples injected as few-shot learning
-8. View real analytics → call counts, durations, success rates, agent comparisons from actual CallLog data
-9. Configure brands → brand voice, topic restrictions, policy rules applied at inference time
+7. **Integrate via REST API** → any third-party website can create sessions, send messages, and get AI responses via 4 public endpoints per agent — no embed script needed
+8. Agent remembers conversation context → last 20 turns from Redis included in every LLM call
+9. Per-tenant model selection → each agent can use a different Groq model from the allowlist
+10. Flag bad calls → nightly extraction → admin reviews/edits ideal responses → approved examples injected as few-shot learning
+11. View real analytics → call counts, durations, success rates, agent comparisons from actual CallLog data
+12. Configure brands → brand voice, topic restrictions, policy rules applied at inference time
+13. Manage pipelines → create, configure stages, trigger execution, monitor status via admin API
+14. Browse interactive API docs → Scalar UI at `/api-docs` with full OpenAPI spec
 
 ---
 

@@ -40,7 +40,9 @@ class ApiClient {
 
   setClerkToken(token: string) {
     ;(globalThis as any).clerkToken = token
-    localStorage.setItem("clerk_token", token)
+    if (typeof window !== 'undefined') {
+      localStorage.setItem("clerk_token", token)
+    }
   }
 
   private async getClerkToken(): Promise<string | null> {
@@ -79,7 +81,7 @@ class ApiClient {
     try {
       // For client-side, we'll need to get the token from Clerk
       // This will be set by components using the apiClient
-      const token = (globalThis as any).clerkToken || localStorage.getItem("clerk_token") || localStorage.getItem("auth_token")
+      const token = (globalThis as any).clerkToken || (typeof window !== 'undefined' ? localStorage.getItem("clerk_token") || localStorage.getItem("auth_token") : null)
       if (token) {
         config.headers = {
           ...config.headers,
@@ -118,6 +120,7 @@ class ApiClient {
   // Auth endpoints
   // Auth helpers that persist token + user locally
   private persistAuth(token: string, user: any) {
+    if (typeof window === 'undefined') return
     if (token) localStorage.setItem('auth_token', token)
     if (user) {
       localStorage.setItem('auth_user', JSON.stringify(user))
@@ -156,8 +159,10 @@ class ApiClient {
 
   async logout() {
     // remove local persisted token and call server for symmetry
-    localStorage.removeItem('auth_token')
-    localStorage.removeItem('auth_user')
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('auth_token')
+      localStorage.removeItem('auth_user')
+    }
     try {
       await this.request<{ success: boolean }>('/auth/logout', { method: 'POST' })
     } catch (err) {

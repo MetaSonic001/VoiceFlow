@@ -79,11 +79,18 @@ export function initWebRTCSignaling(
         const injector = new ContextInjector(prisma, redis);
         let systemPrompt: string;
         let policyRules: any[] = [];
+        let conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+        let model = 'llama-3.3-70b-versatile';
 
         try {
           const ctx = await injector.assemble(sess.tenantId, sess.agentId, sess.sessionId);
           systemPrompt = buildSystemPrompt(ctx);
           policyRules = ctx.mergedPolicyRules;
+          conversationHistory = ctx.conversationHistory;
+          // Resolve model from agent's llmPreferences
+          const agent = await prisma.agent.findUnique({ where: { id: sess.agentId }, select: { llmPreferences: true } });
+          const prefs = agent?.llmPreferences as any;
+          if (prefs?.model) model = prefs.model;
         } catch {
           systemPrompt = 'You are a helpful AI assistant.';
         }
@@ -93,7 +100,7 @@ export function initWebRTCSignaling(
           sess.tenantId, sess.agentId, userText, 10, 4096, policyRules,
         );
         const response = await RagService.generateResponse(
-          systemPrompt, contexts, userText, 4096,
+          systemPrompt, contexts, userText, 4096, conversationHistory, model,
         );
 
         sess.conversation.push({ role: 'assistant', content: response });

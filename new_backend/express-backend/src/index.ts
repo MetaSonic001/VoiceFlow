@@ -40,7 +40,7 @@ import { initWebRTCSignaling } from './services/webrtcService';
 // Middleware imports
 import { createTenantRateLimit } from './middleware/rateLimit';
 import { createClerkAuth } from './middleware/clerkAuth';
-import { swaggerUi, specs } from './utils/swagger';
+import { apiReference, specs } from './utils/swagger';
 import { errorHandler, requestLogger, healthCheckErrorHandler } from './middleware/errorHandler';
 import { syncAgentWebhookUrl } from './services/twilioProvisioningService';
 
@@ -98,8 +98,9 @@ app.use('/api/retraining', clerkAuth.authenticate, retrainingRouter);
 // Widget endpoints — public (no auth), used by embeddable script
 app.use('/api/widget', widgetRouter);
 
-// API Documentation
-// app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs));
+// API Documentation — Scalar reference UI
+app.get('/api-docs/openapi.json', (_req: Request, res: Response) => res.json(specs));
+app.use('/api-docs', apiReference({ spec: { content: specs } }));
 
 // Health check
 const healthHandler = (_req: Request, res: Response) => {

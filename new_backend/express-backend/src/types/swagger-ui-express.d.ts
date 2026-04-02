@@ -1,1 +1,1 @@
-declare module "swagger-ui-express";
+declare module "@scalar/express-api-reference";

@@ -1,5 +1,10 @@
 import { Router, Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
+import Redis from 'ioredis';
+import { v4 as uuidv4 } from 'uuid';
+import RagService from '../services/ragService';
+import { ContextInjector } from '../services/contextInjector';
+import { buildSystemPrompt } from '../services/promptAssembly';
 
 const router = Router();
 
@@ -213,6 +218,242 @@ router.get('/:agentId/embed.js', async (req: Request, res: Response) => {
 
   res.setHeader('Content-Type', 'application/javascript');
   res.send(script);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Per-Agent REST API — Public integration endpoints
+//
+// These endpoints let any company integrate a VoiceFlow agent into their
+// own application WITHOUT using the embeddable widget. They only need the
+// agentId (which is public) and can create sessions, send messages, and
+// get responses via simple HTTP calls.
+//
+// Flow:
+//   1. POST /api/widget/:agentId/sessions       → creates a session, returns sessionId
+//   2. POST /api/widget/:agentId/sessions/:sid/message  → sends text, returns AI response
+//   3. GET  /api/widget/:agentId/sessions/:sid   → gets session transcript
+//   4. DELETE /api/widget/:agentId/sessions/:sid  → ends session, persists CallLog
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * POST /api/widget/:agentId/sessions
+ *
+ * Create a new conversation session for this agent.
+ * Returns a sessionId that the client uses for subsequent messages.
+ */
+router.post('/:agentId/sessions', async (req: Request, res: Response) => {
+  try {
+    const prisma: PrismaClient = req.app.get('prisma');
+    const redis: Redis = req.app.get('redis');
+
+    const agent = await prisma.agent.findUnique({
+      where: { id: req.params.agentId },
+      select: { id: true, name: true, tenantId: true, status: true },
+    });
+
+    if (!agent || agent.status !== 'active') {
+      return res.status(404).json({ error: 'Agent not found or inactive' });
+    }
+
+    const sessionId = `api_${uuidv4()}`;
+
+    // Store session metadata in Redis (TTL: 1 hour)
+    const sessionData = {
+      agentId: agent.id,
+      tenantId: agent.tenantId,
+      sessionId,
+      startedAt: new Date().toISOString(),
+    };
+    await redis.setex(`widget:session:${sessionId}`, 3600, JSON.stringify(sessionData));
+
+    res.status(201).json({
+      sessionId,
+      agentId: agent.id,
+      agentName: agent.name,
+      wsEndpoint: `${req.protocol}://${req.get('host')}/ws`,
+    });
+  } catch (error) {
+    console.error('Error creating session:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * POST /api/widget/:agentId/sessions/:sessionId/message
+ *
+ * Send a text message to the agent and get a response.
+ * Uses the full RAG pipeline: ContextInjector → policy scoring → prompt assembly → LLM.
+ */
+router.post('/:agentId/sessions/:sessionId/message', async (req: Request, res: Response) => {
+  try {
+    const prisma: PrismaClient = req.app.get('prisma');
+    const redis: Redis = req.app.get('redis');
+
+    const { text } = req.body;
+    if (!text?.trim()) {
+      return res.status(400).json({ error: 'text is required' });
+    }
+
+    // Validate session
+    const sessionRaw = await redis.get(`widget:session:${req.params.sessionId}`);
+    if (!sessionRaw) {
+      return res.status(404).json({ error: 'Session not found or expired' });
+    }
+    const session = JSON.parse(sessionRaw);
+
+    if (session.agentId !== req.params.agentId) {
+      return res.status(403).json({ error: 'Session does not belong to this agent' });
+    }
+
+    const userText = text.trim();
+
+    // Build full context hierarchy
+    const injector = new ContextInjector(prisma, redis);
+    let systemPrompt: string;
+    let policyRules: any[] = [];
+    let conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+    let model = 'llama-3.3-70b-versatile';
+
+    try {
+      const ctx = await injector.assemble(session.tenantId, session.agentId, session.sessionId);
+      systemPrompt = buildSystemPrompt(ctx);
+      policyRules = ctx.mergedPolicyRules;
+      conversationHistory = ctx.conversationHistory;
+      const agent = await prisma.agent.findUnique({ where: { id: session.agentId }, select: { llmPreferences: true } });
+      const prefs = agent?.llmPreferences as any;
+      if (prefs?.model) model = prefs.model;
+    } catch {
+      systemPrompt = 'You are a helpful AI assistant.';
+    }
+
+    // RAG query with policy scoring
+    const contexts = await RagService.queryDocuments(
+      session.tenantId, session.agentId, userText, 10, 4096, policyRules,
+    );
+    const response = await RagService.generateResponse(
+      systemPrompt, contexts, userText, 4096, conversationHistory, model,
+    );
+
+    // Store conversation in Redis for session continuity
+    const convKey = `conversation:${session.tenantId}:${session.agentId}:${session.sessionId}`;
+    let conversation: Array<{ role: string; content: string }> = [];
+    try {
+      const existing = await redis.get(convKey);
+      if (existing) conversation = JSON.parse(existing);
+    } catch {}
+    conversation.push({ role: 'user', content: userText });
+    conversation.push({ role: 'assistant', content: response });
+    if (conversation.length > 20) conversation = conversation.slice(-20);
+    await redis.setex(convKey, 86400, JSON.stringify(conversation));
+
+    // Refresh session TTL
+    await redis.expire(`widget:session:${req.params.sessionId}`, 3600);
+
+    res.json({ response, sessionId: session.sessionId });
+  } catch (error) {
+    console.error('Error processing message:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * GET /api/widget/:agentId/sessions/:sessionId
+ *
+ * Get the current session transcript.
+ */
+router.get('/:agentId/sessions/:sessionId', async (req: Request, res: Response) => {
+  try {
+    const redis: Redis = req.app.get('redis');
+
+    const sessionRaw = await redis.get(`widget:session:${req.params.sessionId}`);
+    if (!sessionRaw) {
+      return res.status(404).json({ error: 'Session not found or expired' });
+    }
+    const session = JSON.parse(sessionRaw);
+
+    if (session.agentId !== req.params.agentId) {
+      return res.status(403).json({ error: 'Session does not belong to this agent' });
+    }
+
+    // Load conversation
+    const convKey = `conversation:${session.tenantId}:${session.agentId}:${session.sessionId}`;
+    let messages: Array<{ role: string; content: string }> = [];
+    try {
+      const existing = await redis.get(convKey);
+      if (existing) messages = JSON.parse(existing);
+    } catch {}
+
+    res.json({
+      sessionId: session.sessionId,
+      agentId: session.agentId,
+      startedAt: session.startedAt,
+      messages,
+    });
+  } catch (error) {
+    console.error('Error getting session:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * DELETE /api/widget/:agentId/sessions/:sessionId
+ *
+ * End a session and persist the conversation as a CallLog.
+ */
+router.delete('/:agentId/sessions/:sessionId', async (req: Request, res: Response) => {
+  try {
+    const prisma: PrismaClient = req.app.get('prisma');
+    const redis: Redis = req.app.get('redis');
+
+    const sessionRaw = await redis.get(`widget:session:${req.params.sessionId}`);
+    if (!sessionRaw) {
+      return res.status(404).json({ error: 'Session not found or expired' });
+    }
+    const session = JSON.parse(sessionRaw);
+
+    if (session.agentId !== req.params.agentId) {
+      return res.status(403).json({ error: 'Session does not belong to this agent' });
+    }
+
+    // Load conversation for CallLog
+    const convKey = `conversation:${session.tenantId}:${session.agentId}:${session.sessionId}`;
+    let messages: Array<{ role: string; content: string }> = [];
+    try {
+      const existing = await redis.get(convKey);
+      if (existing) messages = JSON.parse(existing);
+    } catch {}
+
+    // Persist as CallLog
+    if (messages.length > 0) {
+      const endedAt = new Date();
+      const startedAt = new Date(session.startedAt);
+      const durationSeconds = Math.round((endedAt.getTime() - startedAt.getTime()) / 1000);
+      const transcript = messages
+        .map(m => `${m.role === 'user' ? 'Caller' : 'Agent'}: ${m.content}`)
+        .join('\n');
+
+      await prisma.callLog.create({
+        data: {
+          tenantId: session.tenantId,
+          agentId: session.agentId,
+          callerPhone: null,
+          startedAt,
+          endedAt,
+          durationSeconds,
+          transcript,
+        },
+      });
+    }
+
+    // Clean up Redis keys
+    await redis.del(`widget:session:${req.params.sessionId}`);
+    await redis.del(convKey);
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error ending session:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 export default router;

@@ -16,7 +16,7 @@ const envSchema = z.object({
 
   // Backend service
   NEXT_PUBLIC_API_URL: z.string().url('NEXT_PUBLIC_API_URL must be a valid URL').optional(),
-  NEW_BACKEND_URL: z.string().url('NEW_BACKEND_URL must be a valid URL').optional(),
+  BACKEND_URL: z.string().url('BACKEND_URL must be a valid URL').optional(),
   BACKEND_API_KEY: z.string().optional(),
 })
 
