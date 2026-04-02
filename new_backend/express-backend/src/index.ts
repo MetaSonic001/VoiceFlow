@@ -30,6 +30,12 @@ import logsRouter from './routes/logs';
 import templatesRouter from './routes/templates';
 import ttsRouter from './routes/tts';
 import brandsRouter from './routes/brands';
+import retrainingRouter from './routes/retraining';
+import widgetRouter from './routes/widget';
+
+// Service imports
+import { startRetrainingScheduler, stopRetrainingScheduler } from './services/retrainingScheduler';
+import { initWebRTCSignaling } from './services/webrtcService';
 
 // Middleware imports
 import { createTenantRateLimit } from './middleware/rateLimit';
@@ -88,6 +94,9 @@ app.use('/api/logs', clerkAuth.authenticate, logsRouter);
 app.use('/api/templates', clerkAuth.authenticate, templatesRouter);
 app.use('/api/tts', clerkAuth.authenticate, ttsRouter);
 app.use('/api/brands', clerkAuth.authenticate, brandsRouter);
+app.use('/api/retraining', clerkAuth.authenticate, retrainingRouter);
+// Widget endpoints — public (no auth), used by embeddable script
+app.use('/api/widget', widgetRouter);
 
 // API Documentation
 // app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs));
@@ -164,6 +173,12 @@ async function setupTwilioWebhooks(): Promise<void> {
 server.listen(PORT, () => {
   console.log(`Express server running on port ${PORT}`);
 
+  // Initialize WebRTC signaling (Socket.IO)
+  initWebRTCSignaling(server, prisma, redis);
+
+  // Start the nightly retraining scheduler
+  startRetrainingScheduler(prisma);
+
   // Non-blocking: set up Twilio webhooks after server is ready
   setupTwilioWebhooks().catch((err) => {
     console.warn('[setup] Twilio webhook setup failed:', err?.message);
@@ -173,6 +188,7 @@ server.listen(PORT, () => {
 // Graceful shutdown
 process.on('SIGTERM', async () => {
   console.log('SIGTERM received, shutting down gracefully');
+  stopRetrainingScheduler();
   await prisma.$disconnect();
   await redis.quit();
   server.close(() => {
@@ -182,6 +198,7 @@ process.on('SIGTERM', async () => {
 
 process.on('SIGINT', async () => {
   console.log('SIGINT received, shutting down gracefully');
+  stopRetrainingScheduler();
   await prisma.$disconnect();
   await redis.quit();
   server.close(() => {

@@ -301,6 +301,49 @@ class ApiClient {
     })
   }
 
+  // ── Retraining Pipeline ─────────────────────────────────────────────────
+
+  async getRetrainingExamples(params?: { page?: number; limit?: number; status?: string; agentId?: string }) {
+    const qs = new URLSearchParams()
+    if (params?.page) qs.append('page', String(params.page))
+    if (params?.limit) qs.append('limit', String(params.limit))
+    if (params?.status) qs.append('status', params.status)
+    if (params?.agentId) qs.append('agentId', params.agentId)
+    return this.request<{
+      examples: Array<{
+        id: string; tenantId: string; agentId: string; callLogId: string;
+        userQuery: string; badResponse: string; idealResponse: string;
+        status: string; approvedAt: string | null; createdAt: string;
+        agent: { id: string; name: string };
+        callLog: { id: string; startedAt: string; rating: number | null };
+      }>;
+      total: number; page: number; limit: number; pages: number;
+    }>(`/api/retraining?${qs.toString()}`)
+  }
+
+  async getRetrainingStats() {
+    return this.request<{
+      pending: number; approved: number; rejected: number; flaggedNotProcessed: number;
+    }>('/api/retraining/stats')
+  }
+
+  async updateRetrainingExample(id: string, data: { idealResponse?: string; status?: 'pending' | 'approved' | 'rejected' }) {
+    return this.request(`/api/retraining/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async deleteRetrainingExample(id: string) {
+    return this.request<{ deleted: boolean }>(`/api/retraining/${id}`, { method: 'DELETE' })
+  }
+
+  async triggerRetrainingPipeline() {
+    return this.request<{ processed: boolean; examplesCreated: number }>('/api/retraining/process', {
+      method: 'POST',
+    })
+  }
+
   // ── Agent Templates ───────────────────────────────────────────────────────
 
   async getAgentTemplates() {

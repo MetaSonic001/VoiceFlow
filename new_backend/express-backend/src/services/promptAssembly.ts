@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { AssembledContext, PolicyRule } from './contextInjector';
+import { AssembledContext, PolicyRule, FewShotExample } from './contextInjector';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Dynamic Prompt Assembly — Task 18
@@ -12,8 +12,9 @@ import { AssembledContext, PolicyRule } from './contextInjector';
 //   2. Tenant context + tenant policies
 //   3. Brand voice + brand topic constraints
 //   4. Agent persona + base template + custom instructions + agent policies
-//   5. Escalation rules (if any)
-//   6. Policy summary (merged, human-readable)
+//   5. Few-shot examples from retraining pipeline (in-context learning)
+//   6. Escalation rules (if any)
+//   7. Policy summary (merged, human-readable)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -76,7 +77,20 @@ export function buildSystemPrompt(ctx: AssembledContext): string {
     sections.push(`AGENT CONFIGURATION\n${parts.join('\n')}`);
   }
 
-  // ── Section 5: Escalation rules ─────────────────────────────────────────
+  // ── Section 5: Few-shot examples from retraining ────────────────────────
+  if (ctx.fewShotExamples?.length) {
+    const examples = ctx.fewShotExamples
+      .map(
+        (ex: FewShotExample, i: number) =>
+          `Example ${i + 1}:\n  User: "${ex.userQuery}"\n  You: "${ex.idealResponse}"`,
+      )
+      .join('\n\n');
+    sections.push(
+      `LEARNED EXAMPLES (respond similarly for equivalent queries):\n${examples}`,
+    );
+  }
+
+  // ── Section 6: Escalation rules ─────────────────────────────────────────
   if (ctx.agentEscalationRules?.length) {
     const escalation = ctx.agentEscalationRules
       .map(
@@ -87,7 +101,7 @@ export function buildSystemPrompt(ctx: AssembledContext): string {
     sections.push(`ESCALATION RULES\n${escalation}`);
   }
 
-  // ── Section 6: Merged policy summary ────────────────────────────────────
+  // ── Section 7: Merged policy summary ────────────────────────────────────
   const policyBlock = buildPolicySummaryBlock(ctx.mergedPolicyRules);
   if (policyBlock) sections.push(policyBlock);
 

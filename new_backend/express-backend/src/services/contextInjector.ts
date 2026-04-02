@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import Redis from 'ioredis';
+import { getApprovedExamples } from './retrainingService';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ContextInjector — Assembles the full 5-layer context hierarchy per request.
@@ -24,6 +25,11 @@ export interface PolicyRule {
 export interface ConversationMessage {
   role: 'user' | 'assistant';
   content: string;
+}
+
+export interface FewShotExample {
+  userQuery: string;
+  idealResponse: string;
 }
 
 /** The fully-assembled context object used by RAG + prompt assembly. */
@@ -63,6 +69,9 @@ export interface AssembledContext {
 
   // Merged policy rules (all layers combined, global → tenant → brand → agent)
   mergedPolicyRules: PolicyRule[];
+
+  // Approved few-shot examples for in-context learning
+  fewShotExamples: FewShotExample[];
 }
 
 // ── Layer 1: Global baseline ────────────────────────────────────────────────
@@ -153,6 +162,9 @@ export class ContextInjector {
     // ── Layer 5: Session ──────────────────────────────────────────────────
     const conversationHistory = await this.loadConversationHistory(tenantId, agentId, sessionId);
 
+    // ── Few-shot examples from approved retraining ────────────────────────
+    const fewShotExamples = await getApprovedExamples(this.prisma, agentId, 10);
+
     // ── Merge policy rules (global > tenant > brand > agent) ──────────────
     const mergedPolicyRules = this.mergePolicyRules(
       GLOBAL_POLICY_RULES,
@@ -186,6 +198,7 @@ export class ContextInjector {
       sessionId,
       conversationHistory,
       mergedPolicyRules,
+      fewShotExamples,
     };
   }
 

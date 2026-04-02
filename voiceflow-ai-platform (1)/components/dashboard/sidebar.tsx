@@ -4,7 +4,7 @@ import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import MotionWrapper from '@/components/ui/MotionWrapper'
 import { Badge } from "@/components/ui/badge"
-import { Brain, Bot, BarChart3, Settings, HelpCircle, LogOut, Users, Phone, Activity, FileText, BookOpen, Code, Database, Archive, CreditCard, Zap, Bell, Mic, Shield } from "lucide-react"
+import { Brain, Bot, BarChart3, Settings, HelpCircle, LogOut, Users, Phone, Activity, FileText, BookOpen, Code, Database, Archive, CreditCard, Zap, Bell, Mic, Shield, RefreshCw, Globe } from "lucide-react"
 import Link from "next/link"
 import { useRouter, usePathname } from "next/navigation"
 
@@ -18,6 +18,7 @@ export function DashboardSidebar() {
     { id: "voice-agent", label: "Voice Agent", icon: Mic, href: "/voice-agent" },
     { id: "analytics", label: "Analytics", icon: BarChart3, href: "/dashboard/analytics" },
     { id: "calls", label: "Call Logs", icon: Phone, href: "/dashboard/calls" },
+    { id: "retraining", label: "Retraining", icon: RefreshCw, href: "/dashboard/retraining" },
     { id: "system", label: "System Health", icon: Activity, href: "/dashboard/system" },
     { id: "reports", label: "Reports", icon: FileText, href: "/dashboard/reports" },
     { id: "knowledge", label: "Knowledge Base", icon: Database, href: "/dashboard/knowledge" },
@@ -26,6 +27,7 @@ export function DashboardSidebar() {
     { id: "backup", label: "Backup & Restore", icon: Archive, href: "/dashboard/backup" },
     { id: "billing", label: "Billing & Usage", icon: CreditCard, href: "/dashboard/billing" },
     { id: "integrations", label: "Integrations", icon: Zap, href: "/dashboard/integrations" },
+    { id: "widget", label: "Call Widget", icon: Globe, href: "/dashboard/widget" },
     { id: "api-docs", label: "API Docs", icon: Code, href: "/dashboard/api-docs" },
     { id: "pipelines", label: "Pipelines", icon: Shield, href: "/admin/pipelines" },
     { id: "users", label: "Team", icon: Users, href: "/dashboard/users" },

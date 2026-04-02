@@ -204,8 +204,6 @@ export const requestLogger = (req: Request, res: Response, next: NextFunction) =
 
     if (res.statusCode >= 400) {
       console.warn('Request Error:', JSON.stringify(logData));
-    } else {
-      console.log('Request:', JSON.stringify(logData));
     }
   });
 

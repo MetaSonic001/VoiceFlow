@@ -33,6 +33,7 @@ model Tenant {
   agents   Agent[]
   documents Document[]
   callLogs CallLog[]
+  retrainingExamples RetrainingExample[]
   onboardingProgress OnboardingProgress[]
 
   @@map("tenants")
@@ -104,9 +105,10 @@ model Agent {
   brand         Brand?              @relation(fields: [brandId], references: [id])
   user          User?               @relation(fields: [userId], references: [id])
   template      AgentTemplate?      @relation(fields: [templateId], references: [id])
-  configuration AgentConfiguration?
-  documents     Document[]
-  callLogs      CallLog[]
+  configuration     AgentConfiguration?
+  documents          Document[]
+  callLogs           CallLog[]
+  retrainingExamples RetrainingExample[]
 
   @@map("agents")
 }
@@ -213,11 +215,34 @@ model CallLog {
   rating               Int?      // 1 = thumbs up, -1 = thumbs down, null = unrated
   ratingNotes          String?
   flaggedForRetraining Boolean   @default(false)
+  retrained            Boolean   @default(false)
   createdAt            DateTime  @default(now())
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  agent  Agent  @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  tenant             Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  agent              Agent                @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  retrainingExamples RetrainingExample[]
 
   @@map("call_logs")
+}
+
+model RetrainingExample {
+  id              String   @id @default(uuid())
+  tenantId        String
+  agentId         String
+  callLogId       String
+  userQuery       String   @db.Text
+  badResponse     String   @db.Text
+  idealResponse   String   @db.Text
+  status          String   @default("pending") // pending | approved | rejected
+  approvedAt      DateTime?
+  approvedBy      String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  agent   Agent   @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  callLog CallLog @relation(fields: [callLogId], references: [id], onDelete: Cascade)
+
+  @@map("retraining_examples")
 }
 
