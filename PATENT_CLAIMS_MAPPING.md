@@ -38,6 +38,8 @@ Inbound call (Twilio) / WebRTC → Tenant resolution → ContextInjector (5-laye
 
 **Per-tenant LLM model selection:** `src/services/ragService.ts` — `resolveModel(agent)` reads `agent.llmPreferences.model` and validates against a 4-model Groq production allowlist (`llama-3.3-70b-versatile`, `llama-3.1-8b-instant`, `openai/gpt-oss-120b`, `openai/gpt-oss-20b`). Falls back to `llama-3.3-70b-versatile` if not set or invalid. Model is passed to `generateResponse()` in all code paths.
 
+**Per-tenant Groq API key (BYOK):** `src/services/credentialsService.ts` — `getTenantGroqKey(prisma, tenantId)` decrypts and returns the tenant's own Groq API key from `tenant.settings.groqApiKey` (AES-256-GCM encrypted). All code paths call this helper first: `runner.ts` `/chat`, `twilioVoice.ts` `/respond`, `webrtcService.ts` STT + LLM, and widget `processQuery()`. If no tenant key exists, the platform-level `GROQ_API_KEY` env var is used as fallback. Key management endpoints in `src/routes/settings.ts`: validate key against live Groq `/models` API before saving, return masked status, allow removal.
+
 **WebRTC alternative path (Claim 1 variant):**
 
 | Step | File | Notes |

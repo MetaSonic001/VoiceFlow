@@ -308,7 +308,7 @@ VoiceFlow/
 | Vector Store | ChromaDB |
 | Cache / Queue | Redis 7 |
 | File Storage | MinIO (S3-compatible) |
-| LLM | Groq API (`llama` / `mixtral` family) |
+| LLM | Groq API (`Llama` / `GPT-OSS` family) |
 | TTS | Chatterbox Turbo 350M (self-hosted, MIT license) |
 | Telephony | Twilio (TwiML Gather loop, per-tenant credentials) |
 | Credential Encryption | AES-256-GCM via Node.js crypto |
@@ -506,15 +506,16 @@ Server: webrtcService.ts handles 'join-call'
   │ Generates greeting via TTS (if voiceId configured)
   └ Emits 'call-connected' + 'agent-audio' (greeting)
         │
-        ▼  (user speaks — browser does STT via Web Speech API)
+        ▼  (user speaks — browser records audio via MediaRecorder)
         │
-Client sends 'audio-chunk' event with transcribed text
+Client sends 'audio:data' event with binary audio chunks
         │
         ▼
-Server: Same pipeline as Chat —
-  ContextInjector.assemble() → queryDocuments() → policyScoring()
-  → buildSystemPrompt() → generateResponse() → TTS
-  → Emits 'agent-audio' + 'agent-text' back to client
+Server: webrtcService.ts —
+  Groq Whisper STT (server-side) → text transcript
+  → ContextInjector.assemble() → queryDocuments() → policyScoring()
+  → buildSystemPrompt() → generateResponse() → Chatterbox TTS
+  → Emits 'agent-audio' (binary) + 'agent-text' back to client
         │
         ▼  (loop continues until disconnect)
         │
@@ -858,6 +859,14 @@ x-tenant-id: <tenant_uuid>
 | PUT | `/api/brands/:id` | Update brand configuration |
 | DELETE | `/api/brands/:id` | Delete brand |
 
+### Groq Settings (BYOK)
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/settings/groq/models` | List available Groq production models (id, name, speed, context window) |
+| POST | `/api/settings/groq` | Save & verify tenant Groq API key (validates against live Groq API, encrypts with AES-256-GCM) |
+| GET | `/api/settings/groq` | Get Groq key status (masked key, verified flag, usingPlatformKey boolean) |
+| DELETE | `/api/settings/groq` | Remove tenant Groq API key (reverts to platform default) |
+
 ### Call Logs
 | Method | Endpoint | Description |
 |---|---|---|
@@ -952,7 +961,8 @@ A complete breakdown of what works versus what needs attention.
 | **Widget management UI** | `/dashboard/widget` — per-agent embed code with copy-to-clipboard |
 | **Scalar API documentation** | Interactive API explorer at `/api-docs` with OpenAPI 3.0 spec |
 | **Conversation history in LLM (all paths)** | Last 20 turns from Redis/ContextInjector passed into Groq messages array in ALL code paths: /chat, WebRTC, widget REST API, processQuery |
-| **Per-tenant LLM model selection** | `resolveModel()` reads `agent.llmPreferences.model` with allowlist of 4 Groq production models; default `llama-3.3-70b-versatile` |
+| **Per-tenant LLM model selection** | `resolveModel()` reads `agent.llmPreferences.model` with allowlist of 4 Groq production models; default `llama-3.3-70b-versatile`. Agent Settings tab in UI lets users pick model, token limit, and context window strategy |
+| **Bring Your Own Groq Key (BYOK)** | Tenants can supply their own Groq Cloud API key via Settings → Integrations. Key is validated against live Groq API, encrypted with AES-256-GCM, and stored per-tenant. All code paths (chat, WebRTC, Twilio, widget) resolve tenant key first, falling back to platform key |
 | **Admin pipeline management** | Real Prisma CRUD: create/read/update/delete pipelines, async trigger with stage execution |
 | **Per-agent REST API** | Public session-based endpoints for third-party website integration (create session → send messages → get transcript → end session) |
 | **SSR-safe ApiClient** | All `localStorage` access guarded with `typeof window !== 'undefined'` — no SSR crashes |
@@ -1150,7 +1160,7 @@ Standard vector similarity scores from ChromaDB are modified by a policy scoring
 - `AgentConfiguration.knowledgeBoundaries` provides agent-level exclusion rules enforced before prompt assembly
 
 **4. Tight Voice + Telephony Integration Under Same RAG Layer**
-The same hierarchical RAG execution layer serves real-time voice calls via Twilio Media Streams. Tenant resolution for voice uses telephony routing metadata (called phone number → tenant lookup), not just auth tokens. The complete STT → context injection → retrieval → dynamic prompt → LLM → TTS → audio response pipeline operates under per-tenant context constraints.
+The same hierarchical RAG execution layer serves real-time voice calls via Twilio TwiML Gather loop. Tenant resolution for voice uses telephony routing metadata (called phone number → tenant lookup), not just auth tokens. The complete STT → context injection → retrieval → dynamic prompt → LLM → TTS → audio response pipeline operates under per-tenant context constraints.
 
 ### System Architecture Under the Patent
 
@@ -1187,7 +1197,7 @@ Incoming Request (Voice or Text)
                      │
           ┌──────────▼─────────┐
           │  If voice input:   │
-          │  STT (Vosk/Whisper) │
+          │  STT (Groq Whisper)  │
           │  → text transcript  │
           └──────────┬─────────┘
                      │
@@ -1232,7 +1242,7 @@ Incoming Request (Voice or Text)
                      ▼
           ┌──────────▼─────────┐
           │  If voice output:  │
-          │  TTS (Coqui/Mozilla)│
+          │  TTS (Chatterbox)   │
           │  → audio response   │
           └──────────┬─────────┘
                      │
@@ -1253,8 +1263,7 @@ The core patent pipeline is now fully implemented. Remaining gaps are quality-of
 - ~~Module 6 — Retraining Pipeline~~ → Flagged calls → nightly extraction → admin review → few-shot injection
 - ~~Module 7 — WebRTC Channel~~ → Socket.IO `/voice` namespace + embeddable widget
 
-**Remaining gap:**
-- Conversation history from Redis session (Layer 5) is loaded by `ContextInjector` but not yet passed into the Groq API `messages` array — only `[system, user]` messages are sent. Fix is straightforward: include session turns in the messages array.
+All patent-claimed modules are now fully implemented. No architectural gaps remain.
 
 See `PATENT_CLAIMS_MAPPING.md` for the full claim-to-code trace document.
 
