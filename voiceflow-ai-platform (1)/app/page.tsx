@@ -4,6 +4,7 @@ import React from "react"
 import { Header } from "@/components/Header"
 import { Hero } from "@/components/Hero"
 import { Features } from "@/components/Features"
+import { EmbedWidget } from "@/components/EmbedWidget"
 import { Pricing } from "@/components/Pricing"
 import { useRouter } from "next/navigation"
 import { useClerk } from '@clerk/nextjs'
@@ -42,6 +43,7 @@ export default function HomePage() {
       
       <Hero onGetStarted={handleGetStarted} />
       <Features />
+      <EmbedWidget onGetStarted={handleGetStarted} />
       <Pricing onGetStarted={handleGetStarted} />
 
       {/* Footer */}
@@ -54,7 +56,7 @@ export default function HomePage() {
             </p>
             <div className="pt-8 border-t border-gray-800">
               <p className="text-gray-500">
-                © 2024 VoiceFlow AI. All rights reserved.
+                © 2026 VoiceFlow AI. All rights reserved.
               </p>
             </div>
           </div>

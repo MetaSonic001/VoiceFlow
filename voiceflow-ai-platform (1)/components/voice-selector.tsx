@@ -15,6 +15,8 @@ import {
   CheckCircle,
   AlertCircle,
   Volume2,
+  Info,
+  Clock,
 } from "lucide-react"
 import { apiClient } from "@/lib/api-client"
 
@@ -43,6 +45,7 @@ export function VoiceSelector({ value, onChange }: VoiceSelectorProps) {
   const [cloneFile, setCloneFile] = useState<File | null>(null)
   const [cloning, setCloning] = useState(false)
   const [cloneError, setCloneError] = useState("")
+  const [cloneErrorTips, setCloneErrorTips] = useState<string[]>([])
   const [clonedVoiceId, setClonedVoiceId] = useState<string | null>(
     value?.startsWith("clone-") ? value : null
   )
@@ -50,8 +53,15 @@ export function VoiceSelector({ value, onChange }: VoiceSelectorProps) {
 
   // Recording state
   const [recording, setRecording] = useState(false)
+  const [recordingSeconds, setRecordingSeconds] = useState(0)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Audio level visualization
+  const [audioLevel, setAudioLevel] = useState(0)
+  const analyserRef = useRef<AnalyserNode | null>(null)
+  const animFrameRef = useRef<number | null>(null)
 
   // Load preset voices
   useEffect(() => {
@@ -75,6 +85,8 @@ export function VoiceSelector({ value, onChange }: VoiceSelectorProps) {
         audioRef.current.pause()
         audioRef.current = null
       }
+      if (timerRef.current) clearInterval(timerRef.current)
+      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)
     }
   }, [])
 
@@ -106,6 +118,7 @@ export function VoiceSelector({ value, onChange }: VoiceSelectorProps) {
     if (file) {
       setCloneFile(file)
       setCloneError("")
+      setCloneErrorTips([])
       setClonedVoiceId(null)
       setCloneTestUrl(null)
     }
@@ -115,6 +128,7 @@ export function VoiceSelector({ value, onChange }: VoiceSelectorProps) {
     if (!cloneFile) return
     setCloning(true)
     setCloneError("")
+    setCloneErrorTips([])
     try {
       const result = await apiClient.cloneVoice(cloneFile)
       setClonedVoiceId(result.voiceId)
@@ -124,18 +138,41 @@ export function VoiceSelector({ value, onChange }: VoiceSelectorProps) {
       const msg =
         err?.response?.error || err?.message || "Voice cloning failed"
       setCloneError(msg)
+      // Extract tips from backend response if available
+      const tips = err?.response?.tips || err?.tips || []
+      setCloneErrorTips(Array.isArray(tips) ? tips : [])
     } finally {
       setCloning(false)
     }
   }
 
-  // ── Clone: in-browser recording ─────────────────────────────────────────
+  // ── Clone: in-browser recording with level monitoring ──────────────────
 
   const startRecording = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+      })
       const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" })
       chunksRef.current = []
+
+      // Audio level monitoring
+      const audioCtx = new AudioContext()
+      const source = audioCtx.createMediaStreamSource(stream)
+      const analyser = audioCtx.createAnalyser()
+      analyser.fftSize = 256
+      source.connect(analyser)
+      analyserRef.current = analyser
+
+      const updateLevel = () => {
+        if (!analyserRef.current) return
+        const data = new Uint8Array(analyserRef.current.frequencyBinCount)
+        analyserRef.current.getByteFrequencyData(data)
+        const avg = data.reduce((sum, v) => sum + v, 0) / data.length
+        setAudioLevel(Math.min(100, (avg / 128) * 100))
+        animFrameRef.current = requestAnimationFrame(updateLevel)
+      }
+      updateLevel()
 
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data)
@@ -143,10 +180,15 @@ export function VoiceSelector({ value, onChange }: VoiceSelectorProps) {
 
       recorder.onstop = () => {
         stream.getTracks().forEach((t) => t.stop())
+        audioCtx.close()
+        if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)
+        setAudioLevel(0)
+        analyserRef.current = null
         const blob = new Blob(chunksRef.current, { type: "audio/webm" })
         const file = new File([blob], "recording.webm", { type: "audio/webm" })
         setCloneFile(file)
         setCloneError("")
+        setCloneErrorTips([])
         setClonedVoiceId(null)
         setCloneTestUrl(null)
       }
@@ -154,15 +196,27 @@ export function VoiceSelector({ value, onChange }: VoiceSelectorProps) {
       mediaRecorderRef.current = recorder
       recorder.start()
       setRecording(true)
+      setRecordingSeconds(0)
+
+      // Timer
+      timerRef.current = setInterval(() => {
+        setRecordingSeconds((s) => s + 1)
+      }, 1000)
     } catch (err) {
-      setCloneError("Microphone access denied. Please allow microphone access.")
+      setCloneError("Microphone access denied. Please allow microphone access in your browser settings.")
     }
   }
 
   const stopRecording = () => {
     mediaRecorderRef.current?.stop()
     setRecording(false)
+    if (timerRef.current) {
+      clearInterval(timerRef.current)
+      timerRef.current = null
+    }
   }
+
+  const formatTime = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`
 
   return (
     <div className="space-y-4">
@@ -256,42 +310,96 @@ export function VoiceSelector({ value, onChange }: VoiceSelectorProps) {
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Clone a Custom Voice</CardTitle>
             <CardDescription>
-              Upload 5–60 seconds of clean audio. Single speaker, no background
-              noise, natural speech. This becomes your agent's voice.
+              Record or upload 10–60 seconds of clear speech. Your agent will sound like this voice.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* File upload */}
+            {/* Quality guidance panel */}
+            <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-3 space-y-2">
+              <div className="flex items-center gap-2 text-sm font-medium text-blue-800 dark:text-blue-200">
+                <Info className="w-4 h-4" />
+                What makes a good reference clip
+              </div>
+              <ul className="text-xs text-blue-700 dark:text-blue-300 space-y-1 ml-6 list-disc">
+                <li><strong>Quiet room</strong> — no background music, TV, traffic, or other people talking</li>
+                <li><strong>One speaker</strong> — only the voice you want to clone, speaking naturally</li>
+                <li><strong>10–30 seconds ideal</strong> — read a paragraph aloud at normal pace</li>
+                <li><strong>No WhatsApp/phone recordings</strong> — compressed phone audio produces poor clones</li>
+                <li><strong>Hold device 15–20 cm away</strong> — avoid breathing/plosive sounds on the mic</li>
+              </ul>
+              <p className="text-xs text-blue-600 dark:text-blue-400 italic">
+                Tip: Try reading this aloud — "The quick brown fox jumps over the lazy dog. She sells seashells by the seashore. How much wood would a woodchuck chuck if a woodchuck could chuck wood?"
+              </p>
+            </div>
+
+            {/* In-browser recording */}
             <div className="space-y-2">
-              <Label>Audio File</Label>
-              <div className="flex gap-2">
-                <Input
-                  type="file"
-                  accept="audio/wav,audio/mpeg,audio/mp3,audio/webm"
-                  onChange={handleFileChange}
-                  className="flex-1"
-                />
-                {/* Record button */}
+              <Label>Option 1: Record directly</Label>
+              <div className="flex items-center gap-3">
                 <Button
                   type="button"
-                  variant="outline"
+                  variant={recording ? "destructive" : "outline"}
                   onClick={recording ? stopRecording : startRecording}
-                  className={recording ? "text-red-600 border-red-300" : ""}
+                  className="min-w-[140px]"
                 >
                   {recording ? (
                     <>
-                      <Square className="w-4 h-4 mr-1" />
-                      Stop
+                      <Square className="w-4 h-4 mr-2" />
+                      Stop Recording
                     </>
                   ) : (
                     <>
-                      <Mic className="w-4 h-4 mr-1" />
-                      Record
+                      <Mic className="w-4 h-4 mr-2" />
+                      Start Recording
                     </>
                   )}
                 </Button>
+                {recording && (
+                  <div className="flex items-center gap-3 flex-1">
+                    <div className="flex items-center gap-1.5 text-sm text-red-600 font-mono">
+                      <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                      <Clock className="w-3.5 h-3.5" />
+                      {formatTime(recordingSeconds)}
+                    </div>
+                    {/* Level meter */}
+                    <div className="flex-1 h-3 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                      <div
+                        className="h-full rounded-full transition-all duration-75"
+                        style={{
+                          width: `${audioLevel}%`,
+                          backgroundColor: audioLevel > 80 ? '#ef4444' : audioLevel > 40 ? '#22c55e' : '#94a3b8',
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
-              {cloneFile && (
+              {recording && (
+                <p className="text-xs text-muted-foreground">
+                  {recordingSeconds < 5 && "Keep going — aim for at least 10 seconds…"}
+                  {recordingSeconds >= 5 && recordingSeconds < 10 && "Good start — a few more seconds for better quality…"}
+                  {recordingSeconds >= 10 && recordingSeconds < 30 && "Great length! You can stop anytime, or keep going for the best results."}
+                  {recordingSeconds >= 30 && recordingSeconds < 60 && "Excellent! This is more than enough. Press Stop whenever you're ready."}
+                  {recordingSeconds >= 60 && "Maximum duration reached — press Stop to finish."}
+                </p>
+              )}
+              {!recording && recordingSeconds > 0 && cloneFile?.name === "recording.webm" && (
+                <p className="text-xs text-green-600">
+                  <CheckCircle className="w-3 h-3 inline mr-1" />
+                  Recorded {formatTime(recordingSeconds)} of audio — ready to clone
+                </p>
+              )}
+            </div>
+
+            {/* Or file upload */}
+            <div className="space-y-2">
+              <Label>Option 2: Upload a file</Label>
+              <Input
+                type="file"
+                accept="audio/wav,audio/mpeg,audio/mp3,audio/webm,audio/flac,audio/ogg,audio/m4a"
+                onChange={handleFileChange}
+              />
+              {cloneFile && cloneFile.name !== "recording.webm" && (
                 <p className="text-xs text-muted-foreground">
                   Selected: {cloneFile.name} (
                   {(cloneFile.size / 1024).toFixed(0)} KB)
@@ -304,6 +412,7 @@ export function VoiceSelector({ value, onChange }: VoiceSelectorProps) {
               type="button"
               onClick={uploadAndClone}
               disabled={!cloneFile || cloning}
+              className="w-full"
             >
               {cloning ? (
                 <>
@@ -313,26 +422,37 @@ export function VoiceSelector({ value, onChange }: VoiceSelectorProps) {
               ) : (
                 <>
                   <Upload className="w-4 h-4 mr-2" />
-                  Upload & Clone Voice
+                  {cloneFile ? "Upload & Clone Voice" : "Record or upload audio first"}
                 </>
               )}
             </Button>
 
-            {/* Error */}
+            {/* Error with tips */}
             {cloneError && (
-              <div className="flex items-center gap-2 p-3 rounded-lg bg-red-50 border border-red-200 text-red-800">
-                <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                <span className="text-sm">{cloneError}</span>
+              <div className="space-y-2">
+                <div className="flex items-start gap-2 p-3 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 text-red-800 dark:text-red-200">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <span className="text-sm font-medium">{cloneError}</span>
+                    {cloneErrorTips.length > 0 && (
+                      <ul className="text-xs space-y-0.5 list-disc ml-4 text-red-700 dark:text-red-300">
+                        {cloneErrorTips.map((tip, i) => (
+                          <li key={i}>{tip}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
               </div>
             )}
 
             {/* Success + play test */}
             {clonedVoiceId && (
               <div className="space-y-2">
-                <div className="flex items-center gap-2 p-3 rounded-lg bg-green-50 border border-green-200 text-green-800">
+                <div className="flex items-center gap-2 p-3 rounded-lg bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200">
                   <CheckCircle className="w-4 h-4 flex-shrink-0" />
                   <span className="text-sm font-medium">
-                    Voice cloned successfully!
+                    Voice cloned successfully! Listen to the preview below.
                   </span>
                 </div>
                 {cloneTestUrl && (

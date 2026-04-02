@@ -22,9 +22,10 @@ interface ChatInterfaceProps {
   sessionId?: string
   title?: string
   className?: string
+  onAgentResponse?: () => void
 }
 
-export function ChatInterface({ agentId, sessionId, title = "Test Your Agent", className }: ChatInterfaceProps) {
+export function ChatInterface({ agentId, sessionId, title = "Test Your Agent", className, onAgentResponse }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [inputMessage, setInputMessage] = useState("")
   const [loading, setLoading] = useState(false)
@@ -89,6 +90,7 @@ export function ChatInterface({ agentId, sessionId, title = "Test Your Agent", c
       }
 
       setMessages((prev) => [...prev, agentMessage])
+      onAgentResponse?.()
     } catch (error: any) {
       const errorMessage: Message = {
         id: `error_${Date.now()}`,

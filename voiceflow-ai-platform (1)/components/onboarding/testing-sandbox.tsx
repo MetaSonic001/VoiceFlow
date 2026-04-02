@@ -2,114 +2,123 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Phone, Play, Mic } from "lucide-react"
+import { Phone, Play, MessageSquare, CheckCircle, Circle, Sparkles, ArrowRight } from "lucide-react"
 import { ChatInterface } from "@/components/chat-interface"
 
 interface TestingSandboxProps {
   onComplete: (data: any) => void
+  agentId?: string
+  agentName?: string
 }
 
-export function TestingSandbox({ onComplete }: TestingSandboxProps) {
-  const [isCallActive, setIsCallActive] = useState(false)
+export function TestingSandbox({ onComplete, agentId, agentName }: TestingSandboxProps) {
   const [chatTested, setChatTested] = useState(false)
-
-  const startPhoneTest = () => {
-    setIsCallActive(true)
-    // Simulate call ending after 5 seconds
-    setTimeout(() => setIsCallActive(false), 5000)
-  }
+  const [firstResponseReceived, setFirstResponseReceived] = useState(false)
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    onComplete({ testing: { chatTested, phoneTested: true } })
+    onComplete({ testing: { chatTested, phoneTested: false } })
   }
+
+  // Listen for first successful agent response to mark chat as tested
+  const handleChatMessage = useCallback(() => {
+    if (!firstResponseReceived) {
+      setFirstResponseReceived(true)
+      setChatTested(true)
+    }
+  }, [firstResponseReceived])
 
   return (
     <div className="space-y-6">
       <div className="text-center">
-        <Play className="w-12 h-12 text-accent mx-auto mb-4" />
-        <h2 className="text-2xl font-bold mb-2">Test your AI agent</h2>
-        <p className="text-muted-foreground">
-          Try out your agent before going live. Test both chat and phone interactions to ensure everything works
-          perfectly.
+        <Sparkles className="w-12 h-12 text-accent mx-auto mb-4" />
+        <h2 className="text-2xl font-bold mb-2">See your agent in action</h2>
+        <p className="text-muted-foreground max-w-xl mx-auto">
+          {agentName ? (
+            <>Ask <strong>{agentName}</strong> a question about your business. It will answer using the knowledge you uploaded.</>
+          ) : (
+            <>Ask your agent a question about your business. It will answer using the knowledge you uploaded.</>
+          )}
         </p>
       </div>
 
-      <div className="grid md:grid-cols-2 gap-6">
-        {/* Chat Testing */}
-        <ChatInterface title="Chat Test" className="h-full" sessionId={`test_${Date.now()}`} />
+      {/* Suggested prompts */}
+      {!chatTested && (
+        <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+          <p className="text-sm font-medium text-blue-800 dark:text-blue-200 mb-2">Try asking something like:</p>
+          <div className="flex flex-wrap gap-2">
+            <Badge variant="secondary" className="cursor-default">"What services do you offer?"</Badge>
+            <Badge variant="secondary" className="cursor-default">"Tell me about your company"</Badge>
+            <Badge variant="secondary" className="cursor-default">"How can you help me?"</Badge>
+          </div>
+        </div>
+      )}
 
-        {/* Phone Testing */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center space-x-2">
-              <Phone className="w-5 h-5" />
-              <span>Phone Test</span>
-            </CardTitle>
-            <CardDescription>Test your agent's voice interactions</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="h-96 border border-border rounded-lg p-4 flex flex-col items-center justify-center space-y-4">
-              {!isCallActive ? (
-                <>
-                  <div className="text-center">
-                    <Phone className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
-                    <p className="text-sm text-muted-foreground">Click to start a test call</p>
-                    <p className="text-xs text-muted-foreground mt-1">Test number: +1 (555) 123-4567</p>
-                  </div>
-                  <Button onClick={startPhoneTest} variant="outline">
-                    <Mic className="w-4 h-4 mr-2" />
-                    Start Test Call
-                  </Button>
-                </>
-              ) : (
-                <div className="text-center">
-                  <div className="w-16 h-16 bg-green-500 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse">
-                    <Phone className="w-8 h-8 text-white" />
-                  </div>
-                  <Badge variant="secondary" className="bg-green-100 text-green-800">
-                    Call Active
-                  </Badge>
-                  <p className="text-sm text-muted-foreground mt-2">Testing voice interaction...</p>
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+      {/* Chat panel — full width, this is the hero moment */}
+      <div className="border rounded-lg overflow-hidden" style={{ minHeight: 420 }}>
+        <ChatInterface
+          title={agentName ? `Chat with ${agentName}` : "Chat with your agent"}
+          className="h-full"
+          agentId={agentId}
+          sessionId={`onboarding_test_${agentId || 'default'}`}
+          onAgentResponse={handleChatMessage}
+        />
       </div>
+
+      {/* Success state */}
+      {chatTested && (
+        <div className="flex items-center gap-3 p-4 rounded-lg bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800">
+          <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
+          <div>
+            <p className="font-medium text-green-800 dark:text-green-200">Your agent is working!</p>
+            <p className="text-sm text-green-700 dark:text-green-300">
+              It answered using your uploaded knowledge. You can keep testing or proceed to deployment.
+            </p>
+          </div>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit}>
         <Card>
           <CardHeader>
-            <CardTitle>Testing Checklist</CardTitle>
-            <CardDescription>Make sure everything works before going live</CardDescription>
+            <CardTitle className="text-base">Testing Checklist</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex items-center space-x-2">
-              <div className={`w-4 h-4 rounded-full ${chatTested ? "bg-green-500" : "bg-muted"}`} />
-              <span className="text-sm">Chat responses are working correctly</span>
+              {chatTested ? (
+                <CheckCircle className="w-4 h-4 text-green-500" />
+              ) : (
+                <Circle className="w-4 h-4 text-muted-foreground" />
+              )}
+              <span className="text-sm">Agent responded to a chat message using your knowledge</span>
             </div>
             <div className="flex items-center space-x-2">
-              <div className="w-4 h-4 rounded-full bg-green-500" />
-              <span className="text-sm">Phone number is configured</span>
+              <CheckCircle className="w-4 h-4 text-green-500" />
+              <span className="text-sm">Knowledge base uploaded</span>
             </div>
             <div className="flex items-center space-x-2">
-              <div className="w-4 h-4 rounded-full bg-green-500" />
-              <span className="text-sm">Knowledge base is loaded</span>
-            </div>
-            <div className="flex items-center space-x-2">
-              <div className="w-4 h-4 rounded-full bg-green-500" />
-              <span className="text-sm">Voice and personality are set</span>
+              <CheckCircle className="w-4 h-4 text-green-500" />
+              <span className="text-sm">Voice and personality configured</span>
             </div>
           </CardContent>
         </Card>
 
-        <Button type="submit" className="w-full mt-6">
-          Everything looks good - Go Live!
+        <Button type="submit" className="w-full mt-6" size="lg">
+          {chatTested ? (
+            <>
+              Everything looks great — Deploy!
+              <ArrowRight className="w-4 h-4 ml-2" />
+            </>
+          ) : (
+            <>
+              Skip Testing & Deploy
+              <ArrowRight className="w-4 h-4 ml-2" />
+            </>
+          )}
         </Button>
       </form>
     </div>

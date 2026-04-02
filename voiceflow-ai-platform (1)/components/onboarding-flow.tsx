@@ -256,7 +256,7 @@ export function OnboardingFlow() {
       case 5:
         return <ChannelSetup onComplete={handleStepComplete} />
       case 6:
-        return <TestingSandbox onComplete={handleStepComplete} />
+        return <TestingSandbox onComplete={handleStepComplete} agentId={(onboardingData as any).agent_id} agentName={(onboardingData as any).agent?.agentName} />
       case 7:
         return <GoLive onComplete={handleStepComplete} phoneNumber={(onboardingData as any).phone_number} />
       default:
