@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { auth } from '@clerk/nextjs/server'
+import { resolveUserEmail } from '@/lib/clerk-helpers'
 
 export async function POST(req: Request) {
   const session = await auth()
@@ -9,17 +10,7 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}))
   const { name } = body
   if (!name) return NextResponse.json({ error: 'Missing name' }, { status: 400 })
-
-  // Resolve user email
-  // @ts-ignore
-  let userEmail = session.user?.primary_email_address || session.user?.email || null
-  if (!userEmail && process.env.CLERK_API_KEY) {
-    const r = await fetch(`https://api.clerk.com/v1/users/${userId}`, { headers: { Authorization: `Bearer ${process.env.CLERK_API_KEY}` } })
-    if (r.ok) {
-      const data = await r.json()
-      userEmail = data.email_addresses?.[0]?.email_address || data.primary_email_address || null
-    }
-  }
+  const userEmail = await resolveUserEmail()
   if (!userEmail) return NextResponse.json({ error: 'Unable to resolve user email' }, { status: 400 })
 
   try {

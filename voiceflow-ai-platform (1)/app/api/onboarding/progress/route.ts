@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { auth } from '@clerk/nextjs/server'
+import { resolveUserEmail } from '@/lib/clerk-helpers'
 
 export async function GET() {
   const session = await auth()
@@ -8,22 +9,7 @@ export async function GET() {
   if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
   try {
-    // Map Clerk userId to email via Clerk API if CLERK_API_KEY provided, else rely on local token claims
-    // For simplicity, attempt to read email from auth() token claims
-    // @ts-ignore
-    const email = (session.user as any)?.primary_email_address || (session.user as any)?.email || null
-
-    // Fallback: try to read from CLERK_API_KEY via REST API (optional)
-    let userEmail = email
-    if (!userEmail && process.env.CLERK_API_KEY) {
-      // fetch user details
-      const r = await fetch(`https://api.clerk.com/v1/users/${userId}`, { headers: { Authorization: `Bearer ${process.env.CLERK_API_KEY}` } })
-      if (r.ok) {
-        const data = await r.json()
-        userEmail = data.email_addresses?.[0]?.email_address || data.primary_email_address || null
-      }
-    }
-
+    const userEmail = await resolveUserEmail()
     if (!userEmail) return NextResponse.json({ error: 'Unable to resolve user email' }, { status: 400 })
 
     const progress = await prisma.onboardingProgress.findUnique({ where: { userEmail } })
@@ -39,18 +25,7 @@ export async function POST(req: Request) {
   if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
   const body = await req.json().catch(() => ({}))
-  // expected: { agent_id?, current_step?, data? }
-  // Determine user's email as above (use session first, then Clerk API)
-  // @ts-ignore
-  let userEmail = (session.user as any)?.primary_email_address || (session.user as any)?.email || null
-
-  if (!userEmail && process.env.CLERK_API_KEY) {
-    const r = await fetch(`https://api.clerk.com/v1/users/${userId}`, { headers: { Authorization: `Bearer ${process.env.CLERK_API_KEY}` } })
-    if (r.ok) {
-      const data = await r.json()
-      userEmail = data.email_addresses?.[0]?.email_address || data.primary_email_address || null
-    }
-  }
+  const userEmail = await resolveUserEmail()
   if (!userEmail) return NextResponse.json({ error: 'Unable to resolve user email' }, { status: 400 })
 
   try {
@@ -69,17 +44,7 @@ export async function DELETE(req: Request) {
   const session = await auth()
   const userId = session.userId
   if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
-  // Determine email (use session first, then Clerk API)
-  // @ts-ignore
-  let userEmail = (session.user as any)?.primary_email_address || (session.user as any)?.email || null
-
-  if (!userEmail && process.env.CLERK_API_KEY) {
-    const r = await fetch(`https://api.clerk.com/v1/users/${userId}`, { headers: { Authorization: `Bearer ${process.env.CLERK_API_KEY}` } })
-    if (r.ok) {
-      const data = await r.json()
-      userEmail = data.email_addresses?.[0]?.email_address || data.primary_email_address || null
-    }
-  }
+  const userEmail = await resolveUserEmail()
   if (!userEmail) return NextResponse.json({ error: 'Unable to resolve user email' }, { status: 400 })
 
   try {
