@@ -33,14 +33,26 @@ const generateMetricData = (): MetricData[] => {
 }
 
 export function RealtimeMetrics() {
-  const [metricsData, setMetricsData] = useState<MetricData[]>(generateMetricData())
+  const [metricsData, setMetricsData] = useState<MetricData[]>([])
   const [currentMetrics, setCurrentMetrics] = useState({
-    activeCalls: 8,
-    activeChats: 12,
-    avgResponseTime: 2.1,
-    successRate: 92,
-    queuedInteractions: 3,
+    activeCalls: 0,
+    activeChats: 0,
+    avgResponseTime: 0,
+    successRate: 0,
+    queuedInteractions: 0,
   })
+
+  // Populate initial data on client only to avoid SSR hydration mismatch
+  useEffect(() => {
+    setMetricsData(generateMetricData())
+    setCurrentMetrics({
+      activeCalls: 8,
+      activeChats: 12,
+      avgResponseTime: 2.1,
+      successRate: 92,
+      queuedInteractions: 3,
+    })
+  }, [])
 
   useEffect(() => {
     const interval = setInterval(() => {

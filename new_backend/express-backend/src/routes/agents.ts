@@ -61,19 +61,42 @@ router.get('/', async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Authentication required' });
     }
 
-    const agents = await prisma.agent.findMany({
-      where: {
-        userId: userId,
-        tenantId: req.tenantId // Ensure tenant isolation
-      },
-      include: {
-        _count: {
-          select: { documents: true }
-        }
-      }
-    });
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 20));
+    const search = req.query.search as string | undefined;
+    const status = req.query.status as string | undefined;
 
-    res.json(agents);
+    const where: any = {
+      tenantId: req.tenantId, // Ensure tenant isolation
+      OR: [
+        { userId: userId },
+        { userId: null }   // include agents created without a userId (e.g. onboarding)
+      ]
+    };
+
+    if (search) {
+      where.name = { contains: search, mode: 'insensitive' };
+    }
+    if (status) {
+      where.status = status;
+    }
+
+    const [agents, total] = await Promise.all([
+      prisma.agent.findMany({
+        where,
+        include: {
+          _count: {
+            select: { documents: true }
+          }
+        },
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy: { createdAt: 'desc' }
+      }),
+      prisma.agent.count({ where })
+    ]);
+
+    res.json({ agents, total, page, limit });
   } catch (error) {
     console.error('Error fetching agents:', error);
     res.status(500).json({ error: 'Internal server error' });
