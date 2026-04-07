@@ -9,8 +9,8 @@ const envSchema = Joi.object({
   // Database
   DATABASE_URL: Joi.string().uri().required(),
 
-  // Redis
-  REDIS_HOST: Joi.string().required(),
+  // Redis (optional — falls back to in-memory rate limiting)
+  REDIS_HOST: Joi.string().optional().default('localhost'),
   REDIS_PORT: Joi.number().integer().default(6379),
 
   // Clerk

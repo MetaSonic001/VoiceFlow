@@ -50,10 +50,20 @@ _thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
 # Initialize clients
 redis_client = redis.Redis(host=os.getenv("REDIS_HOST", "localhost"), port=int(os.getenv("REDIS_PORT", 6379)), decode_responses=True)
-chroma_client = chromadb.HttpClient(
-    host=os.getenv("CHROMA_HOST", "localhost"),
-    port=int(os.getenv("CHROMA_PORT", 8002)),
-)
+
+# Connect to ChromaDB — prefer HTTP server, fall back to local persistent storage
+try:
+    chroma_client = chromadb.HttpClient(
+        host=os.getenv("CHROMA_HOST", "localhost"),
+        port=int(os.getenv("CHROMA_PORT", 8002)),
+    )
+    chroma_client.heartbeat()  # verify the server is reachable
+    print(f"Connected to ChromaDB server at {os.getenv('CHROMA_HOST', 'localhost')}:{os.getenv('CHROMA_PORT', 8002)}")
+except Exception as e:
+    print(f"ChromaDB server not reachable ({e}), using local persistent storage")
+    chroma_client = chromadb.PersistentClient(
+        path=os.getenv("CHROMA_PERSIST_DIR", "./chroma_data"),
+    )
 s3_client = boto3.client(
     's3',
     endpoint_url=os.getenv("MINIO_ENDPOINT", "http://localhost:9000"),

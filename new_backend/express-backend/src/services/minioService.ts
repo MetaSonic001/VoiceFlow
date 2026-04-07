@@ -28,8 +28,7 @@ export class MinioService {
         console.log(`Created bucket: ${this.bucketName}`);
       }
     } catch (error) {
-      console.error('Error initializing MinIO bucket:', error);
-      throw error;
+      console.error('[minio] Could not initialize bucket (non-fatal — file uploads will fail until MinIO is available):', (error as Error).message);
     }
   }
 
