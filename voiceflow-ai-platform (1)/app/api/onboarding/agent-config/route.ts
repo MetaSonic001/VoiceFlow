@@ -3,12 +3,12 @@ import type { NextRequest } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
 
 export async function POST(req: NextRequest) {
-  const session = await auth()
-  const userId = session.userId
+  const { userId, getToken } = await auth()
   if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
   try {
     const body = await req.json()
+    const token = await getToken()
 
     // Forward to backend
     const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000'
@@ -20,8 +20,9 @@ export async function POST(req: NextRequest) {
       headers: {
         'Content-Type': 'application/json',
         'X-API-Key': backendKey,
-        'Authorization': req.headers.get('authorization') || '',
-        ...(tenantId && { 'x-tenant-id': tenantId }),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(tenantId ? { 'x-tenant-id': tenantId } : {}),
+        'x-user-id': userId,
       },
       body: JSON.stringify(body),
     })

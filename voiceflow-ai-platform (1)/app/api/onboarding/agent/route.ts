@@ -7,7 +7,7 @@ export async function POST(req: Request) {
   const { userId, getToken } = await auth()
   if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
   const body = await req.json().catch(() => ({}))
-  const { name } = body
+  const { name, role, templateId, description, channels } = body
   if (!name) return NextResponse.json({ error: 'Missing name' }, { status: 400 })
   const userEmail = await resolveUserEmail()
   if (!userEmail) return NextResponse.json({ error: 'Unable to resolve user email' }, { status: 400 })
@@ -17,16 +17,40 @@ export async function POST(req: Request) {
     const tenantId = progress?.tenantId
     if (!tenantId) return NextResponse.json({ error: 'No tenant associated with user' }, { status: 400 })
 
-    const agent = await prisma.agent.create({ data: { name, tenantId } })
+    const agent = await prisma.agent.create({
+      data: {
+        name,
+        tenantId,
+        ...(description ? { description } : {}),
+        ...(channels ? { channels } : {}),
+        ...(templateId ? { templateId } : {}),
+      },
+    })
     // update onboarding progress with agent id
     await prisma.onboardingProgress.update({ where: { userEmail }, data: { agentId: agent.id } })
 
-    // Mirror creation to Python backend to keep parity (call /agents endpoint) using BACKEND_API_KEY
+    // Create AgentConfiguration so the full profile is persisted
+    try {
+      await prisma.agentConfiguration.create({
+        data: {
+          agentId: agent.id,
+          ...(templateId ? { templateId } : {}),
+          agentName: name,
+          ...(role ? { agentRole: role } : {}),
+          ...(description ? { agentDescription: description } : {}),
+          ...(channels ? { communicationChannels: channels } : {}),
+        },
+      })
+    } catch (cfgErr) {
+      console.warn('Failed to create AgentConfiguration:', cfgErr)
+    }
+
+    // Mirror creation to Express backend
     try {
       const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000'
       const backendKey = process.env.BACKEND_API_KEY || ''
       const token = await getToken()
-      await fetch(`${backendUrl.replace(/\/$/, '')}/api/agents`, {
+      await fetch(`${backendUrl.replace(/\/$/, '')}/onboarding/agent`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -35,7 +59,7 @@ export async function POST(req: Request) {
           'x-tenant-id': tenantId,
           'x-user-id': userId,
         },
-        body: JSON.stringify({ tenant_id: tenantId, name }),
+        body: JSON.stringify({ name, role, templateId, description, channels }),
       })
     } catch (err) {
       // ignore backend mirror failure; still return success from Prisma
