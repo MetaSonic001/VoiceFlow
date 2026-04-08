@@ -46,11 +46,7 @@ export function DashboardSidebar() {
   const handleLogout = async () => {
     setIsLoggingOut(true)
     try {
-      // Clear all cached auth data
-      localStorage.removeItem('auth_token')
-      localStorage.removeItem('clerk_token')
       localStorage.removeItem('auth_user')
-      localStorage.removeItem('session_id')
       router.push('/')
     } catch (error) {
       console.error("Logout error:", error)

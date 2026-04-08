@@ -1,7 +1,7 @@
 // API Client Configuration and Utilities
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-// Runner requests are proxied through the backend orchestrator
-const AGENT_RUNNER_URL = undefined
+// All requests go through the Next.js proxy at /api/backend which handles auth
+// via cookies and forwards to Express with trusted headers.
+const API_BASE_URL = "/api/backend"
 
 export class ApiError extends Error {
   constructor(
@@ -16,76 +16,47 @@ export class ApiError extends Error {
 
 class ApiClient {
   private baseUrl: string
-  private tenantId: string | null = null
-  private tokenProvider: (() => Promise<string | null>) | null = null
 
   constructor(baseUrl: string = API_BASE_URL) {
     this.baseUrl = baseUrl
-    // Try to get tenant ID from localStorage on initialization
-    if (typeof window !== 'undefined') {
-      const user = localStorage.getItem('auth_user')
-      if (user) {
-        try {
-          const userData = JSON.parse(user)
-          this.tenantId = userData.tenantId
-        } catch (e) {
-          console.warn('Failed to parse user data for tenant ID')
-        }
-      }
-    }
-  }
-
-  setTenantId(tenantId: string) {
-    this.tenantId = tenantId
-  }
-
-  // Called once from AutoAuth to wire up fresh-token retrieval on every request
-  setTokenProvider(provider: () => Promise<string | null>) {
-    this.tokenProvider = provider
   }
 
   private async request<T>(endpoint: string, options: RequestInit = {}, _isRetry = false): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`
 
+    // Don't set Content-Type for FormData — let the browser add multipart boundary
+    const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData
+
     const config: RequestInit = {
+      ...options,
       headers: {
-        "Content-Type": "application/json",
+        ...(isFormData ? {} : { "Content-Type": "application/json" }),
         ...options.headers,
       },
-      ...options,
-    }
-
-    // Add tenant ID header for multi-tenant isolation
-    if (this.tenantId) {
-      config.headers = {
-        ...config.headers,
-        'x-tenant-id': this.tenantId,
-      }
-    }
-
-    // Get a fresh auth token for every request
-    try {
-      const token = this.tokenProvider ? await this.tokenProvider() : null
-      if (token) {
-        config.headers = {
-          ...config.headers,
-          Authorization: `Bearer ${token}`,
-        }
-      }
-    } catch (error) {
-      console.warn('Failed to get auth token:', error)
     }
 
     try {
       const response = await fetch(url, config)
 
       if (!response.ok) {
-        // On 401, retry once with a fresh token (handles edge case of token expiring mid-flight)
-        if (response.status === 401 && !_isRetry && this.tokenProvider) {
-          return this.request<T>(endpoint, options, true)
+        // On 401, trigger auto_sync to create/refresh the user session then retry once
+        if (response.status === 401 && !_isRetry) {
+          try {
+            const r = await fetch('/api/auth/auto_sync', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+            })
+            if (r.ok) {
+              const res = await r.json()
+              if (res.user) {
+                localStorage.setItem('auth_user', JSON.stringify(res.user))
+              }
+              return this.request<T>(endpoint, options, true)
+            }
+          } catch { /* re-sync failed, fall through to error */ }
         }
         const errorData = await response.json().catch(() => ({}))
-        throw new ApiError(errorData.message || `HTTP ${response.status}`, response.status, errorData)
+        throw new ApiError(errorData.message || errorData.error || `HTTP ${response.status}`, response.status, errorData)
       }
 
       return await response.json()
@@ -106,16 +77,6 @@ class ApiClient {
   }
 
   // Auth endpoints
-  private persistAuth(_token: string, user: any) {
-    if (typeof window === 'undefined') return
-    if (user) {
-      localStorage.setItem('auth_user', JSON.stringify(user))
-      if (user.tenantId) {
-        this.setTenantId(user.tenantId)
-      }
-    }
-  }
-
   async getCurrentUser() {
     const raw = typeof window !== 'undefined' ? localStorage.getItem('auth_user') : null
     if (raw) return JSON.parse(raw)

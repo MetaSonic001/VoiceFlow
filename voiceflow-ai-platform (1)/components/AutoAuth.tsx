@@ -2,13 +2,15 @@
 
 import { useEffect } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
-import { apiClient } from '@/lib/api-client'
 
 /**
- * AutoAuth — replaces ClerkSync.
- * On mount, checks localStorage for an existing session.
- * If none exists, calls /api/auth/auto_sync to create a user+tenant,
- * stores the JWT and user profile, then sets up the apiClient.
+ * AutoAuth — ensures the user has a session.
+ * On mount, calls /api/auth/auto_sync which:
+ *   1. Creates/finds a user based on a stable browser cookie
+ *   2. Sets the vf_browser_id httpOnly cookie (used by the API proxy for auth)
+ *   3. Returns user profile info (stored in localStorage for UI display)
+ *
+ * No JWT or token management needed — the proxy reads the cookie server-side.
  */
 export default function AutoAuth() {
   const router = useRouter()
@@ -16,18 +18,14 @@ export default function AutoAuth() {
 
   useEffect(() => {
     ;(async () => {
-      // Check if we already have a session
-      const existingToken = localStorage.getItem('auth_token')
+      // If we already have user info, skip (cookie is already set from a previous visit)
       const existingUser = localStorage.getItem('auth_user')
-
-      if (existingToken && existingUser) {
+      if (existingUser) {
         try {
-          const user = JSON.parse(existingUser)
-          apiClient.setTokenProvider(async () => localStorage.getItem('auth_token'))
-          if (user.tenantId) apiClient.setTenantId(user.tenantId)
+          JSON.parse(existingUser) // validate it's not corrupted
           return
         } catch {
-          // corrupted data, re-sync below
+          localStorage.removeItem('auth_user')
         }
       }
 
@@ -39,14 +37,9 @@ export default function AutoAuth() {
         })
         if (r.ok) {
           const res = await r.json()
-          if (res.access_token) {
-            localStorage.setItem('auth_token', res.access_token)
-          }
           if (res.user) {
             localStorage.setItem('auth_user', JSON.stringify(res.user))
-            if (res.user.tenantId) apiClient.setTenantId(res.user.tenantId)
           }
-          apiClient.setTokenProvider(async () => localStorage.getItem('auth_token'))
 
           // Route based on onboarding status
           if (res.needs_onboarding === true && pathname === '/') {

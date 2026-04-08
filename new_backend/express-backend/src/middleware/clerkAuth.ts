@@ -22,7 +22,10 @@ export class SimpleAuth {
     this.prisma = prisma;
   }
 
-  // Middleware to verify JWT and set tenant context
+  // Middleware to verify auth and set tenant context.
+  // Priority:
+  //   1. Trusted proxy headers (x-user-id, x-tenant-id) — set by Next.js proxy
+  //   2. JWT Bearer token — for direct API consumers / backward compat
   authenticate = async (req: Request, res: Response, next: NextFunction) => {
     try {
       // Allow unauthenticated access to voice agent audio endpoint for demo
@@ -33,16 +36,27 @@ export class SimpleAuth {
         return next();
       }
 
+      // ── Option 1: Trusted proxy headers from Next.js ──────────────────
+      const proxyUserId = req.headers['x-user-id'] as string;
+      const proxyTenantId = req.headers['x-tenant-id'] as string;
+
+      if (proxyUserId && proxyTenantId) {
+        req.userId = proxyUserId;
+        req.tenantId = proxyTenantId;
+        req.user = { id: proxyUserId, tenantId: proxyTenantId };
+        return next();
+      }
+
+      // ── Option 2: JWT Bearer token ────────────────────────────────────
       const token = this.extractTokenFromHeader(req);
 
       if (!token) {
         return res.status(401).json({
-          error: 'No authentication token provided',
+          error: 'No authentication provided',
           code: 'AUTHENTICATION_ERROR'
         });
       }
 
-      // Verify the JWT
       let payload: any;
       try {
         payload = jwt.verify(token, JWT_SECRET);
@@ -53,7 +67,6 @@ export class SimpleAuth {
         });
       }
 
-      // Look up user in DB
       const user = await this.prisma.user.findUnique({
         where: { id: payload.userId }
       });
@@ -65,7 +78,6 @@ export class SimpleAuth {
         });
       }
 
-      // Set tenant context from user
       req.tenantId = user.tenantId;
       req.userId = user.id;
       req.user = user;

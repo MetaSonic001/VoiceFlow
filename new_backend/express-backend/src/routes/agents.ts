@@ -55,9 +55,8 @@ const updateAgentSchema = Joi.object({
 router.get('/', async (req: Request, res: Response) => {
   try {
     const prisma: PrismaClient = req.app.get('prisma');
-    const userId = req.userId; // Get from authenticated request
 
-    if (!userId) {
+    if (!req.tenantId) {
       return res.status(401).json({ error: 'Authentication required' });
     }
 
@@ -67,11 +66,7 @@ router.get('/', async (req: Request, res: Response) => {
     const status = req.query.status as string | undefined;
 
     const where: any = {
-      tenantId: req.tenantId, // Ensure tenant isolation
-      OR: [
-        { userId: userId },
-        { userId: null }   // include agents created without a userId (e.g. onboarding)
-      ]
+      tenantId: req.tenantId, // Tenant isolation is the only required filter
     };
 
     if (search) {

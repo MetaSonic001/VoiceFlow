@@ -17,7 +17,7 @@ export const Header: React.FC<HeaderProps> = ({ onLoginClick, onSignupClick }) =
   // Check if user has an existing session
   const [hasSession, setHasSession] = React.useState(false);
   React.useEffect(() => {
-    setHasSession(!!localStorage.getItem('auth_token'));
+    setHasSession(!!localStorage.getItem('auth_user'));
   }, []);
 
   const handleDashboardClick = () => {

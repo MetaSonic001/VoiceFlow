@@ -2,12 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { prisma } from '@/lib/prisma'
 
-export const runtime = 'nodejs'
-
 const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8000'
 
 /**
  * Resolve the current user from the vf_browser_id cookie.
+ * Returns userId, tenantId, email if the user exists, otherwise null.
  */
 async function resolveAuth(): Promise<{ userId: string; tenantId: string; email: string } | null> {
   try {
@@ -23,32 +22,41 @@ async function resolveAuth(): Promise<{ userId: string; tenantId: string; email:
   }
 }
 
+/**
+ * Generic proxy: authenticates via cookie then forwards to the Express backend.
+ * Passes userId/tenantId as trusted headers so Express doesn't need JWT.
+ */
 async function proxy(
   req: NextRequest,
   { params }: { params: Promise<{ path: string[] }> },
 ) {
   const { path } = await params
-  const subPath = path.join('/')
-
-  // Allow unauthenticated access for voice agent audio endpoint (demo)
-  const isPublicAudio = subPath === 'audio'
 
   const auth = await resolveAuth()
-  if (!auth && !isPublicAudio) {
+  if (!auth) {
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
   }
 
-  const url = `${BACKEND_URL.replace(/\/$/, '')}/api/runner/${subPath}`
+  // Reconstruct the backend URL
+  const backendPath = path.join('/')
+  const url = new URL(`/${backendPath}`, BACKEND_URL)
+
+  // Forward query parameters
+  req.nextUrl.searchParams.forEach((value, key) => {
+    url.searchParams.set(key, value)
+  })
 
   // Build headers — add auth context, forward content-type
   const headers: Record<string, string> = {
-    'x-user-id': auth?.userId ?? 'demo-user',
-    'x-tenant-id': auth?.tenantId ?? 'default-tenant',
+    'x-user-id': auth.userId,
+    'x-tenant-id': auth.tenantId,
+    'x-user-email': auth.email,
   }
-  if (auth?.email) headers['x-user-email'] = auth.email
 
   const contentType = req.headers.get('content-type')
-  if (contentType) headers['content-type'] = contentType
+  if (contentType) {
+    headers['content-type'] = contentType
+  }
 
   // Forward body for non-GET/HEAD requests
   let body: ArrayBuffer | undefined
@@ -57,13 +65,14 @@ async function proxy(
   }
 
   try {
-    const resp = await fetch(url, {
+    const resp = await fetch(url.toString(), {
       method: req.method,
       headers,
       body: body ? Buffer.from(body) : undefined,
     })
 
     const respBody = await resp.arrayBuffer()
+
     return new NextResponse(respBody, {
       status: resp.status,
       headers: {
@@ -71,7 +80,7 @@ async function proxy(
       },
     })
   } catch (error) {
-    console.error('Runner proxy error:', error)
+    console.error('Backend proxy error:', error)
     return NextResponse.json({ error: 'Backend unavailable' }, { status: 502 })
   }
 }
@@ -80,3 +89,4 @@ export const GET = proxy
 export const POST = proxy
 export const PUT = proxy
 export const DELETE = proxy
+export const PATCH = proxy

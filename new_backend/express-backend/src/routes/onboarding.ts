@@ -183,24 +183,28 @@ router.post('/agent', async (req: Request, res: Response) => {
       },
     });
 
-    // Create the corresponding agent configuration
-    const tenantSettings = (
-      await prisma.tenant.findUnique({ where: { id: req.tenantId } })
-    )?.settings as Record<string, any> | null;
+    // Create the corresponding agent configuration (non-fatal if schema differs)
+    try {
+      const tenantSettings = (
+        await prisma.tenant.findUnique({ where: { id: req.tenantId } })
+      )?.settings as Record<string, any> | null;
 
-    await prisma.agentConfiguration.create({
-      data: {
-        agentId: agent.id,
-        templateId: templateId || undefined,
-        agentName: name,
-        agentRole: role || undefined,
-        agentDescription: description || undefined,
-        communicationChannels: channels || undefined,
-        companyName: tenantSettings?.companyName || undefined,
-        industry: tenantSettings?.industry || undefined,
-        primaryUseCase: tenantSettings?.useCase || undefined,
-      },
-    });
+      await prisma.agentConfiguration.create({
+        data: {
+          agentId: agent.id,
+          templateId: templateId || undefined,
+          agentName: name,
+          agentRole: role || undefined,
+          agentDescription: description || undefined,
+          communicationChannels: channels || undefined,
+          companyName: tenantSettings?.companyName || undefined,
+          industry: tenantSettings?.industry || undefined,
+          primaryUseCase: tenantSettings?.useCase || undefined,
+        },
+      });
+    } catch (configErr) {
+      console.warn('Failed to create agent configuration (non-fatal):', configErr);
+    }
 
     res.json({ agent_id: agent.id });
   } catch (error) {
