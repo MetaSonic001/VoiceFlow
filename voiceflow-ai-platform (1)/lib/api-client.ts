@@ -1,7 +1,8 @@
 // API Client Configuration and Utilities
+// Proxied routes go through Next.js API routes (same-origin) which add Clerk auth
 const API_BASE_URL = ""
-// Runner requests are proxied through the backend orchestrator
-const AGENT_RUNNER_URL = undefined
+// Direct Express calls — for endpoints without a Next.js proxy route
+export const DIRECT_API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
 export class ApiError extends Error {
   constructor(
@@ -19,7 +20,7 @@ class ApiClient {
   private tenantId: string | null = null
   private tokenProvider: (() => Promise<string | null>) | null = null
 
-  constructor(baseUrl: string = API_BASE_URL) {
+  constructor(baseUrl: string = DIRECT_API_URL) {
     this.baseUrl = baseUrl
     // Try to get tenant ID from localStorage on initialization
     if (typeof window !== 'undefined') {
@@ -46,13 +47,25 @@ class ApiClient {
 
   private async request<T>(endpoint: string, options: RequestInit = {}, _isRetry = false): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`
+    return this._fetch<T>(url, options, _isRetry)
+  }
+
+  // Calls routed through Next.js API proxy routes (same-origin, Clerk auth added server-side)
+  private async proxyRequest<T>(endpoint: string, options: RequestInit = {}, _isRetry = false): Promise<T> {
+    const url = `${API_BASE_URL}${endpoint}`
+    return this._fetch<T>(url, options, _isRetry)
+  }
+
+  private async _fetch<T>(url: string, options: RequestInit = {}, _isRetry = false): Promise<T> {
+    // Don't set Content-Type for FormData — let the browser add multipart boundary
+    const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData
 
     const config: RequestInit = {
+      ...options,
       headers: {
-        "Content-Type": "application/json",
+        ...(isFormData ? {} : { "Content-Type": "application/json" }),
         ...options.headers,
       },
-      ...options,
     }
 
     // Add tenant ID header for multi-tenant isolation
@@ -82,7 +95,7 @@ class ApiClient {
       if (!response.ok) {
         // On 401, retry once with a fresh token (handles edge case of token expiring mid-flight)
         if (response.status === 401 && !_isRetry && this.tokenProvider) {
-          return this.request<T>(endpoint, options, true)
+          return this._fetch<T>(url, options, true)
         }
         const errorData = await response.json().catch(() => ({}))
         throw new ApiError(errorData.message || `HTTP ${response.status}`, response.status, errorData)
@@ -131,20 +144,20 @@ class ApiClient {
     website_url?: string
     description?: string
   }) {
-    return this.request<{ success: boolean; scrapeJobId?: string }>("/onboarding/company", {
+    return this.proxyRequest<{ success: boolean; scrapeJobId?: string }>("/api/onboarding/company", {
       method: "POST",
       body: JSON.stringify(data),
     })
   }
 
   async getCompanyProfile() {
-    return this.request<{
+    return this.proxyRequest<{
       company_name: string | null
       industry: string | null
       use_case: string | null
       website_url: string | null
       description: string | null
-    }>("/onboarding/company")
+    }>("/api/onboarding/company")
   }
 
   // LinkedIn-style company search against the seed list
@@ -323,7 +336,7 @@ class ApiClient {
   }
 
   async createAgent(data: AgentCreationData) {
-    return this.request<{ agent_id: string }>("/onboarding/agent", {
+    return this.proxyRequest<{ agent_id: string }>("/api/onboarding/agent", {
       method: "POST",
       body: JSON.stringify(data),
     })
@@ -341,7 +354,7 @@ class ApiClient {
     formData.append("websites", JSON.stringify(data.websites || []))
     formData.append("faq_text", data.faqText || "")
 
-    return this.request<{ success: boolean }>("/onboarding/knowledge", {
+    return this.proxyRequest<{ success: boolean }>("/api/onboarding/knowledge", {
       method: "POST",
       body: formData,
       headers: {}, // Remove Content-Type to let browser set it for FormData
@@ -363,12 +376,12 @@ class ApiClient {
   }
 
   async saveAgentConfiguration(data: AgentConfigurationData) {
-    return this.request<{
+    return this.proxyRequest<{
       success: boolean;
       message: string;
       agent_id: string;
       chroma_collection: string;
-    }>("/onboarding/agent-config", {
+    }>("/api/onboarding/agent-config", {
       method: "POST",
       body: JSON.stringify(data),
     })
@@ -392,18 +405,18 @@ class ApiClient {
 
   // Onboarding progress persistence (server-side resume)
   async saveOnboardingProgress(payload: { agent_id?: number | string; current_step?: number; data?: any }) {
-    return this.request<{ success: boolean; progress_id?: number; agent_id?: number; current_step?: number; data?: any }>(`/onboarding/progress`, {
+    return this.proxyRequest<{ success: boolean; progress_id?: number; agent_id?: number; current_step?: number; data?: any }>(`/api/onboarding/progress`, {
       method: 'POST',
       body: JSON.stringify({ agent_id: payload.agent_id, current_step: payload.current_step, data: payload.data }),
     })
   }
 
   async getOnboardingProgress() {
-    return this.request<{ exists: boolean; progress_id?: number; agent_id?: number; current_step?: number; data?: any }>(`/onboarding/progress`)
+    return this.proxyRequest<{ exists: boolean; progress_id?: number; agent_id?: number; current_step?: number; data?: any }>(`/api/onboarding/progress`)
   }
 
   async deleteOnboardingProgress() {
-    return this.request<{ deleted: boolean }>(`/onboarding/progress`, { method: 'DELETE' })
+    return this.proxyRequest<{ deleted: boolean }>(`/api/onboarding/progress`, { method: 'DELETE' })
   }
 
   // Agent management endpoints
@@ -414,7 +427,7 @@ class ApiClient {
     if (params.search) qs.append('search', params.search)
     if (params.status) qs.append('status', params.status)
     // Call Next.js server route under /api which will proxy to Prisma/backend as needed
-    return this.request<{ agents: Agent[]; total: number; page: number; limit: number }>(`/api/agents?${qs.toString()}`)
+    return this.proxyRequest<{ agents: Agent[]; total: number; page: number; limit: number }>(`/api/agents?${qs.toString()}`)
   }
 
   // Pipeline admin
@@ -450,54 +463,54 @@ class ApiClient {
 
   // Agent-runner operations are proxied through backend endpoints under /runner/*
   async runnerCreateAgent(data: { name: string; agent_type: string; config?: any }) {
-    return this.request<{ id: number; name: string }>(`/runner/agents`, { method: 'POST', body: JSON.stringify(data) })
+    return this.proxyRequest<{ id: number; name: string }>(`/api/runner/agents`, { method: 'POST', body: JSON.stringify(data) })
   }
 
   async runnerListAgents() {
-    return this.request<any[]>(`/runner/agents`)
+    return this.proxyRequest<any[]>(`/api/runner/agents`)
   }
 
   async runnerCreatePipeline(data: { name: string; tenant_id?: string; stages: any[] }) {
-    return this.request<{ id: number; name: string }>(`/runner/pipelines`, { method: 'POST', body: JSON.stringify(data) })
+    return this.proxyRequest<{ id: number; name: string }>(`/api/runner/pipelines`, { method: 'POST', body: JSON.stringify(data) })
   }
 
   async runnerListPipelines() {
-    return this.request<any[]>(`/runner/pipelines`)
+    return this.proxyRequest<any[]>(`/api/runner/pipelines`)
   }
 
   async runnerTriggerPipeline(pipelineId: number) {
-    return this.request<{ message: string }>(`/runner/pipelines/${pipelineId}/trigger`, { method: 'POST', body: JSON.stringify({}) })
+    return this.proxyRequest<{ message: string }>(`/api/runner/pipelines/${pipelineId}/trigger`, { method: 'POST', body: JSON.stringify({}) })
   }
 
   async runnerTriggerPipelineWithContext(pipelineId: number, context: any) {
-    return this.request<{ message: string }>(`/runner/pipelines/${pipelineId}/trigger`, { method: 'POST', body: JSON.stringify(context) })
+    return this.proxyRequest<{ message: string }>(`/api/runner/pipelines/${pipelineId}/trigger`, { method: 'POST', body: JSON.stringify(context) })
   }
 
   async getAgent(agentId: string) {
-    return this.request<AgentDetails>(`/api/agents/${agentId}`)
+    return this.proxyRequest<AgentDetails>(`/api/agents/${agentId}`)
   }
 
   async updateAgent(agentId: string, data: Partial<AgentUpdateData>) {
-    return this.request<{ success: boolean }>(`/api/agents/${agentId}`, {
+    return this.proxyRequest<{ success: boolean }>(`/api/agents/${agentId}`, {
       method: "PUT",
       body: JSON.stringify(data),
     })
   }
 
   async deleteAgent(agentId: string) {
-    return this.request<{ success: boolean }>(`/api/agents/${agentId}`, {
+    return this.proxyRequest<{ success: boolean }>(`/api/agents/${agentId}`, {
       method: "DELETE",
     })
   }
 
   async pauseAgent(agentId: string) {
-    return this.request<{ success: boolean }>(`/api/agents/${agentId}/pause`, {
+    return this.proxyRequest<{ success: boolean }>(`/api/agents/${agentId}/pause`, {
       method: "POST",
     })
   }
 
   async activateAgent(agentId: string) {
-    return this.request<{ success: boolean }>(`/api/agents/${agentId}/activate`, {
+    return this.proxyRequest<{ success: boolean }>(`/api/agents/${agentId}/activate`, {
       method: "POST",
     })
   }
