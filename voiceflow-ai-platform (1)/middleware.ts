@@ -9,25 +9,7 @@ const isProtectedRoute = createRouteMatcher([
   '/api/(.*)',
 ]);
 
-const isApiRoute = createRouteMatcher(['/api/(.*)']);
-const isAuthRoute = createRouteMatcher(['/api/auth/(.*)']);
-
 export default clerkMiddleware(async (auth, req: NextRequest) => {
-  // Handle tenant isolation for API routes (exempt auth routes — tenant doesn't exist yet during sync)
-  if (isApiRoute(req) && !isAuthRoute(req)) {
-    const tenantId = req.headers.get('x-tenant-id');
-
-    if (!tenantId) {
-      return NextResponse.json(
-        { error: 'Missing tenant ID. Please provide x-tenant-id header.' },
-        { status: 400 }
-      );
-    }
-
-    // Add tenant context to request headers for downstream processing
-    req.headers.set('x-tenant-context', tenantId);
-  }
-
   // Protect routes that require authentication
   if (isProtectedRoute(req)) {
     await auth.protect();
