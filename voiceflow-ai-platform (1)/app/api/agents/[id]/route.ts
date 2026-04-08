@@ -3,8 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { auth } from '@clerk/nextjs/server'
 
 export async function GET(req: Request, { params }: { params: { id: string } }) {
-  const session: any = auth()
-  const userId = session?.userId
+  const { userId, orgId, getToken } = await auth()
   if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
   const { id } = params
   try {
@@ -15,7 +14,15 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     try {
       const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000'
       const backendKey = process.env.BACKEND_API_KEY || ''
-      const r = await fetch(`${backendUrl.replace(/\/$/, '')}/agents/${id}`, { headers: { 'X-API-Key': backendKey } })
+      const token = await getToken()
+      const r = await fetch(`${backendUrl.replace(/\/$/, '')}/api/agents/${id}`, {
+        headers: {
+          'X-API-Key': backendKey,
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          'x-tenant-id': orgId || userId || 'default-tenant',
+          'x-user-id': userId,
+        },
+      })
       if (r.ok) backend = await r.json()
     } catch (e) {}
 
@@ -42,8 +49,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 }
 
 export async function PUT(req: Request, { params }: { params: { id: string } }) {
-  const session: any = auth()
-  const userId = session?.userId
+  const { userId, orgId, getToken } = await auth()
   if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
   const { id } = params
   const body = await req.json().catch(() => ({}))
@@ -53,7 +59,18 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
     try {
       const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000'
       const backendKey = process.env.BACKEND_API_KEY || ''
-      await fetch(`${backendUrl.replace(/\/$/, '')}/agents/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-API-Key': backendKey }, body: JSON.stringify(body) })
+      const token = await getToken()
+      await fetch(`${backendUrl.replace(/\/$/, '')}/api/agents/${id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': backendKey,
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          'x-tenant-id': orgId || userId || 'default-tenant',
+          'x-user-id': userId,
+        },
+        body: JSON.stringify(body),
+      })
     } catch (e) {}
     return NextResponse.json({ success: true })
   } catch (err) {
@@ -62,8 +79,7 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
 }
 
 export async function DELETE(req: Request, { params }: { params: { id: string } }) {
-  const session: any = auth()
-  const userId = session?.userId
+  const { userId, orgId, getToken } = await auth()
   if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
   const { id } = params
   try {
@@ -71,7 +87,16 @@ export async function DELETE(req: Request, { params }: { params: { id: string } 
     try {
       const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000'
       const backendKey = process.env.BACKEND_API_KEY || ''
-      await fetch(`${backendUrl.replace(/\/$/, '')}/agents/${id}`, { method: 'DELETE', headers: { 'X-API-Key': backendKey } })
+      const token = await getToken()
+      await fetch(`${backendUrl.replace(/\/$/, '')}/api/agents/${id}`, {
+        method: 'DELETE',
+        headers: {
+          'X-API-Key': backendKey,
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          'x-tenant-id': orgId || userId || 'default-tenant',
+          'x-user-id': userId,
+        },
+      })
     } catch (e) {}
     return NextResponse.json({ success: true })
   } catch (err) {

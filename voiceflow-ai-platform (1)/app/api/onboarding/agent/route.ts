@@ -4,8 +4,7 @@ import { auth } from '@clerk/nextjs/server'
 import { resolveUserEmail } from '@/lib/clerk-helpers'
 
 export async function POST(req: Request) {
-  const session = await auth()
-  const { userId } = session
+  const { userId, getToken } = await auth()
   if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
   const body = await req.json().catch(() => ({}))
   const { name } = body
@@ -26,9 +25,16 @@ export async function POST(req: Request) {
     try {
       const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000'
       const backendKey = process.env.BACKEND_API_KEY || ''
-      await fetch(`${backendUrl.replace(/\/$/, '')}/agents`, {
+      const token = await getToken()
+      await fetch(`${backendUrl.replace(/\/$/, '')}/api/agents`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-API-Key': backendKey },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': backendKey,
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          'x-tenant-id': tenantId,
+          'x-user-id': userId,
+        },
         body: JSON.stringify({ tenant_id: tenantId, name }),
       })
     } catch (err) {
