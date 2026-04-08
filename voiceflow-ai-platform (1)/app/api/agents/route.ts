@@ -1,47 +1,60 @@
-import { NextResponse } from 'next/server'
-import { auth } from '@clerk/nextjs/server'
+import { NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
 
 export async function GET(req: Request) {
-  const session: any = await auth()
-  const userId = session?.userId
-  if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+  const { userId, orgId, getToken } = await auth();
 
-  // Query params: page, limit, search, status
-  const url = new URL(req.url)
-  const page = Math.max(1, Number(url.searchParams.get('page')) || 1)
-  const limit = Math.min(200, Math.max(1, Number(url.searchParams.get('limit')) || 20))
-  const search = url.searchParams.get('search') || ''
-  const status = url.searchParams.get('status') || ''
+  if (!userId) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
+
+  // ✅ get Clerk JWT
+const token = await getToken()
+  // Query params
+  const url = new URL(req.url);
+  const page = Math.max(1, Number(url.searchParams.get("page")) || 1);
+  const limit = Math.min(
+    200,
+    Math.max(1, Number(url.searchParams.get("limit")) || 20),
+  );
+  const search = url.searchParams.get("search") || "";
+  const status = url.searchParams.get("status") || "";
 
   try {
-    // Call the new backend /api/agents endpoint
-    const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000'
-    const backendKey = process.env.BACKEND_API_KEY || ''
+    const backendUrl = process.env.BACKEND_URL || "http://localhost:8000";
 
-    const backendReqUrl = new URL(`${backendUrl.replace(/\/$/, '')}/api/agents`)
-    if (page) backendReqUrl.searchParams.set('page', String(page))
-    if (limit) backendReqUrl.searchParams.set('limit', String(limit))
-    if (search) backendReqUrl.searchParams.set('search', search)
-    if (status) backendReqUrl.searchParams.set('status', status)
+    const backendReqUrl = new URL(
+      `${backendUrl.replace(/\/$/, "")}/api/agents`,
+    );
+    backendReqUrl.searchParams.set("page", String(page));
+    backendReqUrl.searchParams.set("limit", String(limit));
+
+    const backendKey = process.env.BACKEND_API_KEY || "";
+    if (search) backendReqUrl.searchParams.set("search", search);
+    if (status) backendReqUrl.searchParams.set("status", status);
 
     const r = await fetch(backendReqUrl.toString(), {
       headers: {
-        'X-API-Key': backendKey,
-        'Authorization': req.headers.get('authorization') || '',
-        'x-tenant-id': session?.orgId || session?.userId || 'default-tenant',
-        'x-user-id': userId
-      }
-    })
+        Authorization: `Bearer ${token}`,
+        "X-API-Key": backendKey,
+        "x-tenant-id": orgId || userId || "default-tenant",
+        "x-user-id": userId,
+      },
+    });
 
     if (r.ok) {
-      const data = await r.json()
-      return NextResponse.json(data)
+      const data = await r.json();
+      return NextResponse.json(data);
     } else {
-      console.error('New backend agents request failed:', r.status, await r.text())
-      return NextResponse.json({ agents: [], total: 0, page, limit })
+      console.error(
+        "New backend agents request failed:",
+        r.status,
+        await r.text(),
+      );
+      return NextResponse.json({ agents: [], total: 0, page, limit });
     }
   } catch (err) {
-    console.error('Failed to fetch agents from new backend:', err)
-    return NextResponse.json({ agents: [], total: 0, page, limit })
+    console.error("Failed to fetch agents from new backend:", err);
+    return NextResponse.json({ agents: [], total: 0, page, limit });
   }
 }
