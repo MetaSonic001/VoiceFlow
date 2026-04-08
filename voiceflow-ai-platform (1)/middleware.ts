@@ -1,18 +1,10 @@
-import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-const isProtectedRoute = createRouteMatcher([
-  '/dashboard(.*)',
-  '/admin(.*)',
-  '/onboarding(.*)',
-  '/api/(.*)',
-]);
+const isApiRoute = (req: NextRequest) => req.nextUrl.pathname.startsWith('/api/');
+const isAuthRoute = (req: NextRequest) => req.nextUrl.pathname.startsWith('/api/auth/');
 
-const isApiRoute = createRouteMatcher(['/api/(.*)']);
-const isAuthRoute = createRouteMatcher(['/api/auth/(.*)']);
-
-export default clerkMiddleware(async (auth, req: NextRequest) => {
+export default function middleware(req: NextRequest) {
   // Handle tenant isolation for API routes (exempt auth routes — tenant doesn't exist yet during sync)
   if (isApiRoute(req) && !isAuthRoute(req)) {
     const tenantId = req.headers.get('x-tenant-id');
@@ -28,13 +20,8 @@ export default clerkMiddleware(async (auth, req: NextRequest) => {
     req.headers.set('x-tenant-context', tenantId);
   }
 
-  // Protect routes that require authentication
-  if (isProtectedRoute(req)) {
-    await auth.protect();
-  }
-
   return NextResponse.next();
-});
+}
 
 export const config = {
   matcher: [

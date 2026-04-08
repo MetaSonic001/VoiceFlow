@@ -84,7 +84,7 @@ export function AgentDashboard() {
   const [limit, setLimit] = useState(12)
   const [total, setTotal] = useState<number | null>(null)
 
-  // Token provider is set globally by ClerkSync — no per-component setup needed
+  // Token provider is set globally by AutoAuth — no per-component setup needed
 
   // Mock realtime metrics since we removed the backend dependency
   const realtimeMetrics = {

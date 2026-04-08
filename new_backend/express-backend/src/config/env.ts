@@ -13,8 +13,8 @@ const envSchema = Joi.object({
   REDIS_HOST: Joi.string().optional().default('localhost'),
   REDIS_PORT: Joi.number().integer().default(6379),
 
-  // Clerk
-  CLERK_SECRET_KEY: Joi.string().required(),
+  // JWT secret for token signing/verification
+  JWT_SECRET: Joi.string().optional().default('dev-secret'),
 
   // Groq LLM (platform fallback — tenants can bring their own key via Settings)
   GROQ_API_KEY: Joi.string().optional(),

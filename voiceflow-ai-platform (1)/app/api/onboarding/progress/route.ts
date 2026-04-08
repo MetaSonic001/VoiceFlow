@@ -1,17 +1,12 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { auth } from '@clerk/nextjs/server'
 import { resolveUserEmail } from '@/lib/clerk-helpers'
 
 export async function GET() {
-  const session = await auth()
-  const userId = session.userId
-  if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+  const userEmail = await resolveUserEmail()
+  if (!userEmail) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
   try {
-    const userEmail = await resolveUserEmail()
-    if (!userEmail) return NextResponse.json({ error: 'Unable to resolve user email' }, { status: 400 })
-
     const progress = await prisma.onboardingProgress.findUnique({ where: { userEmail } })
     if (!progress) return NextResponse.json({ exists: false })
     return NextResponse.json({ exists: true, progress })
@@ -20,13 +15,10 @@ export async function GET() {
   }
 }
 export async function POST(req: Request) {
-  const session = await auth()
-  const userId = session.userId
-  if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+  const userEmail = await resolveUserEmail()
+  if (!userEmail) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
   const body = await req.json().catch(() => ({}))
-  const userEmail = await resolveUserEmail()
-  if (!userEmail) return NextResponse.json({ error: 'Unable to resolve user email' }, { status: 400 })
 
   try {
     const up = await prisma.onboardingProgress.upsert({
@@ -41,11 +33,8 @@ export async function POST(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-  const session = await auth()
-  const userId = session.userId
-  if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
   const userEmail = await resolveUserEmail()
-  if (!userEmail) return NextResponse.json({ error: 'Unable to resolve user email' }, { status: 400 })
+  if (!userEmail) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
   try {
     await prisma.onboardingProgress.deleteMany({ where: { userEmail } })

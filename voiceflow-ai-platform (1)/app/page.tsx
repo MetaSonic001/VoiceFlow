@@ -7,30 +7,15 @@ import { Features } from "@/components/Features"
 import { EmbedWidget } from "@/components/EmbedWidget"
 import { Pricing } from "@/components/Pricing"
 import { useRouter } from "next/navigation"
-import { useClerk } from '@clerk/nextjs'
 
 export default function HomePage() {
-  // Clerk handles sign-in / sign-up UI. No local fallback modal is used.
-  const router: Router= useRouter()
-  const clerk = useClerk() as any
+  const router = useRouter()
 
   const handleGetStarted = () => {
-    // Prefer opening Clerk sign-up if available, fallback to local AuthModal
-    if (clerk?.openSignUp) {
-      clerk.openSignUp()
-      return
-    }
-    console.warn('Clerk not available: cannot open sign-up. Redirecting to onboarding as fallback.')
     router.push('/onboarding')
   }
 
   const handleSignIn = () => {
-    // Prefer opening Clerk sign-in if available, fallback to local AuthModal
-    if (clerk?.openSignIn) {
-      clerk.openSignIn()
-      return
-    }
-    console.warn('Clerk not available: cannot open sign-in. Redirecting to dashboard as fallback.')
     router.push('/dashboard')
   }
 
@@ -63,7 +48,6 @@ export default function HomePage() {
         </div>
       </footer>
 
-      {/* AuthModal removed: Clerk manages sign-in/sign-up UI */}
     </div>
   )
 }

@@ -39,7 +39,7 @@ class ApiClient {
     this.tenantId = tenantId
   }
 
-  // Called once from ClerkSync to wire up fresh-token retrieval on every request
+  // Called once from AutoAuth to wire up fresh-token retrieval on every request
   setTokenProvider(provider: () => Promise<string | null>) {
     this.tokenProvider = provider
   }
@@ -63,7 +63,7 @@ class ApiClient {
       }
     }
 
-    // Get a fresh Clerk JWT for every request
+    // Get a fresh auth token for every request
     try {
       const token = this.tokenProvider ? await this.tokenProvider() : null
       if (token) {
@@ -73,7 +73,7 @@ class ApiClient {
         }
       }
     } catch (error) {
-      console.warn('Failed to get Clerk token:', error)
+      console.warn('Failed to get auth token:', error)
     }
 
     try {
@@ -106,7 +106,6 @@ class ApiClient {
   }
 
   // Auth endpoints
-  // Legacy auth helpers kept as no-ops; Clerk is the only auth source now.
   private persistAuth(_token: string, user: any) {
     if (typeof window === 'undefined') return
     if (user) {

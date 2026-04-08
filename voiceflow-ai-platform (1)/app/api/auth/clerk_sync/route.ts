@@ -1,17 +1,16 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
-import { auth } from '@clerk/nextjs/server'
 import { resolveUserEmail } from '@/lib/clerk-helpers'
 import { prisma } from '@/lib/prisma'
 
+/**
+ * Legacy clerk_sync kept for backward compatibility.
+ * New flow uses /api/auth/auto_sync instead.
+ */
 export async function POST(req: NextRequest) {
-  const session = await auth()
-  const userId = session.userId
-  if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
-
   try {
     const email = await resolveUserEmail()
-    if (!email) return NextResponse.json({ error: 'Unable to resolve user email from Clerk' }, { status: 400 })
+    if (!email) return NextResponse.json({ error: 'Unable to resolve user email' }, { status: 400 })
 
     // Forward to Express backend's /auth/clerk_sync
     const backendUrl = process.env.BACKEND_URL || process.env.NEW_BACKEND_URL || 'http://localhost:8000'

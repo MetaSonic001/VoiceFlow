@@ -1,11 +1,10 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { auth } from '@clerk/nextjs/server'
+import { resolveUserEmail } from '@/lib/clerk-helpers'
 
 export async function GET(req: Request, { params }: { params: { id: string } }) {
-  const session: any = auth()
-  const userId = session?.userId
-  if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+  const userEmail = await resolveUserEmail()
+  if (!userEmail) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
   const { id } = params
   try {
     const agent = await prisma.agent.findUnique({ where: { id } })
@@ -42,9 +41,8 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 }
 
 export async function PUT(req: Request, { params }: { params: { id: string } }) {
-  const session: any = auth()
-  const userId = session?.userId
-  if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+  const userEmail = await resolveUserEmail()
+  if (!userEmail) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
   const { id } = params
   const body = await req.json().catch(() => ({}))
   try {
@@ -62,9 +60,8 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
 }
 
 export async function DELETE(req: Request, { params }: { params: { id: string } }) {
-  const session: any = auth()
-  const userId = session?.userId
-  if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+  const userEmail = await resolveUserEmail()
+  if (!userEmail) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
   const { id } = params
   try {
     await prisma.agent.delete({ where: { id } })

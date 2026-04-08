@@ -1,13 +1,20 @@
-import { currentUser } from '@clerk/nextjs/server'
+import { cookies } from 'next/headers'
+import { prisma } from '@/lib/prisma'
 
 /**
- * Resolve the current Clerk user's primary email address.
- * Uses `currentUser()` which is the standard Clerk v6 server-side API.
- * Returns null if the user is not authenticated or has no email.
+ * Resolve the current user's email address from the browser ID cookie.
+ * The auto_sync flow sets a vf_browser_id cookie which maps to a stable email.
  */
 export async function resolveUserEmail(): Promise<string | null> {
-  const user = await currentUser()
-  if (!user) return null
-  const primary = user.emailAddresses.find((e: any) => e.id === user.primaryEmailAddressId)
-  return primary?.emailAddress || user.emailAddresses[0]?.emailAddress || null
+  try {
+    const cookieStore = await cookies()
+    const browserId = cookieStore.get('vf_browser_id')?.value
+    if (!browserId) return null
+    const email = `user-${browserId.slice(0, 8)}@voiceflow.local`
+    // Verify user exists
+    const user = await prisma.user.findUnique({ where: { email } })
+    return user?.email || null
+  } catch {
+    return null
+  }
 }

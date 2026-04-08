@@ -3,7 +3,6 @@ import MotionWrapper from './ui/MotionWrapper'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Button } from './ui/button';
 import { Mic, Menu, X } from 'lucide-react';
-import { useUser } from '@clerk/nextjs';
 import { useRouter } from 'next/navigation';
 
 interface HeaderProps {
@@ -13,8 +12,13 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({ onLoginClick, onSignupClick }) => {
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
-  const { isSignedIn } = useUser();
   const router = useRouter();
+
+  // Check if user has an existing session
+  const [hasSession, setHasSession] = React.useState(false);
+  React.useEffect(() => {
+    setHasSession(!!localStorage.getItem('auth_token'));
+  }, []);
 
   const handleDashboardClick = () => {
     router.push('/dashboard');
@@ -51,7 +55,7 @@ export const Header: React.FC<HeaderProps> = ({ onLoginClick, onSignupClick }) =
           </nav>
 
           <div className="hidden md:flex items-center space-x-4">
-            {isSignedIn ? (
+            {hasSession ? (
               <Button onClick={handleDashboardClick} className="bg-blue-600 hover:bg-blue-700">
                 Dashboard
               </Button>
@@ -99,7 +103,7 @@ export const Header: React.FC<HeaderProps> = ({ onLoginClick, onSignupClick }) =
                 </a>
               ))}
               <div className="flex flex-col space-y-2 pt-4 border-t border-gray-200">
-                {isSignedIn ? (
+                {hasSession ? (
                   <Button onClick={handleDashboardClick} className="justify-start bg-blue-600 hover:bg-blue-700">
                     Dashboard
                   </Button>

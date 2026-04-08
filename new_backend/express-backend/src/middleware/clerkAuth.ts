@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { verifyToken } from '@clerk/clerk-sdk-node';
+import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
 
 // Extend Request interface
@@ -13,29 +13,20 @@ declare global {
   }
 }
 
-export interface ClerkUser {
-  id: string;
-  email: string;
-  firstName?: string;
-  lastName?: string;
-  imageUrl?: string;
-  publicMetadata?: any;
-  privateMetadata?: any;
-}
+const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
 
-export class ClerkAuth {
+export class SimpleAuth {
   private prisma: PrismaClient;
 
   constructor(prisma: PrismaClient) {
     this.prisma = prisma;
   }
 
-  // Middleware to verify Clerk JWT and set tenant context
+  // Middleware to verify JWT and set tenant context
   authenticate = async (req: Request, res: Response, next: NextFunction) => {
     try {
       // Allow unauthenticated access to voice agent audio endpoint for demo
       if (req.path === '/api/runner/audio' && req.method === 'POST') {
-        // Set default tenant and user for demo
         req.tenantId = 'default-tenant';
         req.userId = 'demo-user';
         req.user = { id: 'demo-user', tenantId: 'default-tenant' };
@@ -51,41 +42,37 @@ export class ClerkAuth {
         });
       }
 
-      // Verify the JWT with Clerk
-      const tokenPayload = await verifyToken(token, {
-        secretKey: process.env.CLERK_SECRET_KEY!
-      });
-
-      if (!tokenPayload) {
+      // Verify the JWT
+      let payload: any;
+      try {
+        payload = jwt.verify(token, JWT_SECRET);
+      } catch {
         return res.status(401).json({
           error: 'Invalid authentication token',
           code: 'AUTHENTICATION_ERROR'
         });
       }
 
-      // Extract user info from Clerk JWT
-      const payload = tokenPayload as any; // Clerk JWT payload
-      const clerkUser: ClerkUser = {
-        id: payload.sub,
-        email: (payload.email_addresses?.[0]?.email_address as string) || '',
-        firstName: payload.first_name as string,
-        lastName: payload.last_name as string,
-        imageUrl: payload.image_url as string,
-        publicMetadata: payload.public_metadata,
-        privateMetadata: payload.private_metadata
-      };
+      // Look up user in DB
+      const user = await this.prisma.user.findUnique({
+        where: { id: payload.userId }
+      });
 
-      // Get or create user in our database
-      const user = await this.syncUserWithDatabase(clerkUser);
+      if (!user) {
+        return res.status(401).json({
+          error: 'User not found',
+          code: 'AUTHENTICATION_ERROR'
+        });
+      }
 
-      // Set tenant context from user's tenant
+      // Set tenant context from user
       req.tenantId = user.tenantId;
       req.userId = user.id;
       req.user = user;
 
       next();
     } catch (error) {
-      console.error('Clerk authentication error:', error);
+      console.error('Authentication error:', error);
       return res.status(401).json({
         error: 'Authentication failed',
         code: 'AUTHENTICATION_ERROR'
@@ -144,46 +131,6 @@ export class ClerkAuth {
     return authHeader.substring(7);
   }
 
-  private async syncUserWithDatabase(clerkUser: ClerkUser) {
-    // Try to find existing user
-    let user = await this.prisma.user.findUnique({
-      where: { id: clerkUser.id }
-    });
-
-    if (!user) {
-      // Get default tenant or create one for new users
-      let tenant = await this.prisma.tenant.findFirst({
-        where: { isActive: true },
-        orderBy: { createdAt: 'asc' }
-      });
-
-      if (!tenant) {
-        // Create default tenant if none exists
-        tenant = await this.prisma.tenant.create({
-          data: {
-            id: 'default-tenant',
-            name: 'Default Organization',
-            domain: 'default.com',
-            apiKey: 'sk-default-' + Date.now(),
-            isActive: true
-          }
-        });
-      }
-
-      // Create new user
-      user = await this.prisma.user.create({
-        data: {
-          id: clerkUser.id,
-          email: clerkUser.email,
-          name: `${clerkUser.firstName || ''} ${clerkUser.lastName || ''}`.trim() || 'User',
-          tenantId: tenant.id
-        }
-      });
-    }
-
-    return user;
-  }
-
   // Helper method to get user info
   async getUserInfo(userId: string) {
     return await this.prisma.user.findUnique({
@@ -195,12 +142,12 @@ export class ClerkAuth {
   }
 }
 
-// Factory function to create Clerk auth middleware
+// Factory function to create auth middleware
 export const createClerkAuth = (prisma: PrismaClient) => {
-  const clerkAuth = new ClerkAuth(prisma);
+  const auth = new SimpleAuth(prisma);
   return {
-    authenticate: clerkAuth.authenticate,
-    validateTenantAccess: clerkAuth.validateTenantAccess,
-    getUserInfo: clerkAuth.getUserInfo.bind(clerkAuth)
+    authenticate: auth.authenticate,
+    validateTenantAccess: auth.validateTenantAccess,
+    getUserInfo: auth.getUserInfo.bind(auth)
   };
 };

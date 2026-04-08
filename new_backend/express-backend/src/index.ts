@@ -52,7 +52,7 @@ const startTime = Date.now();
 // Initialize Prisma
 const prisma = new PrismaClient();
 
-// Initialize Clerk auth
+// Initialize JWT auth
 const clerkAuth = createClerkAuth(prisma);
 
 // Middleware
@@ -91,9 +91,9 @@ app.use('/admin', clerkAuth.authenticate, adminRouter);
 app.use('/analytics', clerkAuth.authenticate, analyticsRouter);
 app.use('/auth', authRouter);
 app.use('/onboarding', clerkAuth.authenticate, onboardingRouter);
-// Twilio voice webhooks — NO Clerk auth (Twilio sends its own signature)
+// Twilio voice webhooks — no auth (Twilio sends its own signature)
 app.use('/twilio/voice', twilioVoiceRouter);
-// Twilio admin endpoints (numbers, etc.) — Clerk-authed
+// Twilio admin endpoints — JWT-authed
 app.use('/twilio', clerkAuth.authenticate, twilioRouter);
 app.use('/api/agents', clerkAuth.authenticate, agentsRouter);
 app.use('/api/documents', clerkAuth.authenticate, documentsRouter);

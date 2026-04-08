@@ -1,11 +1,10 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
-import { auth } from '@clerk/nextjs/server'
+import { resolveUserEmail } from '@/lib/clerk-helpers'
 
 export async function POST(req: NextRequest) {
-  const session = await auth()
-  const userId = session.userId
-  if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+  const userEmail = await resolveUserEmail()
+  if (!userEmail) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
   try {
     const body = await req.json()

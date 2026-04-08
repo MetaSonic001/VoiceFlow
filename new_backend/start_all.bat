@@ -6,7 +6,7 @@ cd /d "%~dp0"
 REM Check if .env file exists
 if not exist .env (
     echo Error: .env file not found. Please copy .env.example to .env and configure your API keys.
-    echo Required: CLERK_SECRET_KEY, CREDENTIALS_ENCRYPTION_KEY
+    echo Required: DATABASE_URL
     echo Optional: GROQ_API_KEY (platform fallback; tenants can bring their own)
     pause
     exit /b 1

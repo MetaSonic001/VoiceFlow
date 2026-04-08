@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server'
-import { auth } from '@clerk/nextjs/server'
+import { resolveUserEmail } from '@/lib/clerk-helpers'
 
 export const runtime = 'nodejs'
 
 export async function POST(req: Request) {
-  const { userId } = await auth()
-  if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+  const userEmail = await resolveUserEmail()
+  if (!userEmail) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
   const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000'
   const backendKey = process.env.BACKEND_API_KEY || ''

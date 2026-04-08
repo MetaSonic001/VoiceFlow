@@ -1,10 +1,9 @@
 import { NextResponse } from 'next/server'
-import { auth } from '@clerk/nextjs/server'
+import { resolveUserEmail } from '@/lib/clerk-helpers'
 
 export async function GET(req: Request) {
-  const session: any = await auth()
-  const userId = session?.userId
-  if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+  const userEmail = await resolveUserEmail()
+  if (!userEmail) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
   // Query params: page, limit, search, status
   const url = new URL(req.url)
@@ -28,8 +27,7 @@ export async function GET(req: Request) {
       headers: {
         'X-API-Key': backendKey,
         'Authorization': req.headers.get('authorization') || '',
-        'x-tenant-id': session?.orgId || session?.userId || 'default-tenant',
-        'x-user-id': userId
+        'x-tenant-id': req.headers.get('x-tenant-id') || 'default-tenant',
       }
     })
 

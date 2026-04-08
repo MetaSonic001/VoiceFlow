@@ -115,8 +115,7 @@ export function useApiMutation<T, P>(apiCall: (params: P) => Promise<T>) {
   return { mutate, loading, error }
 }
 
-// Auth hooks — Clerk is the single auth source.
-// This hook reads the cached user profile from localStorage (set by ClerkSync).
+// Auth hook — reads cached user profile from localStorage (set by AutoAuth).
 export function useAuth() {
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)

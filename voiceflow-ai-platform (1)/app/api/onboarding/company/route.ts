@@ -1,17 +1,13 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { auth } from '@clerk/nextjs/server'
 import { resolveUserEmail } from '@/lib/clerk-helpers'
 
 export async function POST(req: Request) {
-  const session = await auth()
-  const userId = session.userId
-  if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+  const userEmail = await resolveUserEmail()
+  if (!userEmail) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
   const body = await req.json().catch(() => ({}))
   const { name } = body
   if (!name) return NextResponse.json({ error: 'Missing name' }, { status: 400 })
-  const userEmail = await resolveUserEmail()
-  if (!userEmail) return NextResponse.json({ error: 'Unable to resolve user email' }, { status: 400 })
 
   try {
     const tenant = await prisma.tenant.create({ data: { name } })

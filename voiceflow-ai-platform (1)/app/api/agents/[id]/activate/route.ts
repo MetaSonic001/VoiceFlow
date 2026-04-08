@@ -1,11 +1,10 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { auth } from '@clerk/nextjs/server'
+import { resolveUserEmail } from '@/lib/clerk-helpers'
 
 export async function POST(req: Request, { params }: { params: { id: string } }) {
-  const session: any = auth()
-  const userId = session?.userId
-  if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+  const userEmail = await resolveUserEmail()
+  if (!userEmail) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
   const { id } = params
   try {
     await prisma.agent.update({ where: { id }, data: { status: 'active' } })
