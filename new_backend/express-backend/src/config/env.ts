@@ -35,10 +35,6 @@ const envSchema = Joi.object({
   MINIO_ACCESS_KEY: Joi.string().optional(),
   MINIO_SECRET_KEY: Joi.string().optional(),
 
-  // ChromaDB
-  CHROMA_HOST: Joi.string().default('localhost'),
-  CHROMA_PORT: Joi.number().integer().default(8002),
-
   // General
   NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
   PORT: Joi.number().integer().default(8000),

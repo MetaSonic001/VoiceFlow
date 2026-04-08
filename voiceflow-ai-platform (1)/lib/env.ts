@@ -13,7 +13,6 @@ const envSchema = z.object({
   // Backend service
   NEXT_PUBLIC_API_URL: z.string().url('NEXT_PUBLIC_API_URL must be a valid URL').optional(),
   BACKEND_URL: z.string().url('BACKEND_URL must be a valid URL').optional(),
-  BACKEND_API_KEY: z.string().optional(),
 })
 
 // Allow optional vars to be missing entirely (z.string().optional() still fails on empty string)

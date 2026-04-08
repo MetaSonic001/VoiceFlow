@@ -42,6 +42,7 @@ interface GroqResponse {
 
 class RagService {
   private chromaBaseUrl: string;
+  private chromaAvailable: boolean | null = null;
   private groqApiKey: string;
   private groqBaseUrl: string;
   private redis: Redis;
@@ -52,8 +53,23 @@ class RagService {
     this.groqBaseUrl = 'https://api.groq.com/openai/v1';
     this.redis = new Redis({
       host: process.env.REDIS_HOST || 'localhost',
-      port: parseInt(process.env.REDIS_PORT || '6379', 10)
+      port: parseInt(process.env.REDIS_PORT || '6379', 10),
+      lazyConnect: true,
+      maxRetriesPerRequest: 1,
     });
+    this.redis.connect().catch(() => {});
+    this.checkChromaAvailability();
+  }
+
+  private async checkChromaAvailability(): Promise<void> {
+    try {
+      await axios.get(`${this.chromaBaseUrl}/api/v1/heartbeat`, { timeout: 3000 });
+      this.chromaAvailable = true;
+      console.log(`✅ ChromaDB reachable at ${this.chromaBaseUrl}`);
+    } catch {
+      this.chromaAvailable = false;
+      console.warn(`⚠️  ChromaDB not reachable at ${this.chromaBaseUrl} — RAG queries will return empty results until it's available`);
+    }
   }
 
   async queryDocuments(tenantId: string, agentId: string, query: string, topK: number = 5, maxTokens: number = 4000, policyRules: PolicyRule[] = []): Promise<string[]> {
