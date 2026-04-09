@@ -23,5 +23,8 @@ env/
 # Chroma DB
 document-ingestion/chroma_db/
 
+# Demo output files (audio, transcripts)
+demo_outputs/
+
 # Other temporary files
 *.sqlite3
