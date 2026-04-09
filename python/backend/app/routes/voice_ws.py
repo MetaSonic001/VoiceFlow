@@ -70,7 +70,7 @@ async def _transcribe_groq(audio_bytes: bytes, groq_key: str) -> str:
             "https://api.groq.com/openai/v1/audio/transcriptions",
             headers={"Authorization": f"Bearer {groq_key}"},
             files={"file": ("audio.wav", buf, "audio/wav")},
-            data={"model": "whisper-large-v3", "language": "en"},
+            data={"model": "whisper-large-v3-turbo", "language": "en"},
         )
         if resp.status_code == 200:
             return resp.json().get("text", "")

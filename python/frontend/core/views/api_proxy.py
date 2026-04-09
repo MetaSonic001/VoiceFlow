@@ -3,7 +3,7 @@ Proxy endpoints for browser JS / HTMX to talk to the FastAPI backend.
 Every endpoint requires login and injects tenant headers automatically.
 """
 import json
-from django.http import JsonResponse, HttpResponse
+from django.http import JsonResponse
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
@@ -126,10 +126,10 @@ def audio_send(request):
 def tts_synthesize(request):
     data = _json_body(request)
     try:
-        audio_bytes = get_client(request).synthesize_tts(
+        result = get_client(request).synthesize_tts(
             text=data.get("text", ""), voice_id=data.get("voiceId", ""),
         )
-        return HttpResponse(audio_bytes, content_type="audio/mpeg")
+        return JsonResponse(result)
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
@@ -218,8 +218,9 @@ def document_upload(request):
     f = request.FILES.get("file")
     if not f:
         return JsonResponse({"error": "No file"}, status=400)
+    agent_id = request.POST.get("agentId", "")
     try:
-        result = get_client(request).upload_document((f.name, f.read(), f.content_type))
+        result = get_client(request).upload_document((f.name, f.read(), f.content_type), agent_id=agent_id)
         return JsonResponse(result)
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)
@@ -291,7 +292,7 @@ def groq_api_key(request):
 def analytics_overview(request):
     try:
         return JsonResponse(get_client(request).get_analytics_overview(
-            time_range=request.GET.get("range", "7d"),
+            time_range=request.GET.get("timeRange", request.GET.get("range", "7d")),
             agent_id=request.GET.get("agentId", ""),
         ))
     except Exception as e:
@@ -303,6 +304,7 @@ def call_logs_api(request):
     try:
         return JsonResponse(get_client(request).get_call_logs(
             page=int(request.GET.get("page", 1)),
+            agent_id=request.GET.get("agentId", ""),
             search=request.GET.get("search", ""),
         ))
     except Exception as e:
@@ -426,6 +428,9 @@ def notifications_read_all(request):
     client = get_client(request)
     try:
         return JsonResponse(client.mark_all_notifications_read())
+    except AttributeError:
+        # Fallback: direct call
+        return JsonResponse(client._post("/api/notifications/read-all"))
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)
 
@@ -440,6 +445,13 @@ def system_health(request):
         return JsonResponse(client.get_system_health())
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
+@require_http_methods(["GET"])
+def system_health_check(request):
+    """Alias endpoint for system page JS refresh."""
+    return system_health(request)
 
 
 # ── Call log flag ──────────────────────────────────────────────────────

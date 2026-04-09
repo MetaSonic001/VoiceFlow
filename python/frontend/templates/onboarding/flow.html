@@ -152,7 +152,12 @@ function onboardingApp() {
       this.saving = true;
       try {
         if (this.step === 1) {
-          await apiFetch('/api/onboarding/company/', {method:'POST', json:this.company});
+          await apiFetch('/api/onboarding/company/', {method:'POST', json:{
+            company_name: this.company.name,
+            industry: this.company.industry,
+            description: this.company.description,
+            website_url: this.company.website,
+          }});
         } else if (this.step === 3) {
           const d = await apiFetch('/api/agents/', {method:'POST', json:{
             name: this.agentConfig.name || 'My Agent',
@@ -164,6 +169,7 @@ function onboardingApp() {
           if (this.knowledgeFile) {
             const fd = new FormData();
             fd.append('file', this.knowledgeFile);
+            if (this.createdAgentId) fd.append('agentId', this.createdAgentId);
             await fetch('/api/documents/upload/', {method:'POST', body:fd, headers:{'X-CSRFToken': CSRF}});
           }
           if (this.knowledgeUrl) {

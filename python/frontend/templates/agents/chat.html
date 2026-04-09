@@ -108,15 +108,22 @@ function chatApp() {
           body:JSON.stringify({text, voiceId:''}),
         });
         if (r.ok) {
-          const blob = await r.blob();
-          const url = URL.createObjectURL(blob);
-          const audio = new Audio(url);
-          audio.play();
-          // Add audio URL to last agent message
-          const lastAgent = [...this.messages].reverse().find(m=>m.role==='agent');
-          if (lastAgent) lastAgent.audioUrl = url;
-        }
-      } catch(e) { console.log('TTS unavailable'); }
+          const data = await r.json();
+          if (data.audioUrl) {
+            const audio = new Audio(data.audioUrl);
+            audio.play();
+            const lastAgent = [...this.messages].reverse().find(m=>m.role==='agent');
+            if (lastAgent) lastAgent.audioUrl = data.audioUrl;
+          } else { this._browserSpeak(text); }
+        } else { this._browserSpeak(text); }
+      } catch(e) { this._browserSpeak(text); }
+    },
+
+    _browserSpeak(text) {
+      if ('speechSynthesis' in window) {
+        const u = new SpeechSynthesisUtterance(text);
+        speechSynthesis.speak(u);
+      }
     },
 
     async startRecording() {

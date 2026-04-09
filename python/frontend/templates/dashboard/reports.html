@@ -33,7 +33,7 @@ function reportsApp() {
     async generateReport() {
       this.generating = true;
       try {
-        const data = await apiFetch('/admin/pipelines', {method:'POST', json:{
+        const data = await apiFetch('/api/reports/', {method:'POST', json:{
           name: this.reportType + ' — ' + this.reportPeriod,
           type: this.reportType.toLowerCase().replace(/ /g, '_'),
           period: this.reportPeriod,

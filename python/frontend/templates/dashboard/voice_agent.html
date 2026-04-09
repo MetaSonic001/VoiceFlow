@@ -190,25 +190,23 @@ function voiceAgentApp() {
           body:JSON.stringify({text, voiceId:''}),
         });
         if (r.ok) {
-          const blob = await r.blob();
-          const url = URL.createObjectURL(blob);
-          this.currentAudio = new Audio(url);
-          this.currentAudio.muted = this.muted;
-          this.currentAudio.onended = () => { this.state = 'idle'; this.liveTranscript = ''; };
-          await this.currentAudio.play();
-        } else {
-          // Fallback to browser TTS
-          if ('speechSynthesis' in window) {
-            const u = new SpeechSynthesisUtterance(text);
-            u.onend = () => { this.state = 'idle'; this.liveTranscript = ''; };
-            speechSynthesis.speak(u);
-          } else {
-            this.state = 'idle';
-          }
-        }
-      } catch(e) {
-        this.state = 'idle';
-      }
+          const data = await r.json();
+          if (data.audioUrl) {
+            this.currentAudio = new Audio(data.audioUrl);
+            this.currentAudio.muted = this.muted;
+            this.currentAudio.onended = () => { this.state = 'idle'; this.liveTranscript = ''; };
+            await this.currentAudio.play();
+          } else { this._browserSpeak(text); }
+        } else { this._browserSpeak(text); }
+      } catch(e) { this._browserSpeak(text); }
+    },
+
+    _browserSpeak(text) {
+      if ('speechSynthesis' in window) {
+        const u = new SpeechSynthesisUtterance(text);
+        u.onend = () => { this.state = 'idle'; this.liveTranscript = ''; };
+        speechSynthesis.speak(u);
+      } else { this.state = 'idle'; }
     },
 
     endSession() {

@@ -116,12 +116,12 @@ async def process_audio(
         groq_key = settings.GROQ_API_KEY
         # Try to get tenant-specific key
         try:
-            from app.services.credentials import decrypt_credential
+            from app.services.credentials import decrypt
             from app.models import Tenant
             result = await db.execute(select(Tenant).where(Tenant.id == auth.tenant_id))
             tenant = result.scalar_one_or_none()
             if tenant and tenant.settings and tenant.settings.get("groqApiKey"):
-                groq_key = decrypt_credential(tenant.settings["groqApiKey"])
+                groq_key = decrypt(tenant.settings["groqApiKey"])
         except Exception:
             pass
 
@@ -154,7 +154,8 @@ async def process_audio(
     # Log
     try:
         log = CallLog(
-            tenantId=auth.tenant_id, agentId=agentId, type="voice",
+            tenantId=auth.tenant_id, agentId=agentId,
+            callerPhone=None, durationSeconds=0,
             startedAt=datetime.now(timezone.utc), endedAt=datetime.now(timezone.utc),
             transcript=json.dumps([
                 {"role": "user", "content": transcript},

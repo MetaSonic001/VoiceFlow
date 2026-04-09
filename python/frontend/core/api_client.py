@@ -82,8 +82,9 @@ class BackendClient:
             payload["agentId"] = agent_id
         return self._post("/onboarding/knowledge", json=payload)
 
-    def upload_document(self, file_tuple):
-        return self._post("/api/documents/", files={"file": file_tuple})
+    def upload_document(self, file_tuple, agent_id: str = ""):
+        data = {"agentId": agent_id} if agent_id else {}
+        return self._post("/api/documents/upload", files={"file": file_tuple}, data=data)
 
     def configure_voice(self, data: dict):
         return self._post("/onboarding/voice", json=data)
@@ -141,13 +142,8 @@ class BackendClient:
         return self._post("/api/tts/clone-voice", files={"audio": (filename, audio_bytes, "audio/webm")})
 
     def synthesize_tts(self, text: str, voice_id: str = ""):
-        """Returns raw audio bytes."""
-        with httpx.Client(timeout=TIMEOUT) as c:
-            r = c.post(self._url("/api/tts/synthesise"),
-                       headers=self._headers,
-                       json={"text": text, "voiceId": voice_id})
-            r.raise_for_status()
-            return r.content  # raw audio
+        """Returns JSON dict with audioUrl from TTS service."""
+        return self._post("/api/tts/synthesise", json={"text": text, "voiceId": voice_id})
 
     # ── Knowledge Base (proxied to onboarding/documents) ───────────────
     def get_knowledge_base(self):
@@ -308,6 +304,10 @@ class BackendClient:
     # ── System Health ──────────────────────────────────────────────────
     def get_system_health(self):
         return self._get("/api/system/health")
+
+    def get_system_health_check(self):
+        """Alias used by system page refresh."""
+        return self.get_system_health()
 
     # ── Voice Calls ────────────────────────────────────────────────────
     def get_voice_calls(self, agent_id: str):
