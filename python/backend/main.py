@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import AsyncSessionLocal, get_db
 from app.auth import AuthContext, get_auth
-from app.models import Tenant, User
+from app.models import Tenant, User, AgentTemplate
 
 logger = logging.getLogger("voiceflow")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -56,6 +56,70 @@ async def seed_demo():
                 ))
                 await db.flush()
                 logger.info("[seed] Created demo user")
+
+            # Seed agent templates if empty
+            tmpl_result = await db.execute(select(AgentTemplate).limit(1))
+            if not tmpl_result.scalar_one_or_none():
+                templates = [
+                    AgentTemplate(
+                        id="customer-support", name="Customer Support",
+                        description="Handle customer inquiries, resolve issues, and provide product information",
+                        baseSystemPrompt="You are a helpful and professional customer support agent. Answer questions accurately, resolve issues empathetically, and escalate when needed.",
+                        defaultCapabilities=["faq", "ticketing", "escalation"],
+                        suggestedKnowledgeCategories=["product_docs", "faq", "policies"],
+                        defaultTools=["search_knowledge", "create_ticket"],
+                        icon="headset",
+                    ),
+                    AgentTemplate(
+                        id="cold-calling", name="Cold Calling",
+                        description="Outbound sales calls, lead generation, and appointment setting",
+                        baseSystemPrompt="You are a persuasive and friendly sales agent. Engage prospects, qualify their needs, and book meetings with the sales team.",
+                        defaultCapabilities=["lead_gen", "appointment_booking", "objection_handling"],
+                        suggestedKnowledgeCategories=["product_info", "pricing", "competitor_analysis"],
+                        defaultTools=["search_knowledge", "book_appointment"],
+                        icon="phone-outgoing",
+                    ),
+                    AgentTemplate(
+                        id="lead-qualification", name="Lead Qualification",
+                        description="Qualify and score inbound leads based on criteria",
+                        baseSystemPrompt="You are a knowledgeable lead qualification specialist. Ask targeted questions to assess fit, budget, and timeline.",
+                        defaultCapabilities=["scoring", "routing", "data_collection"],
+                        suggestedKnowledgeCategories=["ideal_customer_profile", "qualification_criteria"],
+                        defaultTools=["search_knowledge", "update_crm"],
+                        icon="filter",
+                    ),
+                    AgentTemplate(
+                        id="technical-support", name="Technical Support",
+                        description="Troubleshoot technical issues and guide users through solutions",
+                        baseSystemPrompt="You are an expert technical support engineer. Diagnose issues systematically, provide step-by-step solutions, and escalate complex problems.",
+                        defaultCapabilities=["troubleshooting", "diagnostics", "escalation"],
+                        suggestedKnowledgeCategories=["technical_docs", "known_issues", "release_notes"],
+                        defaultTools=["search_knowledge", "create_ticket", "run_diagnostic"],
+                        icon="wrench",
+                    ),
+                    AgentTemplate(
+                        id="receptionist", name="Receptionist",
+                        description="Greet callers, route calls, and handle basic inquiries",
+                        baseSystemPrompt="You are a professional and friendly receptionist. Greet callers warmly, understand their needs, and route them appropriately.",
+                        defaultCapabilities=["call_routing", "scheduling", "faq"],
+                        suggestedKnowledgeCategories=["company_directory", "office_hours", "faq"],
+                        defaultTools=["search_knowledge", "transfer_call", "book_appointment"],
+                        icon="phone",
+                    ),
+                    AgentTemplate(
+                        id="survey", name="Survey Agent",
+                        description="Conduct customer satisfaction surveys and collect feedback",
+                        baseSystemPrompt="You are a friendly survey agent. Ask questions naturally, record responses accurately, and thank participants.",
+                        defaultCapabilities=["data_collection", "sentiment_analysis", "reporting"],
+                        suggestedKnowledgeCategories=["survey_questions", "product_info"],
+                        defaultTools=["search_knowledge", "record_response"],
+                        icon="clipboard",
+                    ),
+                ]
+                for t in templates:
+                    db.add(t)
+                await db.flush()
+                logger.info("[seed] Created %d agent templates", len(templates))
 
             await db.commit()
         except Exception as e:

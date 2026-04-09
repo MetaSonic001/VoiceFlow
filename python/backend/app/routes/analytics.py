@@ -60,10 +60,23 @@ async def overview(
         if key in day_counts:
             day_counts[key] += 1
 
+    # Count active agents
+    active_agents = (await db.execute(
+        select(func.count(Agent.id)).where(
+            Agent.tenantId == auth.tenant_id, Agent.status == "active"
+        )
+    )).scalar() or 0
+
+    avg_dur_val = round(float(avg_dur), 1)
+
     return {
         "totalInteractions": total,
         "successRate": success_rate,
-        "avgResponseTimeSec": round(float(avg_dur), 1),
+        "avgResponseTime": _fmt_dur(int(avg_dur)),
+        "avgResponseTimeSec": avg_dur_val,
+        "activeAgents": active_agents,
+        "satisfaction": success_rate,
+        "timeSeries": [{"date": d, "calls": c, "chats": c} for d, c in day_counts.items()],
         "callsPerDay": [{"date": d, "count": c} for d, c in day_counts.items()],
         "timeRange": timeRange,
         "channelPerformance": {

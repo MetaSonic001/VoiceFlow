@@ -4,25 +4,79 @@
 <div x-data="usersApp()">
   <div class="flex items-center justify-between mb-8">
     <div><h1 class="text-2xl font-bold">Team Management</h1><p class="text-gray-500 text-sm mt-1">Manage users and roles</p></div>
-    <button @click="showCreate=true" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg">Add User</button>
+    <button @click="showCreate=true;editUser={name:'',email:'',role:'user'}" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg">Add User</button>
   </div>
   <div class="bg-white rounded-xl border">
     <table class="w-full text-sm">
-      <thead class="bg-gray-50"><tr class="text-left text-gray-500"><th class="px-4 py-3">Name</th><th class="px-4 py-3">Email</th><th class="px-4 py-3">Role</th><th class="px-4 py-3">Status</th></tr></thead>
+      <thead class="bg-gray-50"><tr class="text-left text-gray-500"><th class="px-4 py-3">Name</th><th class="px-4 py-3">Email</th><th class="px-4 py-3">Role</th><th class="px-4 py-3">Actions</th></tr></thead>
       <tbody>
-        {% for u in users_list %}
-        <tr class="border-t hover:bg-gray-50">
-          <td class="px-4 py-3 font-medium">{{ u.name|default:u.username }}</td>
-          <td class="px-4 py-3 text-gray-500">{{ u.email }}</td>
-          <td class="px-4 py-3"><span class="px-2 py-1 rounded-full text-xs {% if u.role == 'admin' %}bg-purple-100 text-purple-700{% else %}bg-gray-100 text-gray-600{% endif %}">{{ u.role|default:"user" }}</span></td>
-          <td class="px-4 py-3"><span class="px-2 py-1 rounded-full text-xs bg-green-100 text-green-700">{{ u.status|default:"active" }}</span></td>
-        </tr>
-        {% empty %}
-        <tr><td colspan="4" class="px-4 py-12 text-center text-gray-400">No team members yet.</td></tr>
-        {% endfor %}
+        <template x-for="u in users" :key="u.id">
+          <tr class="border-t hover:bg-gray-50">
+            <td class="px-4 py-3 font-medium" x-text="u.name || u.username"></td>
+            <td class="px-4 py-3 text-gray-500" x-text="u.email"></td>
+            <td class="px-4 py-3"><span class="px-2 py-1 rounded-full text-xs" :class="u.role==='admin'?'bg-purple-100 text-purple-700':'bg-gray-100 text-gray-600'" x-text="u.role || 'user'"></span></td>
+            <td class="px-4 py-3 flex gap-2">
+              <button @click="showCreate=true;editUser={...u};isEdit=true" class="text-blue-600 hover:underline text-xs">Edit</button>
+              <button @click="deleteUser(u)" class="text-red-600 hover:underline text-xs">Delete</button>
+            </td>
+          </tr>
+        </template>
+        <tr x-show="users.length===0"><td colspan="4" class="px-4 py-12 text-center text-gray-400">No team members yet.</td></tr>
       </tbody>
     </table>
   </div>
+
+  <!-- Create/Edit modal -->
+  <div x-show="showCreate" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/40" @click.self="showCreate=false;isEdit=false">
+    <div class="bg-white rounded-2xl p-6 w-full max-w-md shadow-xl">
+      <h3 class="font-semibold text-lg mb-4" x-text="isEdit ? 'Edit User' : 'Add User'"></h3>
+      <div class="space-y-3">
+        <div><label class="block text-xs text-gray-500 mb-1">Name</label><input x-model="editUser.name" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
+        <div><label class="block text-xs text-gray-500 mb-1">Email</label><input x-model="editUser.email" type="email" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
+        <div><label class="block text-xs text-gray-500 mb-1">Role</label>
+          <select x-model="editUser.role" class="w-full border rounded-lg px-3 py-2 text-sm">
+            <option value="user">User</option><option value="admin">Admin</option>
+          </select>
+        </div>
+      </div>
+      <div class="flex justify-end gap-3 mt-4">
+        <button @click="showCreate=false;isEdit=false" class="px-4 py-2 border rounded-lg text-sm">Cancel</button>
+        <button @click="saveUser()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm">Save</button>
+      </div>
+    </div>
+  </div>
 </div>
-<script>function usersApp(){return{showCreate:false}}</script>
+<script>
+function usersApp(){
+  return {
+    users: {{ users_list|safe }},
+    showCreate: false,
+    isEdit: false,
+    editUser: {name:'', email:'', role:'user'},
+    async saveUser() {
+      try {
+        if (this.isEdit && this.editUser.id) {
+          await apiFetch('/api/users/' + this.editUser.id + '/', {method:'PUT', json:this.editUser});
+          const idx = this.users.findIndex(u=>u.id===this.editUser.id);
+          if(idx>=0) this.users[idx] = {...this.editUser};
+          showToast('User updated');
+        } else {
+          const d = await apiFetch('/api/users/', {method:'POST', json:this.editUser});
+          this.users.push(d.user || d);
+          showToast('User created');
+        }
+        this.showCreate=false; this.isEdit=false;
+      } catch(e) { showToast('Failed: '+e.message,'error'); }
+    },
+    async deleteUser(u) {
+      if (!confirm('Delete '+u.name+'?')) return;
+      try {
+        await apiFetch('/api/users/' + u.id + '/', {method:'DELETE'});
+        this.users = this.users.filter(x=>x.id!==u.id);
+        showToast('User deleted');
+      } catch(e) { showToast('Failed','error'); }
+    }
+  }
+}
+</script>
 {% endblock %}

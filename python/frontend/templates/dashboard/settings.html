@@ -1,7 +1,7 @@
 {% extends "base_dashboard.html" %}
 {% block title %}Settings — VoiceFlow AI{% endblock %}
 {% block content %}
-<div x-data="settingsApp()">
+<div x-data="settingsApp()" x-init="init()">
   <div class="mb-8"><h1 class="text-2xl font-bold">Settings</h1><p class="text-gray-500 text-sm mt-1">Manage integrations and configuration</p></div>
 
   <!-- Tabs -->
@@ -69,10 +69,11 @@
   <div x-show="tab==='General'" class="bg-white rounded-xl border p-6 space-y-4">
     <h3 class="font-semibold">General Settings</h3>
     <div class="space-y-3">
-      <label class="flex items-center gap-3"><input type="checkbox" class="rounded border-gray-300" checked> <span class="text-sm">Email notifications</span></label>
-      <label class="flex items-center gap-3"><input type="checkbox" class="rounded border-gray-300"> <span class="text-sm">Maintenance mode</span></label>
-      <label class="flex items-center gap-3"><input type="checkbox" class="rounded border-gray-300"> <span class="text-sm">Debug logging</span></label>
+      <label class="flex items-center gap-3"><input type="checkbox" class="rounded border-gray-300" x-model="generalSettings.emailNotifications"> <span class="text-sm">Email notifications</span></label>
+      <label class="flex items-center gap-3"><input type="checkbox" class="rounded border-gray-300" x-model="generalSettings.maintenanceMode"> <span class="text-sm">Maintenance mode</span></label>
+      <label class="flex items-center gap-3"><input type="checkbox" class="rounded border-gray-300" x-model="generalSettings.debugLogging"> <span class="text-sm">Debug logging</span></label>
     </div>
+    <button @click="saveGeneral()" class="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg">Save Settings</button>
   </div>
 </div>
 <script>
@@ -84,6 +85,9 @@ function settingsApp() {
     twilio: { accountSid: '', authToken: '' },
     groqKey: '',
     voiceId: '', cloneFile: null, voicePresets: [],
+    async init() {
+      try { const d = await fetch('/api/voice/presets/', {headers:{'X-CSRFToken':getCookie('csrftoken')}}).then(r=>r.json()); this.voicePresets = d.voices || []; } catch(e) {}
+    },
     async saveTwilio() {
       try { await apiFetch('/api/settings/twilio/', {method:'POST', json:this.twilio}); this.twilioConfigured=true; showToast('Twilio saved'); } catch(e) { showToast('Failed','error'); }
     },
@@ -97,11 +101,15 @@ function settingsApp() {
       try { await apiFetch('/api/settings/groq/', {method:'DELETE'}); this.groqConfigured=false; showToast('Key removed'); } catch(e) { showToast('Failed','error'); }
     },
     async saveVoice() {
-      try { await apiFetch('/api/onboarding/agent-config/', {method:'POST', json:{voiceId:this.voiceId}}); showToast('Voice saved'); } catch(e) { showToast('Failed','error'); }
+      try { await apiFetch('/api/settings/', {method:'PUT', json:{defaultVoiceId:this.voiceId}}); showToast('Voice saved'); } catch(e) { showToast('Failed','error'); }
     },
     async cloneVoice() {
       const fd = new FormData(); fd.append('audio', this.cloneFile);
       try { const r = await fetch('/api/voice/clone/', {method:'POST', headers:{'X-CSRFToken':CSRF}, body:fd}).then(r=>r.json()); showToast('Voice cloned: '+r.voiceId); } catch(e) { showToast('Clone failed','error'); }
+    },
+    generalSettings: {emailNotifications: true, maintenanceMode: false, debugLogging: false},
+    async saveGeneral() {
+      try { await apiFetch('/api/settings/', {method:'PUT', json:this.generalSettings}); showToast('Settings saved'); } catch(e) { showToast('Failed','error'); }
     }
   }
 }

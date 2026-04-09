@@ -21,7 +21,7 @@
     <!-- Welcome message -->
     <div class="flex justify-start">
       <div class="bg-white border rounded-2xl rounded-bl-md px-4 py-3 max-w-md shadow-sm">
-        <p class="text-sm" x-text="firstMessage">{{ agent.first_message|default:"Hello! How can I help you today?" }}</p>
+        <p class="text-sm" x-text="firstMessage">Hello! How can I help you today?</p>
       </div>
     </div>
     <template x-for="(msg, i) in messages" :key="i">
@@ -72,7 +72,7 @@ function chatApp() {
     audioChunks: [],
     sessionId: 'chat-' + Date.now(),
     agentId: '{{ agent.id|default:"" }}',
-    firstMessage: '{{ agent.first_message|default:"Hello! How can I help you today?"|escapejs }}',
+    firstMessage: '{{ agent.systemPrompt|default:"Hello! How can I help you today?"|truncatechars:100|escapejs }}' || 'Hello! How can I help you today?',
 
     toggleVoice() { this.voiceMode = !this.voiceMode; },
 

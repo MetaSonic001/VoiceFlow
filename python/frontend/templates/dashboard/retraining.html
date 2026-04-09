@@ -11,18 +11,18 @@
     <div class="bg-white rounded-xl border p-4 text-center"><div class="text-xl font-bold text-yellow-600">{{ stats.pending|default:"0" }}</div><div class="text-xs text-gray-500">Pending</div></div>
     <div class="bg-white rounded-xl border p-4 text-center"><div class="text-xl font-bold text-green-600">{{ stats.approved|default:"0" }}</div><div class="text-xs text-gray-500">Approved</div></div>
     <div class="bg-white rounded-xl border p-4 text-center"><div class="text-xl font-bold text-red-600">{{ stats.rejected|default:"0" }}</div><div class="text-xs text-gray-500">Rejected</div></div>
-    <div class="bg-white rounded-xl border p-4 text-center"><div class="text-xl font-bold text-blue-600">{{ stats.flagged|default:"0" }}</div><div class="text-xs text-gray-500">Flagged</div></div>
+    <div class="bg-white rounded-xl border p-4 text-center"><div class="text-xl font-bold text-blue-600">{{ stats.flaggedNotProcessed|default:"0" }}</div><div class="text-xs text-gray-500">Flagged</div></div>
   </div>
 
   <div class="bg-white rounded-xl border">
     {% for ex in examples %}
-    <div class="p-4 border-b space-y-2">
+    <div class="p-4 border-b space-y-2" id="ex-{{ ex.id }}">
       <div class="text-sm"><span class="font-medium text-gray-700">User Query:</span> {{ ex.userQuery|default:ex.query }}</div>
       <div class="text-sm text-red-600"><span class="font-medium">Bad Response:</span> {{ ex.badResponse|default:ex.response }}</div>
       <div class="text-sm text-green-600"><span class="font-medium">Ideal Response:</span> {{ ex.idealResponse|default:"(not set)" }}</div>
       <div class="flex gap-2 mt-2">
-        <button class="px-3 py-1 bg-green-100 text-green-700 text-xs rounded-lg" onclick="showToast('Approved')">Approve</button>
-        <button class="px-3 py-1 bg-red-100 text-red-700 text-xs rounded-lg" onclick="showToast('Rejected')">Reject</button>
+        <button class="px-3 py-1 bg-green-100 text-green-700 text-xs rounded-lg" onclick="retrainingAction('{{ ex.id }}', 'approved')">Approve</button>
+        <button class="px-3 py-1 bg-red-100 text-red-700 text-xs rounded-lg" onclick="retrainingAction('{{ ex.id }}', 'rejected')">Reject</button>
       </div>
     </div>
     {% empty %}
@@ -37,6 +37,14 @@ function retrainingApp() {
       try { await apiFetch('/api/retraining/trigger/', {method:'POST'}); showToast('Pipeline triggered'); } catch(e) { showToast('Failed','error'); }
     }
   }
+}
+async function retrainingAction(exId, status) {
+  try {
+    await apiFetch('/api/retraining/' + exId + '/update/', {method:'POST', json:{status: status}});
+    showToast(status.charAt(0).toUpperCase() + status.slice(1));
+    const el = document.getElementById('ex-' + exId);
+    if (el) el.style.opacity = '0.4';
+  } catch(e) { showToast('Failed', 'error'); }
 }
 </script>
 {% endblock %}

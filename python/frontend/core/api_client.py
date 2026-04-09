@@ -278,7 +278,7 @@ class BackendClient:
         return self._post("/admin/pipelines", json=data)
 
     def trigger_pipeline(self, pipeline_id: str):
-        return self._post("/admin/pipelines/trigger", json={"pipelineId": pipeline_id})
+        return self._post("/admin/pipelines/trigger", json={"pipeline_id": pipeline_id})
 
     def list_pipeline_agents(self):
         return self._get("/admin/pipeline_agents")

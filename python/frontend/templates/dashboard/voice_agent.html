@@ -30,7 +30,7 @@
       <!-- Waveform bars -->
       <div class="flex items-end gap-1 h-16 mb-6">
         <template x-for="i in 24" :key="i">
-          <div class="w-1.5 rounded-full transition-all duration-150" :class="state==='listening' ? 'bg-blue-400' : state==='speaking' ? 'bg-green-400' : 'bg-white/20'" :style="'height:' + (state!=='idle' ? (Math.random()*50+10) : 4) + 'px'" x-effect="if(state!=='idle') { setInterval(()=>$el.style.height=(Math.random()*50+10)+'px', 150) }"></div>
+          <div class="w-1.5 rounded-full transition-all duration-150" :class="state==='listening' ? 'bg-blue-400' : state==='speaking' ? 'bg-green-400' : 'bg-white/20'" :style="'height:' + (state!=='idle' ? (Math.random()*50+10) : 4) + 'px'"></div>
         </template>
       </div>
 
@@ -112,7 +112,7 @@ function voiceAgentApp() {
       if (this.ws) { this.ws.close(); this.ws = null; }
       if (!this.selectedAgentId) return;
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      const backendHost = 'localhost:8000';
+      const backendHost = location.hostname + ':8000';
       this.ws = new WebSocket(`${proto}://${backendHost}/api/voice/ws/${this.selectedAgentId}`);
       this.ws.onmessage = (e) => {
         const msg = JSON.parse(e.data);

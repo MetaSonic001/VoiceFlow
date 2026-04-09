@@ -16,9 +16,9 @@
 <div class="bg-white rounded-xl border p-5 mb-4" x-data="{copied:false}">
   <div class="flex items-center justify-between">
     <div><span class="font-semibold">{{ agent.name }}</span> <span class="text-xs px-2 py-1 rounded-full {% if agent.status == 'active' %}bg-green-100 text-green-700{% else %}bg-gray-100 text-gray-600{% endif %} ml-2">{{ agent.status }}</span></div>
-    <button @click="navigator.clipboard.writeText('<script src=\'https://app.voiceflow.ai/widget/{{ agent.id }}/embed.js\'><\/script>'); copied=true; setTimeout(()=>copied=false,2000)" class="px-3 py-1.5 border rounded-lg text-sm hover:bg-gray-50" x-text="copied?'Copied!':'Copy Code'">Copy Code</button>
+    <button @click="navigator.clipboard.writeText('<script src=\'' + location.origin + '/widget/{{ agent.id }}/embed.js\'><\/script>'); copied=true; setTimeout(()=>copied=false,2000)" class="px-3 py-1.5 border rounded-lg text-sm hover:bg-gray-50" x-text="copied?'Copied!':'Copy Code'">Copy Code</button>
   </div>
-  <code class="block mt-3 p-3 bg-gray-50 rounded-lg text-xs font-mono text-gray-600">&lt;script src="https://app.voiceflow.ai/widget/{{ agent.id }}/embed.js"&gt;&lt;/script&gt;</code>
+  <code class="block mt-3 p-3 bg-gray-50 rounded-lg text-xs font-mono text-gray-600" x-text="'<script src=\"' + location.origin + '/widget/{{ agent.id }}/embed.js\"><\/script>'"></code>
 </div>
 {% empty %}
 <div class="bg-white rounded-xl border p-12 text-center text-gray-400">No agents yet. Create an agent first.</div>

@@ -1,29 +1,61 @@
 {% extends "base_dashboard.html" %}{% block title %}Pipelines — VoiceFlow AI{% endblock %}
 {% block content %}
-<div class="mb-8 flex items-center justify-between">
-  <div><h1 class="text-2xl font-bold">Pipelines</h1><p class="text-gray-500 text-sm mt-1">Automation workflows for your agents</p></div>
-  <button onclick="document.getElementById('newPipeline').showModal()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">+ New Pipeline</button>
-</div>
-{% for p in pipelines %}
-<div class="bg-white rounded-xl border p-5 mb-4 flex items-center justify-between">
-  <div><span class="font-semibold">{{ p.name }}</span><span class="text-xs text-gray-400 ml-2">{{ p.steps|length|default:0 }} steps</span></div>
-  <div class="flex gap-2">
-    <span class="text-xs px-2 py-1 rounded-full {% if p.status == 'active' %}bg-green-100 text-green-700{% else %}bg-gray-100 text-gray-500{% endif %}">{{ p.status|default:"draft" }}</span>
-    <button class="px-3 py-1 border rounded text-xs hover:bg-gray-50">Edit</button>
+<div x-data="pipelinesApp()">
+  <div class="mb-8 flex items-center justify-between">
+    <div><h1 class="text-2xl font-bold">Pipelines</h1><p class="text-gray-500 text-sm mt-1">Automation workflows for your agents</p></div>
+    <button @click="showDialog=true" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">+ New Pipeline</button>
+  </div>
+  <template x-for="p in pipelines" :key="p.id">
+    <div class="bg-white rounded-xl border p-5 mb-4 flex items-center justify-between">
+      <div><span class="font-semibold" x-text="p.name"></span><span class="text-xs text-gray-400 ml-2" x-text="(p.stages||[]).length + ' stages'"></span></div>
+      <div class="flex gap-2">
+        <span class="text-xs px-2 py-1 rounded-full" :class="p.status==='active'?'bg-green-100 text-green-700':'bg-gray-100 text-gray-500'" x-text="p.status || 'idle'"></span>
+        <button @click="triggerPipeline(p)" class="px-3 py-1 border rounded text-xs hover:bg-gray-50">Run</button>
+      </div>
+    </div>
+  </template>
+  <div x-show="pipelines.length===0" class="bg-white rounded-xl border p-16 text-center"><div class="text-gray-300 text-5xl mb-4">&#9889;</div><div class="text-gray-400">No pipelines yet.</div><div class="text-sm text-gray-400 mt-1">Create your first automation pipeline.</div></div>
+
+  <!-- Create dialog -->
+  <div x-show="showDialog" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/40" @click.self="showDialog=false">
+    <div class="bg-white rounded-2xl p-6 w-full max-w-md shadow-xl">
+      <h3 class="font-semibold mb-4">Create Pipeline</h3>
+      <div class="space-y-3">
+        <div><label class="block text-xs text-gray-500 mb-1">Name</label><input x-model="newName" type="text" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="My Pipeline"></div>
+        <div><label class="block text-xs text-gray-500 mb-1">Trigger</label><select x-model="newTrigger" class="w-full border rounded-lg px-3 py-2 text-sm"><option>On new conversation</option><option>On agent response</option><option>Scheduled</option></select></div>
+      </div>
+      <div class="flex justify-end gap-2 mt-6">
+        <button @click="showDialog=false" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">Cancel</button>
+        <button @click="createPipeline()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">Create</button>
+      </div>
+    </div>
   </div>
 </div>
-{% empty %}
-<div class="bg-white rounded-xl border p-16 text-center"><div class="text-gray-300 text-5xl mb-4">⚡</div><div class="text-gray-400">No pipelines yet.</div><div class="text-sm text-gray-400 mt-1">Create your first automation pipeline.</div></div>
-{% endfor %}
-
-<dialog id="newPipeline" class="rounded-xl border shadow-xl p-0 w-full max-w-md backdrop:bg-black/40">
-  <form method="dialog" class="p-6">
-    <h3 class="font-semibold mb-4">Create Pipeline</h3>
-    <div class="space-y-3">
-      <div><label class="block text-xs text-gray-500 mb-1">Name</label><input type="text" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="My Pipeline"></div>
-      <div><label class="block text-xs text-gray-500 mb-1">Trigger</label><select class="w-full border rounded-lg px-3 py-2 text-sm"><option>On new conversation</option><option>On agent response</option><option>Scheduled</option></select></div>
-    </div>
-    <div class="flex justify-end gap-2 mt-6"><button value="cancel" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">Cancel</button><button value="default" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">Create</button></div>
-  </form>
-</dialog>
+<script>
+function pipelinesApp() {
+  return {
+    pipelines: {{ pipelines|safe }},
+    showDialog: false,
+    newName: '',
+    newTrigger: 'On new conversation',
+    async createPipeline() {
+      if (!this.newName.trim()) { showToast('Name required','error'); return; }
+      try {
+        const d = await apiFetch('/api/pipelines/', {method:'POST', json:{name:this.newName, stages:[{trigger:this.newTrigger}]}});
+        this.pipelines.unshift(d);
+        this.showDialog = false;
+        this.newName = '';
+        showToast('Pipeline created');
+      } catch(e) { showToast('Failed','error'); }
+    },
+    async triggerPipeline(p) {
+      try {
+        await apiFetch('/api/pipelines/trigger/', {method:'POST', json:{pipeline_id:p.id}});
+        p.status = 'running';
+        showToast('Pipeline triggered');
+      } catch(e) { showToast('Trigger failed','error'); }
+    }
+  }
+}
+</script>
 {% endblock %}

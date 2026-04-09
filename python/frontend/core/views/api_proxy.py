@@ -235,6 +235,16 @@ def document_ingest_url(request):
         return JsonResponse({"error": str(e)}, status=400)
 
 
+@login_required
+@require_http_methods(["DELETE"])
+def document_delete(request, doc_id):
+    try:
+        get_client(request).delete_document(doc_id)
+        return JsonResponse({"ok": True})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
 # ── Settings ───────────────────────────────────────────────────────────
 
 @login_required
@@ -366,6 +376,17 @@ def pipelines_api(request):
 
 
 @login_required
+@require_http_methods(["POST"])
+def pipeline_trigger(request):
+    client = get_client(request)
+    try:
+        data = _json_body(request)
+        return JsonResponse(client.trigger_pipeline(data.get("pipeline_id", "")))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
 @require_http_methods(["GET", "POST"])
 def reports_api(request):
     client = get_client(request)
@@ -419,3 +440,42 @@ def system_health(request):
         return JsonResponse(client.get_system_health())
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
+
+
+# ── Call log flag ──────────────────────────────────────────────────────
+
+@login_required
+@require_http_methods(["POST"])
+def call_log_flag(request, log_id):
+    client = get_client(request)
+    try:
+        return JsonResponse(client.flag_for_retraining(log_id))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+# ── Retraining example update ─────────────────────────────────────────
+
+@login_required
+@require_http_methods(["POST"])
+def retraining_update(request, example_id):
+    client = get_client(request)
+    try:
+        return JsonResponse(client.update_retraining_example(example_id, _json_body(request)))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+# ── User management ───────────────────────────────────────────────────
+
+@login_required
+@require_http_methods(["PUT", "DELETE"])
+def user_detail_api(request, user_id):
+    client = get_client(request)
+    try:
+        if request.method == "DELETE":
+            client.delete_backend_user(user_id)
+            return JsonResponse({"ok": True})
+        return JsonResponse(client.update_backend_user(user_id, _json_body(request)))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)

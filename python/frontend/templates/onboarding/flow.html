@@ -156,9 +156,8 @@ function onboardingApp() {
         } else if (this.step === 3) {
           const d = await apiFetch('/api/agents/', {method:'POST', json:{
             name: this.agentConfig.name || 'My Agent',
-            first_message: this.agentConfig.firstMessage,
-            system_prompt: this.agentConfig.persona,
-            template_id: this.selectedTemplate,
+            systemPrompt: this.agentConfig.persona,
+            templateId: this.selectedTemplate,
           }});
           this.createdAgentId = d.id || d.agent?.id;
         } else if (this.step === 4) {
@@ -169,6 +168,16 @@ function onboardingApp() {
           }
           if (this.knowledgeUrl) {
             await apiFetch('/api/documents/ingest-url/', {method:'POST', json:{url:this.knowledgeUrl}});
+          }
+        } else if (this.step === 5) {
+          // Save voice selection to the agent
+          if (this.createdAgentId && this.selectedVoice) {
+            await apiFetch(`/api/agents/${this.createdAgentId}/`, {method:'PUT', json:{voiceType: this.selectedVoice}});
+          }
+        } else if (this.step === 6) {
+          // Save channel selections to the agent
+          if (this.createdAgentId) {
+            await apiFetch(`/api/agents/${this.createdAgentId}/`, {method:'PUT', json:{channels: this.channels}});
           }
         }
       } catch(e) { console.error(e); }

@@ -25,6 +25,7 @@ def analytics(request):
 
 @login_required
 def calls(request):
+    import json
     client = get_client(request)
     logs = []
     try:
@@ -32,7 +33,7 @@ def calls(request):
         logs = data.get("logs", data.get("callLogs", []))
     except Exception:
         pass
-    return render(request, "dashboard/calls.html", {"logs": logs})
+    return render(request, "dashboard/calls.html", {"logs": json.dumps(logs)})
 
 
 @login_required
@@ -105,13 +106,14 @@ def system(request):
 
 @login_required
 def users(request):
+    import json
     client = get_client(request)
     users_list = []
     try:
         users_list = client.get_users().get("users", [])
     except Exception:
         pass
-    return render(request, "dashboard/users.html", {"users_list": users_list})
+    return render(request, "dashboard/users.html", {"users_list": json.dumps(users_list)})
 
 
 @login_required
@@ -181,26 +183,52 @@ def backup(request):
 
 @login_required
 def reports(request):
+    import json
     client = get_client(request)
     pipeline_list = []
     try:
         pipeline_list = client.get_reports().get("pipelines", [])
     except Exception:
         pass
-    return render(request, "dashboard/reports.html", {"reports": pipeline_list})
+    return render(request, "dashboard/reports.html", {"reports": json.dumps(pipeline_list)})
 
 
 @login_required
 def integrations(request):
-    return render(request, "dashboard/integrations.html")
+    client = get_client(request)
+    integrations_list = []
+    # Build integration status from real credential checks
+    try:
+        twilio_status = client.get_twilio_credential_status()
+        twilio_connected = twilio_status.get("configured", False)
+    except Exception:
+        twilio_connected = False
+    try:
+        groq_status = client.get_groq_key_status()
+        groq_connected = groq_status.get("configured", False)
+    except Exception:
+        groq_connected = False
+
+    integrations_list = [
+        {"name": "Twilio", "description": "Phone calls, SMS, and WhatsApp messaging.", "color": "green",
+         "status": "connected" if twilio_connected else "Not connected"},
+        {"name": "Groq", "description": "LLM inference for agent conversations.", "color": "blue",
+         "status": "connected" if groq_connected else "Not connected"},
+        {"name": "Slack", "description": "Team notifications and alerts.", "color": "purple",
+         "status": "Not connected"},
+        {"name": "WhatsApp", "description": "WhatsApp Business messaging channel.", "color": "green",
+         "status": "connected" if twilio_connected else "Not connected"},
+    ]
+    return render(request, "dashboard/integrations.html", {"integrations": integrations_list})
 
 
 @login_required
 def pipelines(request):
+    import json
     client = get_client(request)
     pipeline_list = []
     try:
         pipeline_list = client.list_pipelines().get("pipelines", [])
     except Exception:
         pass
-    return render(request, "dashboard/pipelines.html", {"pipelines": pipeline_list})
+    return render(request, "dashboard/pipelines.html", {"pipelines": json.dumps(pipeline_list)})

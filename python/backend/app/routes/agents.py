@@ -135,11 +135,14 @@ async def create_agent(request_data: dict, auth: AuthContext = Depends(get_auth)
 
     agent = Agent(
         name=name,
+        description=request_data.get("description", ""),
         systemPrompt=request_data.get("systemPrompt", ""),
         voiceType=request_data.get("voiceType", "female"),
         llmPreferences=request_data.get("llmPreferences", {"model": "llama-3.3-70b-versatile"}),
         tokenLimit=request_data.get("tokenLimit", 4096),
         contextWindowStrategy=request_data.get("contextWindowStrategy", "condense"),
+        channels=request_data.get("channels"),
+        templateId=request_data.get("templateId"),
         tenantId=auth.tenant_id,
         userId=auth.user_id,
     )
@@ -157,7 +160,8 @@ async def update_agent(agent_id: str, request_data: dict, auth: AuthContext = De
     if not agent:
         return JSONResponse({"error": "Agent not found"}, status_code=404)
 
-    for field in ("name", "systemPrompt", "voiceType", "llmPreferences", "tokenLimit", "contextWindowStrategy"):
+    for field in ("name", "description", "systemPrompt", "voiceType", "llmPreferences",
+                   "tokenLimit", "contextWindowStrategy", "channels", "status", "phoneNumber", "brandId"):
         if field in request_data:
             setattr(agent, field, request_data[field])
 

@@ -26,6 +26,8 @@ async def list_templates(db: AsyncSession = Depends(get_db)):
                 "id": t.id,
                 "name": t.name,
                 "description": t.description,
+                "persona": t.baseSystemPrompt,
+                "baseSystemPrompt": t.baseSystemPrompt,
                 "defaultCapabilities": t.defaultCapabilities,
                 "suggestedKnowledgeCategories": t.suggestedKnowledgeCategories,
                 "defaultTools": t.defaultTools,

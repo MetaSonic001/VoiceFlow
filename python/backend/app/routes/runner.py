@@ -104,11 +104,66 @@ async def process_audio(
     agentId: str = Form(...),
     sessionId: str = Form("default"),
     auth: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_db),
 ):
-    # Basic stub — full ASR pipeline is complex
-    return {
-        "transcript": "[Audio processing not available in Python backend demo]",
-        "response": "Audio processing requires the TTS microservice. Please use text chat instead.",
-        "agentId": agentId,
-        "sessionId": sessionId,
-    }
+    """Process uploaded audio: STT via Groq Whisper → RAG → response."""
+    audio_bytes = await audio.read()
+
+    # Step 1: Speech-to-text via Groq Whisper API
+    transcript = ""
+    try:
+        import httpx
+        groq_key = settings.GROQ_API_KEY
+        # Try to get tenant-specific key
+        try:
+            from app.services.credentials import decrypt_credential
+            from app.models import Tenant
+            result = await db.execute(select(Tenant).where(Tenant.id == auth.tenant_id))
+            tenant = result.scalar_one_or_none()
+            if tenant and tenant.settings and tenant.settings.get("groqApiKey"):
+                groq_key = decrypt_credential(tenant.settings["groqApiKey"])
+        except Exception:
+            pass
+
+        if groq_key:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(
+                    "https://api.groq.com/openai/v1/audio/transcriptions",
+                    headers={"Authorization": f"Bearer {groq_key}"},
+                    files={"file": (audio.filename or "audio.webm", audio_bytes, audio.content_type or "audio/webm")},
+                    data={"model": "whisper-large-v3-turbo", "language": "en"},
+                )
+                if resp.status_code == 200:
+                    transcript = resp.json().get("text", "")
+    except Exception as e:
+        logger.warning("STT failed: %s", e)
+
+    if not transcript:
+        return {"transcript": "", "response": "Could not transcribe audio. Please try again or use text chat.", "agentId": agentId, "sessionId": sessionId}
+
+    # Step 2: Process through RAG pipeline (reuse chat logic)
+    result = await db.execute(select(Agent).where(Agent.id == agentId, Agent.tenantId == auth.tenant_id))
+    agent = result.scalar_one_or_none()
+    if not agent:
+        return JSONResponse({"error": "Agent not found"}, status_code=404)
+
+    from app.services.rag_service import process_query
+    rag_result = await process_query(db, auth.tenant_id, agentId, transcript, sessionId)
+    response_text = rag_result.get("response", "No response generated.")
+
+    # Log
+    try:
+        log = CallLog(
+            tenantId=auth.tenant_id, agentId=agentId, type="voice",
+            startedAt=datetime.now(timezone.utc), endedAt=datetime.now(timezone.utc),
+            transcript=json.dumps([
+                {"role": "user", "content": transcript},
+                {"role": "assistant", "content": response_text},
+            ]),
+        )
+        db.add(log)
+        await db.commit()
+    except Exception:
+        logger.exception("Failed to persist audio log")
+
+    return {"transcript": transcript, "response": response_text, "agentId": agentId, "sessionId": sessionId}

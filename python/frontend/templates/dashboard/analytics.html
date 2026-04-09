@@ -44,16 +44,14 @@ function analyticsPage(){return{range:'7d',chart:null,
     try{
       const r=await fetch('/api/analytics/overview/?timeRange='+this.range,{headers:{'X-CSRFToken':getCookie('csrftoken')}});
       const d=await r.json();
-      const series=d.timeSeries||d.chartData||[];
+      const series=d.timeSeries||d.callsPerDay||[];
       const labels=series.map(p=>p.date||p.label||'');
-      const calls=series.map(p=>p.calls||p.voice||0);
-      const chats=series.map(p=>p.chats||p.text||0);
+      const values=series.map(p=>p.calls||p.chats||p.count||0);
       const ctx=document.getElementById('analyticsChart');
       if(!ctx)return;
       if(this.chart)this.chart.destroy();
       this.chart=new Chart(ctx,{type:'line',data:{labels:labels.length?labels:['No data'],
-        datasets:[{label:'Calls',data:calls.length?calls:[0],borderColor:'#3b82f6',tension:.3,fill:false},
-                  {label:'Chats',data:chats.length?chats:[0],borderColor:'#10b981',tension:.3,fill:false}]
+        datasets:[{label:'Interactions',data:values.length?values:[0],borderColor:'#3b82f6',backgroundColor:'rgba(59,130,246,0.1)',tension:.3,fill:true}]
       },options:{responsive:true,plugins:{legend:{position:'bottom'}},scales:{y:{beginAtZero:true}}}});
     }catch(e){console.warn('Chart load failed',e)}
   }

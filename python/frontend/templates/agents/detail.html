@@ -32,23 +32,29 @@
       <div class="bg-white rounded-xl border p-5 space-y-4">
         <h3 class="font-semibold">Agent Details</h3>
         <div><label class="block text-xs text-gray-500 mb-1">Name</label><input x-model="agent.name" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
-        <div><label class="block text-xs text-gray-500 mb-1">First Message</label><input x-model="agent.first_message" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
-        <div><label class="block text-xs text-gray-500 mb-1">System Prompt</label><textarea x-model="agent.system_prompt" rows="5" class="w-full border rounded-lg px-3 py-2 text-sm"></textarea></div>
+        <div><label class="block text-xs text-gray-500 mb-1">Description</label><input x-model="agent.description" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="Brief description of this agent"></div>
+        <div><label class="block text-xs text-gray-500 mb-1">System Prompt</label><textarea x-model="agent.systemPrompt" rows="5" class="w-full border rounded-lg px-3 py-2 text-sm"></textarea></div>
+        <div><label class="block text-xs text-gray-500 mb-1">Voice Type</label>
+          <select x-model="agent.voiceType" class="w-full border rounded-lg px-3 py-2 text-sm">
+            <option value="female">Female</option>
+            <option value="male">Male</option>
+          </select>
+        </div>
         <button @click="saveAgent()" :disabled="saving" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50" x-text="saving?'Saving…':'Save Changes'"></button>
       </div>
       <div class="space-y-6">
         <div class="bg-white rounded-xl border p-5">
           <h3 class="font-semibold mb-3">Quick Stats</h3>
           <div class="grid grid-cols-2 gap-4 text-sm">
-            <div><div class="text-gray-400 text-xs">Total Conversations</div><div class="text-xl font-bold">{{ agent.total_conversations|default:"0" }}</div></div>
-            <div><div class="text-gray-400 text-xs">Avg Satisfaction</div><div class="text-xl font-bold">{{ agent.avg_satisfaction|default:"N/A" }}</div></div>
-            <div><div class="text-gray-400 text-xs">Created</div><div class="text-sm text-gray-600">{{ agent.created_at|default:"—" }}</div></div>
-            <div><div class="text-gray-400 text-xs">Last Active</div><div class="text-sm text-gray-600">{{ agent.updated_at|default:"—" }}</div></div>
+            <div><div class="text-gray-400 text-xs">Total Calls</div><div class="text-xl font-bold" x-text="agent.totalCalls || 0">0</div></div>
+            <div><div class="text-gray-400 text-xs">Total Chats</div><div class="text-xl font-bold" x-text="agent.totalChats || 0">0</div></div>
+            <div><div class="text-gray-400 text-xs">Created</div><div class="text-sm text-gray-600" x-text="agent.createdAt ? new Date(agent.createdAt).toLocaleDateString() : '—'">—</div></div>
+            <div><div class="text-gray-400 text-xs">Last Active</div><div class="text-sm text-gray-600" x-text="agent.updatedAt ? new Date(agent.updatedAt).toLocaleDateString() : '—'">—</div></div>
           </div>
         </div>
         <div class="bg-white rounded-xl border p-5">
           <h3 class="font-semibold mb-3">Embed Code</h3>
-          <code class="block p-3 bg-gray-50 rounded-lg text-xs font-mono text-gray-600 break-all">&lt;script src="https://app.voiceflow.ai/widget/{{ agent.id }}/embed.js"&gt;&lt;/script&gt;</code>
+          <code class="block p-3 bg-gray-50 rounded-lg text-xs font-mono text-gray-600 break-all" x-text="'<script src=\"' + location.origin + '/widget/' + agent.id + '/embed.js\"></script>'"></code>
         </div>
       </div>
     </div>
@@ -59,12 +65,12 @@
     <div class="bg-white rounded-xl border p-6 max-w-xl space-y-4">
       <h3 class="font-semibold">LLM Configuration</h3>
       <div><label class="block text-xs text-gray-500 mb-1">Model</label>
-        <select x-model="agent.llm_model" class="w-full border rounded-lg px-3 py-2 text-sm">
+        <select x-model="agent.llmPreferences.model" class="w-full border rounded-lg px-3 py-2 text-sm">
           {% for m in models_list %}<option value="{{ m.id }}">{{ m.name|default:m.id }}</option>{% endfor %}
         </select>
       </div>
-      <div><label class="block text-xs text-gray-500 mb-1">Temperature <span class="text-gray-400" x-text="agent.temperature || 0.7"></span></label><input type="range" min="0" max="2" step="0.1" x-model="agent.temperature" class="w-full"></div>
-      <div><label class="block text-xs text-gray-500 mb-1">Max Tokens</label><input type="number" x-model="agent.max_tokens" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="1024"></div>
+      <div><label class="block text-xs text-gray-500 mb-1">Temperature <span class="text-gray-400" x-text="agent.llmPreferences.temperature || 0.7"></span></label><input type="range" min="0" max="2" step="0.1" x-model="agent.llmPreferences.temperature" class="w-full"></div>
+      <div><label class="block text-xs text-gray-500 mb-1">Max Tokens</label><input type="number" x-model.number="agent.tokenLimit" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="4096"></div>
       <button @click="saveAgent()" :disabled="saving" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">Save LLM Settings</button>
     </div>
   </div>
@@ -81,14 +87,30 @@
 
 <script>
 function agentDetailApp() {
+  const raw = {{ agent|safe }};
+  // Ensure llmPreferences is always an object with defaults
+  if (!raw.llmPreferences || typeof raw.llmPreferences !== 'object') {
+    raw.llmPreferences = {model: 'llama-3.3-70b-versatile', temperature: 0.7};
+  }
+  if (!raw.llmPreferences.temperature) raw.llmPreferences.temperature = 0.7;
+  if (!raw.llmPreferences.model) raw.llmPreferences.model = 'llama-3.3-70b-versatile';
   return {
     tab: 'overview',
     saving: false,
-    agent: {{ agent|safe }},
+    agent: raw,
     async saveAgent() {
       this.saving = true;
       try {
-        await apiFetch('/api/agents/{{ agent.id|default:"" }}/', {method:'PUT', body:JSON.stringify(this.agent)});
+        await apiFetch('/api/agents/{{ agent.id|default:"" }}/', {method:'PUT', body:JSON.stringify({
+          name: this.agent.name,
+          description: this.agent.description,
+          systemPrompt: this.agent.systemPrompt,
+          voiceType: this.agent.voiceType,
+          llmPreferences: this.agent.llmPreferences,
+          tokenLimit: this.agent.tokenLimit,
+          channels: this.agent.channels,
+          contextWindowStrategy: this.agent.contextWindowStrategy,
+        })});
         showToast('Agent updated','success');
       } catch(e) { showToast('Save failed','error'); }
       this.saving = false;
