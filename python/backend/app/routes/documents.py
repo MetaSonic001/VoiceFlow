@@ -54,14 +54,17 @@ def _get_s3_client():
 
 
 @router.get("/")
-async def list_documents(agentId: str = Query(...), auth: AuthContext = Depends(get_auth), db: AsyncSession = Depends(get_db)):
-    r = await db.execute(select(Agent).where(Agent.id == agentId, Agent.tenantId == auth.tenant_id))
-    if not r.scalar_one_or_none():
-        return JSONResponse({"error": "Access denied"}, status_code=403)
+async def list_documents(agentId: str = Query(None), auth: AuthContext = Depends(get_auth), db: AsyncSession = Depends(get_db)):
+    query = select(Document).where(Document.tenantId == auth.tenant_id)
+    if agentId:
+        r = await db.execute(select(Agent).where(Agent.id == agentId, Agent.tenantId == auth.tenant_id))
+        if not r.scalar_one_or_none():
+            return JSONResponse({"error": "Access denied"}, status_code=403)
+        query = query.where(Document.agentId == agentId)
 
-    result = await db.execute(select(Document).where(Document.agentId == agentId).order_by(Document.createdAt.desc()))
+    result = await db.execute(query.order_by(Document.createdAt.desc()))
     docs = result.scalars().all()
-    return [_doc_to_dict(d) for d in docs]
+    return {"documents": [_doc_to_dict(d) for d in docs]}
 
 
 @router.get("/{doc_id}")
