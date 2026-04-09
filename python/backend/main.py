@@ -72,6 +72,16 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"[db] PostgreSQL connection failed: {e}")
 
+    # Auto-create tables if they don't exist
+    try:
+        from app.database import engine
+        from app.models import Base
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("[db] Tables verified/created")
+    except Exception as e:
+        logger.warning(f"[db] Table creation failed (non-fatal): {e}")
+
     await seed_demo()
     logger.info(f"Python backend ready on port {settings.PORT}")
     yield
@@ -88,7 +98,7 @@ app = FastAPI(
 # CORS — same config as Express
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.FRONTEND_URL, "http://localhost:3000"],
+    allow_origins=[settings.FRONTEND_URL, "http://localhost:3000", "http://localhost:8090"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["Content-Type", "Authorization", "x-tenant-id", "x-user-id", "x-user-email", "X-API-Key"],
@@ -114,6 +124,7 @@ async def health():
 from app.routes import auth, onboarding, agents, documents, templates, runner
 from app.routes import analytics, logs, brands, settings as settings_routes
 from app.routes import ingestion, users, retraining, admin, tts, rag
+from app.routes import widget
 
 # WITHOUT /api prefix (matches Express)
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])
@@ -135,6 +146,7 @@ app.include_router(logs.router, prefix="/api/logs", tags=["Logs"])
 app.include_router(retraining.router, prefix="/api/retraining", tags=["Retraining"])
 app.include_router(brands.router, prefix="/api/brands", tags=["Brands"])
 app.include_router(tts.router, prefix="/api/tts", tags=["TTS"])
+app.include_router(widget.router, prefix="/api/widget", tags=["Widget"])
 
 
 # ── Twilio proxy (matches Express /twilio/numbers) ──────────────────────────

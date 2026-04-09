@@ -12,14 +12,11 @@ import httpx
 
 from app.database import get_db
 from app.auth import AuthContext, get_auth
-from app.models import Agent, AgentConfiguration, Tenant, Brand
+from app.models import Agent, AgentConfiguration, Tenant, Brand, OnboardingProgress, User
 from app.config import settings
 
 logger = logging.getLogger("voiceflow.onboarding")
 router = APIRouter()
-
-# In-memory onboarding progress store (mirrors Express behavior)
-_progress_store: dict[str, dict] = {}
 
 
 # ── Company search (Clearbit) ────────────────────────────────────────────────
@@ -366,16 +363,32 @@ async def get_status():
     return {"status": "ready", "message": "Agent is ready for deployment"}
 
 
-# ── Onboarding progress (in-memory, same as Express) ────────────────────────
+# ── Onboarding progress (database-backed) ───────────────────────────────────
 
 @router.post("/progress")
-async def save_progress(request: Request, auth: AuthContext = Depends(get_auth)):
+async def save_progress(request: Request, auth: AuthContext = Depends(get_auth), db: AsyncSession = Depends(get_db)):
     body = await request.json()
-    _progress_store[auth.user_id] = {
-        "agent_id": body.get("agent_id"),
-        "current_step": body.get("current_step"),
-        "data": body.get("data"),
-    }
+    # Find user email
+    user_result = await db.execute(select(User).where(User.id == auth.user_id))
+    user = user_result.scalar_one_or_none()
+    email = user.email if user else auth.user_id
+
+    result = await db.execute(select(OnboardingProgress).where(OnboardingProgress.userEmail == email))
+    progress = result.scalar_one_or_none()
+    if progress:
+        progress.agentId = body.get("agent_id")
+        progress.currentStep = body.get("current_step")
+        progress.data = body.get("data")
+    else:
+        progress = OnboardingProgress(
+            userEmail=email,
+            tenantId=auth.tenant_id,
+            agentId=body.get("agent_id"),
+            currentStep=body.get("current_step"),
+            data=body.get("data"),
+        )
+        db.add(progress)
+    await db.commit()
     return {
         "success": True,
         "agent_id": body.get("agent_id"),
@@ -385,14 +398,29 @@ async def save_progress(request: Request, auth: AuthContext = Depends(get_auth))
 
 
 @router.get("/progress")
-async def get_progress(auth: AuthContext = Depends(get_auth)):
-    progress = _progress_store.get(auth.user_id)
+async def get_progress(auth: AuthContext = Depends(get_auth), db: AsyncSession = Depends(get_db)):
+    user_result = await db.execute(select(User).where(User.id == auth.user_id))
+    user = user_result.scalar_one_or_none()
+    email = user.email if user else auth.user_id
+
+    result = await db.execute(select(OnboardingProgress).where(OnboardingProgress.userEmail == email))
+    progress = result.scalar_one_or_none()
     if progress:
-        return {"exists": True, **progress}
+        return {
+            "exists": True,
+            "agent_id": progress.agentId,
+            "current_step": progress.currentStep,
+            "data": progress.data,
+        }
     return {"exists": False}
 
 
 @router.delete("/progress")
-async def delete_progress(auth: AuthContext = Depends(get_auth)):
-    _progress_store.pop(auth.user_id, None)
+async def delete_progress(auth: AuthContext = Depends(get_auth), db: AsyncSession = Depends(get_db)):
+    user_result = await db.execute(select(User).where(User.id == auth.user_id))
+    user = user_result.scalar_one_or_none()
+    email = user.email if user else auth.user_id
+
+    await db.execute(sa_delete(OnboardingProgress).where(OnboardingProgress.userEmail == email))
+    await db.commit()
     return {"deleted": True}

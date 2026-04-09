@@ -1,0 +1,72 @@
+[project]
+name = "voiceflow"
+version = "1.0.0"
+description = "Multi-tenant AI voice agent platform with RAG, document ingestion, and hybrid search"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+
+dependencies = [
+    # ── FastAPI Backend ──────────────────────────────────
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg>=0.30",
+    "pydantic>=2.10",
+    "pydantic-settings>=2.7",
+    "python-multipart>=0.0.18",
+    "redis[hiredis]>=5.2",
+    "PyJWT>=2.10",
+    "python-jose[cryptography]>=3.3",
+    "httpx>=0.28",
+    "psycopg2-binary>=2.9",
+    "python-dotenv>=1.0",
+    "aiofiles>=24.0",
+
+    # ── Document Ingestion Pipeline ──────────────────────
+    "docling>=2.0",
+    "paddleocr>=3.0",
+    "paddlepaddle>=3.0",
+    "sentence-transformers>=3.0",
+    "chromadb>=1.0",
+    "langchain-text-splitters>=0.3",
+    "rank-bm25>=0.2",
+
+    # ── Document Parsing Fallbacks ───────────────────────
+    "python-docx>=1.0",
+    "python-pptx>=1.0",
+    "openpyxl>=3.1",
+    "Pillow>=10.0",
+    "pdfminer.six>=20200101",
+
+    # ── URL Scraping ─────────────────────────────────────
+    "trafilatura>=2.0",
+    "beautifulsoup4>=4.12",
+
+    # ── Object Storage ───────────────────────────────────
+    "boto3>=1.35",
+
+    # ── Django Frontend ──────────────────────────────────
+    "Django>=6.0",
+    "django-htmx>=1.27",
+    "whitenoise>=6.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

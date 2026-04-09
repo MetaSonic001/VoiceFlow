@@ -1,6 +1,7 @@
 """
 /api/retraining routes — mirrors Express src/routes/retraining.ts
 """
+import json
 import math
 from datetime import datetime, timezone
 from typing import Optional
@@ -115,14 +116,44 @@ async def delete_example(example_id: str, auth: AuthContext = Depends(get_auth),
 
 @router.post("/process")
 async def process_retraining(auth: AuthContext = Depends(get_auth), db: AsyncSession = Depends(get_db)):
-    # Simplified: just count flagged logs
+    """Process flagged call logs: parse transcripts and create RetrainingExample records."""
     flagged = await db.execute(
-        select(CallLog).where(CallLog.tenantId == auth.tenant_id, CallLog.flaggedForRetraining.is_(True), CallLog.retrained.is_(False))
+        select(CallLog).where(
+            CallLog.tenantId == auth.tenant_id,
+            CallLog.flaggedForRetraining.is_(True),
+            CallLog.retrained.is_(False),
+        )
     )
     count = 0
     for log in flagged.scalars().all():
+        # Parse transcript to extract Q&A pairs
+        try:
+            transcript = json.loads(log.transcript) if isinstance(log.transcript, str) else log.transcript
+            if isinstance(transcript, list):
+                # Extract user-query / assistant-response pairs
+                for i in range(len(transcript)):
+                    turn = transcript[i]
+                    if turn.get("role") == "user" and i + 1 < len(transcript):
+                        next_turn = transcript[i + 1]
+                        if next_turn.get("role") == "assistant":
+                            user_query = turn.get("content", "").strip()
+                            bad_response = next_turn.get("content", "").strip()
+                            if user_query and bad_response:
+                                example = RetrainingExample(
+                                    tenantId=auth.tenant_id,
+                                    agentId=log.agentId,
+                                    callLogId=log.id,
+                                    userQuery=user_query,
+                                    badResponse=bad_response,
+                                    idealResponse=bad_response,  # Admin will edit this
+                                    status="pending",
+                                )
+                                db.add(example)
+                                count += 1
+        except Exception:
+            pass  # Skip unparseable transcripts
         log.retrained = True
-        count += 1
+
     await db.commit()
     return {"processed": True, "examplesCreated": count}
 

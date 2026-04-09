@@ -50,6 +50,14 @@ class BackendClient:
                 return {}
             return r.json()
 
+    def _patch(self, path, json=None):
+        with httpx.Client(timeout=TIMEOUT) as c:
+            r = c.patch(self._url(path), headers=self._headers, json=json)
+            r.raise_for_status()
+            if r.status_code == 204:
+                return {}
+            return r.json()
+
     def _delete(self, path):
         with httpx.Client(timeout=TIMEOUT) as c:
             r = c.delete(self._url(path), headers=self._headers)
@@ -63,7 +71,7 @@ class BackendClient:
 
     # ── Onboarding ─────────────────────────────────────────────────────
     def save_company_profile(self, data: dict):
-        return self._post("/api/onboarding/company", json=data)
+        return self._post("/onboarding/company", json=data)
 
     def create_agent(self, data: dict):
         return self._post("/api/agents/", json=data)
@@ -72,25 +80,25 @@ class BackendClient:
         payload = {"websites": websites or [], "faqText": faq_text}
         if agent_id:
             payload["agentId"] = agent_id
-        return self._post("/api/onboarding/knowledge", json=payload)
+        return self._post("/onboarding/knowledge", json=payload)
 
     def upload_document(self, file_tuple):
-        return self._post("/api/documents/upload", files={"file": file_tuple})
+        return self._post("/api/documents/", files={"file": file_tuple})
 
     def configure_voice(self, data: dict):
-        return self._post("/api/voice/configure", json=data)
+        return self._post("/onboarding/voice", json=data)
 
     def save_agent_config(self, data: dict):
-        return self._post("/api/onboarding/agent-config", json=data)
+        return self._post("/onboarding/agent-config", json=data)
 
     def setup_channels(self, data: dict):
-        return self._post("/api/channels/setup", json=data)
+        return self._post("/onboarding/channels", json=data)
 
     def deploy_agent(self, agent_id: str):
-        return self._post(f"/api/agents/{agent_id}/deploy")
+        return self._post(f"/api/agents/{agent_id}/activate")
 
     def get_deployment_status(self, agent_id: str):
-        return self._get(f"/api/agents/{agent_id}/deploy/status")
+        return self._get(f"/api/agents/{agent_id}")
 
     # ── Agents ─────────────────────────────────────────────────────────
     def get_agents(self, page=1, limit=20):
@@ -112,7 +120,7 @@ class BackendClient:
         return self._post(f"/api/agents/{agent_id}/pause")
 
     def get_agent_templates(self):
-        return self._get("/api/agents/templates")
+        return self._get("/api/templates/")
 
     # ── Runner / Chat / Audio ──────────────────────────────────────────
     def chat(self, agent_id: str, message: str, session_id: str):
@@ -127,38 +135,38 @@ class BackendClient:
 
     # ── Voice / TTS ────────────────────────────────────────────────────
     def get_preset_voices(self):
-        return self._get("/api/voice/presets")
+        return self._get("/api/tts/preset-voices")
 
     def clone_voice(self, audio_bytes: bytes, filename: str = "sample.webm"):
-        return self._post("/api/voice/clone", files={"audio": (filename, audio_bytes, "audio/webm")})
+        return self._post("/api/tts/clone-voice", files={"audio": (filename, audio_bytes, "audio/webm")})
 
     def synthesize_tts(self, text: str, voice_id: str = ""):
         """Returns raw audio bytes."""
         with httpx.Client(timeout=TIMEOUT) as c:
-            r = c.post(self._url("/api/tts/synthesize"),
+            r = c.post(self._url("/api/tts/synthesise"),
                        headers=self._headers,
                        json={"text": text, "voiceId": voice_id})
             r.raise_for_status()
             return r.content  # raw audio
 
-    # ── Knowledge Base ─────────────────────────────────────────────────
+    # ── Knowledge Base (proxied to onboarding/documents) ───────────────
     def get_knowledge_base(self):
-        return self._get("/api/knowledge/")
+        return self._get("/api/documents/", params={"limit": 100})
 
     def get_company_profile(self):
-        return self._get("/api/knowledge/company-profile")
+        return self._get("/onboarding/company")
 
     def get_company_knowledge(self):
-        return self._get("/api/knowledge/company-knowledge")
+        return self._get("/onboarding/company-knowledge")
 
     def delete_company_knowledge(self, chunk_id: str):
-        return self._delete(f"/api/knowledge/company-knowledge/{chunk_id}")
+        return self._delete(f"/onboarding/company-knowledge/{chunk_id}")
 
     def trigger_url_ingestion(self, url: str):
-        return self._post("/api/documents/ingest-url", json={"url": url})
+        return self._post("/api/ingestion/start", json={"urls": [url]})
 
     def get_ingestion_status(self, job_id: str):
-        return self._get(f"/api/documents/ingest-url/{job_id}/status")
+        return self._get(f"/api/ingestion/status/{job_id}")
 
     def delete_document(self, doc_id: str):
         return self._delete(f"/api/documents/{doc_id}")
@@ -168,10 +176,10 @@ class BackendClient:
         params = {"timeRange": time_range}
         if agent_id:
             params["agentId"] = agent_id
-        return self._get("/api/analytics/overview", params=params)
+        return self._get("/analytics/overview", params=params)
 
     def get_analytics_metrics(self, time_range="7d"):
-        return self._get("/api/analytics/metrics-chart", params={"timeRange": time_range})
+        return self._get("/analytics/metrics-chart", params={"timeRange": time_range})
 
     # ── Call Logs ──────────────────────────────────────────────────────
     def get_call_logs(self, page=1, limit=20, agent_id="", search=""):
@@ -180,70 +188,70 @@ class BackendClient:
             params["agentId"] = agent_id
         if search:
             params["search"] = search
-        return self._get("/api/call-logs/", params=params)
+        return self._get("/api/logs/", params=params)
 
     def get_call_log(self, log_id: str):
-        return self._get(f"/api/call-logs/{log_id}")
+        return self._get(f"/api/logs/{log_id}")
 
     def rate_call_log(self, log_id: str, rating: int):
-        return self._post(f"/api/call-logs/{log_id}/rate", json={"rating": rating})
+        return self._patch(f"/api/logs/{log_id}/rating", json={"rating": rating})
 
     def flag_for_retraining(self, log_id: str):
-        return self._post(f"/api/call-logs/{log_id}/flag-retraining")
+        return self._post(f"/api/logs/{log_id}/flag")
 
     # ── Retraining ─────────────────────────────────────────────────────
     def get_retraining_examples(self, page=1, limit=20, status=""):
         params = {"page": page, "limit": limit}
         if status:
             params["status"] = status
-        return self._get("/api/retraining/examples", params=params)
+        return self._get("/api/retraining/", params=params)
 
     def get_retraining_stats(self):
         return self._get("/api/retraining/stats")
 
     def update_retraining_example(self, example_id: str, data: dict):
-        return self._put(f"/api/retraining/examples/{example_id}", json=data)
+        return self._patch(f"/api/retraining/{example_id}", json=data)
 
     def delete_retraining_example(self, example_id: str):
-        return self._delete(f"/api/retraining/examples/{example_id}")
+        return self._delete(f"/api/retraining/{example_id}")
 
     def trigger_retraining_pipeline(self):
-        return self._post("/api/retraining/trigger")
+        return self._post("/api/retraining/process")
 
     # ── Settings ───────────────────────────────────────────────────────
     def get_settings(self):
-        return self._get("/settings")
+        return self._get("/api/settings/")
 
     def update_settings(self, data: dict):
-        return self._put("/settings", json=data)
+        return self._put("/api/settings/", json=data)
 
     def save_twilio_credentials(self, data: dict):
-        return self._post("/api/settings/twilio/credentials", json=data)
+        return self._post("/api/settings/twilio", json=data)
 
     def get_twilio_credential_status(self):
-        return self._get("/api/settings/twilio/credentials/status")
+        return self._get("/api/settings/twilio")
 
     def delete_twilio_credentials(self):
-        return self._delete("/api/settings/twilio/credentials")
+        return self._delete("/api/settings/twilio")
 
     def save_groq_api_key(self, data: dict):
-        return self._post("/api/settings/groq/api-key", json=data)
+        return self._post("/api/settings/groq", json=data)
 
     def get_groq_key_status(self):
-        return self._get("/api/settings/groq/api-key/status")
+        return self._get("/api/settings/groq")
 
     def delete_groq_api_key(self):
-        return self._delete("/api/settings/groq/api-key")
+        return self._delete("/api/settings/groq")
 
     def get_twilio_numbers(self):
-        return self._get("/api/twilio/numbers")
+        return self._get("/twilio/numbers")
 
-    # ── System ─────────────────────────────────────────────────────────
+    # ── System / Groq Models ──────────────────────────────────────────
     def get_system_metrics(self):
-        return self._get("/api/system/metrics")
+        return self._get("/health")
 
     def get_groq_models(self):
-        return self._get("/api/llm/groq/models")
+        return self._get("/api/settings/groq/models")
 
     # ── Users ──────────────────────────────────────────────────────────
     def get_users(self):
@@ -260,27 +268,27 @@ class BackendClient:
 
     # ── Billing ────────────────────────────────────────────────────────
     def get_usage_stats(self):
-        return self._get("/api/billing/usage")
+        return self._get("/analytics/usage")
 
     # ── Pipelines ──────────────────────────────────────────────────────
     def list_pipelines(self):
-        return self._get("/api/pipelines/")
+        return self._get("/admin/pipelines")
 
     def create_pipeline(self, data: dict):
-        return self._post("/api/pipelines/", json=data)
+        return self._post("/admin/pipelines", json=data)
 
     def trigger_pipeline(self, pipeline_id: str):
-        return self._post(f"/api/pipelines/{pipeline_id}/trigger")
+        return self._post("/admin/pipelines/trigger", json={"pipelineId": pipeline_id})
 
     def list_pipeline_agents(self):
-        return self._get("/api/pipelines/agents")
+        return self._get("/admin/pipeline_agents")
 
     # ── Reports ────────────────────────────────────────────────────────
     def generate_report(self, data: dict):
-        return self._post("/api/reports/generate", json=data)
+        return self._post("/admin/pipelines", json=data)
 
     def get_reports(self):
-        return self._get("/api/reports/")
+        return self._get("/admin/pipelines")
 
 
 def get_client(request) -> BackendClient:

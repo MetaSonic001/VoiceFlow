@@ -1,3 +1,4 @@
+# ── FastAPI Backend ───────────────────────────────────────
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 sqlalchemy[asyncio]==2.0.36
@@ -11,3 +12,28 @@ httpx==0.28.1
 redis[hiredis]==5.2.1
 PyJWT==2.10.1
 python-jose[cryptography]==3.3.0
+aiofiles>=24.0
+
+# ── Document Ingestion Pipeline ──────────────────────────
+docling>=2.0
+paddleocr>=3.0
+paddlepaddle>=3.0
+sentence-transformers>=3.0
+chromadb>=1.0
+langchain-text-splitters>=0.3
+rank-bm25>=0.2
+numpy>=1.26
+
+# ── Document Parsing Fallbacks ───────────────────────────
+python-docx>=1.0
+python-pptx>=1.0
+openpyxl>=3.1
+Pillow>=10.0
+pdfminer.six>=20200101
+
+# ── URL Scraping ─────────────────────────────────────────
+trafilatura>=2.0
+beautifulsoup4>=4.12
+
+# ── Object Storage (MinIO) ──────────────────────────────
+boto3>=1.35

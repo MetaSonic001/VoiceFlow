@@ -2,18 +2,14 @@
 /api/runner routes — mirrors Express src/routes/runner.ts
 POST /chat, GET /agent/:agentId, POST /audio
 """
-import asyncio
 import json
 import logging
-import re
 from datetime import datetime, timezone
-from typing import Optional
 
 from fastapi import APIRouter, Depends, UploadFile, File, Form
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-import httpx
 
 from app.database import get_db
 from app.auth import AuthContext, get_auth
@@ -22,51 +18,6 @@ from app.config import settings
 
 logger = logging.getLogger("voiceflow.runner")
 router = APIRouter()
-
-MAX_RETRIES = 4
-
-
-async def _call_groq(groq_key: str, system_prompt: str, message: str, max_tokens: int) -> str:
-    """Call Groq with automatic retry on 429 rate-limit responses."""
-    async with httpx.AsyncClient(timeout=60) as client:
-        for attempt in range(MAX_RETRIES):
-            resp = await client.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
-                json={
-                    "model": "llama-3.1-8b-instant",
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": message},
-                    ],
-                    "max_tokens": max_tokens,
-                    "temperature": 0.7,
-                },
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                return data["choices"][0]["message"]["content"]
-
-            if resp.status_code == 429:
-                # Parse retry-after hint from Groq error body
-                wait = 2.0 * (attempt + 1)  # default backoff
-                try:
-                    body = resp.json()
-                    msg = body.get("error", {}).get("message", "")
-                    m = re.search(r"try again in ([\d.]+)s", msg)
-                    if m:
-                        wait = float(m.group(1)) + 0.5  # add small buffer
-                except Exception:
-                    pass
-                logger.info(f"Groq 429 — retrying in {wait:.1f}s (attempt {attempt + 1}/{MAX_RETRIES})")
-                await asyncio.sleep(wait)
-                continue
-
-            logger.warning(f"Groq API error: {resp.status_code} {resp.text}")
-            return None
-
-    logger.warning("Groq: all retries exhausted")
-    return None
 
 
 @router.post("/chat")
@@ -80,41 +31,19 @@ async def chat(request_data: dict, auth: AuthContext = Depends(get_auth), db: As
     if not agent_id:
         return JSONResponse({"error": "\"agentId\" is required"}, status_code=400)
 
-    # Verify agent
+    # Verify agent belongs to tenant
     result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.tenantId == auth.tenant_id))
     agent = result.scalar_one_or_none()
+    if not agent:
+        return JSONResponse({"error": "Agent not found"}, status_code=404)
 
-    system_prompt = "You are a helpful AI assistant. Provide clear, accurate, and concise responses."
-    if agent and agent.systemPrompt:
-        system_prompt = agent.systemPrompt
-
-    token_limit = (agent.tokenLimit if agent else None) or 4096
-
-    # Try to get tenant Groq key
-    groq_key = settings.GROQ_API_KEY
-    if agent:
-        from app.models import Tenant
-        tr = await db.execute(select(Tenant).where(Tenant.id == auth.tenant_id))
-        tenant = tr.scalar_one_or_none()
-        if tenant and tenant.settings:
-            encrypted_key = tenant.settings.get("groqApiKey")
-            if encrypted_key and isinstance(encrypted_key, str) and encrypted_key.startswith("gsk_"):
-                groq_key = encrypted_key
-
-    # Call Groq API with automatic retry on rate-limit
-    response_text = "I'm sorry, the AI service is temporarily unavailable. Please try again in a moment."
-    if groq_key:
-        try:
-            llm_reply = await _call_groq(groq_key, system_prompt, message, min(token_limit, 1024))
-            if llm_reply:
-                response_text = llm_reply
-        except Exception:
-            logger.exception("Groq API call failed")
-    else:
-        response_text = "No Groq API key configured. Please add one in Settings."
+    # Full RAG pipeline
+    from app.services.rag_service import process_query
+    chat_start = datetime.now(timezone.utc)
+    rag_result = await process_query(db, auth.tenant_id, agent_id, message, session_id)
+    response_text = rag_result.get("response", "No response generated.")
 
     # Log the interaction
-    chat_start = datetime.now(timezone.utc)
     try:
         log = CallLog(
             tenantId=auth.tenant_id,

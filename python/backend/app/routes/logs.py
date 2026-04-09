@@ -22,7 +22,6 @@ async def list_logs(
     agentId: Optional[str] = None,
     auth: AuthContext = Depends(get_auth),
     db: AsyncSession = Depends(get_db),
-    **kwargs,
 ):
     page = max(1, page)
     limit = min(200, max(1, limit))

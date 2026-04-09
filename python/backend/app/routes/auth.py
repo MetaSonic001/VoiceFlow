@@ -8,6 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 import jwt as pyjwt
 
+from fastapi.responses import JSONResponse
+
 from app.database import get_db
 from app.models import User, Tenant, Brand
 from app.config import settings
@@ -46,7 +48,7 @@ def _user_response(user: User, tenant: Optional[Tenant], brand: Optional[Brand])
 async def clerk_sync(body: EmailBody, db: AsyncSession = Depends(get_db)):
     email = body.email
     if not email:
-        return {"error": "Email is required"}, 400
+        return JSONResponse({"error": "Email is required"}, status_code=400)
 
     result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()
@@ -86,7 +88,7 @@ async def login(body: EmailBody, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.email == body.email))
     user = result.scalar_one_or_none()
     if not user:
-        return {"error": "Invalid credentials"}, 401
+        return JSONResponse({"error": "Invalid credentials"}, status_code=401)
 
     r = await db.execute(select(Tenant).where(Tenant.id == user.tenantId))
     tenant = r.scalar_one_or_none()
@@ -107,7 +109,7 @@ async def signup(body: EmailBody, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.email == body.email))
     existing = result.scalar_one_or_none()
     if existing:
-        return {"error": "User already exists"}, 400
+        return JSONResponse({"error": "User already exists"}, status_code=400)
 
     tenant = Tenant(name=f"{body.email.split('@')[0]}'s Organization")
     db.add(tenant)

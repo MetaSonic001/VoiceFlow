@@ -1,7 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Get Started — VoiceFlow AI{% endblock %}
-{% block body_class %}bg-gray-50{% endblock %}
-{% block content %}
+{% block body %}
 <div x-data="onboardingApp()" class="min-h-screen flex flex-col">
   <!-- Progress bar -->
   <div class="bg-white border-b sticky top-0 z-30">
@@ -153,24 +152,23 @@ function onboardingApp() {
       this.saving = true;
       try {
         if (this.step === 1) {
-          await apiFetch('/api/onboarding/company/', {method:'POST', body:JSON.stringify(this.company)});
+          await apiFetch('/api/onboarding/company/', {method:'POST', json:this.company});
         } else if (this.step === 3) {
-          const r = await apiFetch('/api/agents/', {method:'POST', body:JSON.stringify({
+          const d = await apiFetch('/api/agents/', {method:'POST', json:{
             name: this.agentConfig.name || 'My Agent',
             first_message: this.agentConfig.firstMessage,
             system_prompt: this.agentConfig.persona,
             template_id: this.selectedTemplate,
-          })});
-          const d = await r.json();
+          }});
           this.createdAgentId = d.id || d.agent?.id;
         } else if (this.step === 4) {
           if (this.knowledgeFile) {
             const fd = new FormData();
             fd.append('file', this.knowledgeFile);
-            await fetch('/api/documents/upload/', {method:'POST', body:fd, headers:{'X-CSRFToken': getCsrfToken()}});
+            await fetch('/api/documents/upload/', {method:'POST', body:fd, headers:{'X-CSRFToken': CSRF}});
           }
           if (this.knowledgeUrl) {
-            await apiFetch('/api/documents/ingest-url/', {method:'POST', body:JSON.stringify({url:this.knowledgeUrl})});
+            await apiFetch('/api/documents/ingest-url/', {method:'POST', json:{url:this.knowledgeUrl}});
           }
         }
       } catch(e) { console.error(e); }
@@ -184,10 +182,9 @@ function onboardingApp() {
       this.testInput = '';
       this.testMessages.push({role:'user', text:msg});
       try {
-        const r = await apiFetch('/api/chat/', {method:'POST', body:JSON.stringify({
+        const d = await apiFetch('/api/chat/', {method:'POST', json:{
           agentId: this.createdAgentId || '', message: msg, sessionId: 'onboarding-test',
-        })});
-        const d = await r.json();
+        }});
         this.testMessages.push({role:'agent', text: d.response || d.reply || 'No response'});
       } catch(e) {
         this.testMessages.push({role:'agent', text:'Error: could not reach agent'});

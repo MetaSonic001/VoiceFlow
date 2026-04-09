@@ -1,20 +1,21 @@
 """
 /api/rag routes — mirrors Express src/routes/rag.ts
-Query and conversation management.
+Query and conversation management with full RAG pipeline.
 """
-import json
 import logging
-from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-import httpx
 
 from app.database import get_db
 from app.auth import AuthContext, get_auth
-from app.models import Agent, CallLog, Tenant
-from app.config import settings
+from app.models import Agent
+from app.services.rag_service import (
+    process_query,
+    get_conversation_history,
+    delete_conversation_history,
+)
 
 logger = logging.getLogger("voiceflow.rag")
 router = APIRouter()
@@ -29,53 +30,34 @@ async def rag_query(body: dict, auth: AuthContext = Depends(get_auth), db: Async
     if not query or not agent_id:
         return JSONResponse({"error": "query and agentId are required"}, status_code=400)
 
+    # Verify agent belongs to tenant
     result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.tenantId == auth.tenant_id))
     agent = result.scalar_one_or_none()
+    if not agent:
+        return JSONResponse({"error": "Agent not found"}, status_code=404)
 
-    system_prompt = "You are a helpful AI assistant."
-    if agent and agent.systemPrompt:
-        system_prompt = agent.systemPrompt
+    # Full RAG pipeline: context injection → ChromaDB → policy scoring → prompt → Groq
+    rag_result = await process_query(db, auth.tenant_id, agent_id, query, session_id)
 
-    # Get Groq key
-    groq_key = settings.GROQ_API_KEY
-    tr = await db.execute(select(Tenant).where(Tenant.id == auth.tenant_id))
-    tenant = tr.scalar_one_or_none()
-    if tenant and tenant.settings:
-        k = tenant.settings.get("groqApiKey")
-        if k and isinstance(k, str) and k.startswith("gsk_"):
-            groq_key = k
-
-    response_text = "I don't have enough context. Please configure a Groq API key."
-    if groq_key:
-        try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                resp = await client.post(
-                    "https://api.groq.com/openai/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
-                    json={
-                        "model": "llama-3.3-70b-versatile",
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": query},
-                        ],
-                        "max_tokens": 4096,
-                        "temperature": 0.7,
-                    },
-                )
-                if resp.status_code == 200:
-                    response_text = resp.json()["choices"][0]["message"]["content"]
-        except Exception:
-            logger.exception("Groq API call failed")
-
-    return {"response": response_text, "agentId": agent_id, "sessionId": session_id}
+    return {
+        "response": rag_result.get("response", ""),
+        "agentId": agent_id,
+        "sessionId": session_id,
+        "sources": rag_result.get("sources", []),
+        "model": rag_result.get("model", ""),
+        "documentsRetrieved": rag_result.get("documentsRetrieved", 0),
+    }
 
 
 @router.get("/conversation/{session_id}")
 async def get_conversation(session_id: str, agentId: str = "", auth: AuthContext = Depends(get_auth)):
-    # Simplified — no Redis in Python backend demo
-    return {"sessionId": session_id, "conversation": []}
+    """Get conversation history from Redis."""
+    history = await get_conversation_history(auth.tenant_id, agentId, session_id)
+    return {"sessionId": session_id, "conversation": history}
 
 
 @router.delete("/conversation/{session_id}")
-async def delete_conversation(session_id: str, auth: AuthContext = Depends(get_auth)):
+async def del_conversation(session_id: str, agentId: str = "", auth: AuthContext = Depends(get_auth)):
+    """Delete conversation history from Redis."""
+    await delete_conversation_history(auth.tenant_id, agentId, session_id)
     return Response(status_code=204)
