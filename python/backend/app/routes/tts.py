@@ -31,7 +31,7 @@ async def synthesise(body: dict):
     agent_id = body.get("agentId")
 
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=2) as client:
             resp = await client.post(
                 f"{settings.TTS_SERVICE_URL}/synthesise",
                 data={"text": text, "voiceId": voice_id, **({"agentId": agent_id} if agent_id else {})},

@@ -30,7 +30,7 @@
       <!-- Waveform bars -->
       <div class="flex items-end gap-1 h-16 mb-6">
         <template x-for="i in 24" :key="i">
-          <div class="w-1.5 rounded-full transition-all duration-150" :class="state==='listening' ? 'bg-blue-400' : state==='speaking' ? 'bg-green-400' : 'bg-white/20'" :style="'height:' + (state!=='idle' ? (Math.random()*50+10) : 4) + 'px'"></div>
+          <div class="w-1.5 rounded-full transition-all duration-150" :class="state==='listening' ? 'bg-blue-400' : state==='speaking' ? 'bg-green-400' : 'bg-white/20'" :style="'height:' + (state!=='idle' ? (_waveTick, Math.random()*50+10) : 4) + 'px'"></div>
         </template>
       </div>
 
@@ -94,6 +94,9 @@ function voiceAgentApp() {
     sessionId: 'voice-' + Date.now(),
     currentAudio: null,
     ws: null,
+    _ttsAvailable: true,
+    _waveInterval: null,
+    _waveTick: 0,
 
     get stateLabel() {
       return {idle:'Ready',listening:'Listening…',processing:'Thinking…',speaking:'Speaking…'}[this.state] || 'Ready';
@@ -136,6 +139,14 @@ function voiceAgentApp() {
 
     toggleMute() { this.muted = !this.muted; if (this.currentAudio) this.currentAudio.muted = this.muted; },
 
+    _startWave() {
+      if (this._waveInterval) return;
+      this._waveInterval = setInterval(() => { this._waveTick++; }, 120);
+    },
+    _stopWave() {
+      if (this._waveInterval) { clearInterval(this._waveInterval); this._waveInterval = null; }
+    },
+
     async startTalking() {
       if (this.state === 'listening' || !this.selectedAgentId) return;
       try {
@@ -164,6 +175,7 @@ function voiceAgentApp() {
         processor.connect(audioCtx.destination);
         this.state = 'listening';
         this.liveTranscript = '';
+        this._startWave();
       } catch(e) { showToast('Microphone access denied','error'); }
     },
 
@@ -183,30 +195,37 @@ function voiceAgentApp() {
 
     async speak(text) {
       this.state = 'speaking';
+      if (!this._ttsAvailable) { this._browserSpeak(text); return; }
       try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 2000);
         const r = await fetch('/api/tts/', {
           method:'POST',
           headers:{'Content-Type':'application/json','X-CSRFToken':getCookie('csrftoken')},
           body:JSON.stringify({text, voiceId:''}),
+          signal: ctrl.signal,
         });
+        clearTimeout(timer);
         if (r.ok) {
           const data = await r.json();
           if (data.audioUrl) {
             this.currentAudio = new Audio(data.audioUrl);
             this.currentAudio.muted = this.muted;
-            this.currentAudio.onended = () => { this.state = 'idle'; this.liveTranscript = ''; };
+            this._startWave();
+            this.currentAudio.onended = () => { this.state = 'idle'; this.liveTranscript = ''; this._stopWave(); };
             await this.currentAudio.play();
-          } else { this._browserSpeak(text); }
-        } else { this._browserSpeak(text); }
-      } catch(e) { this._browserSpeak(text); }
+          } else { this._ttsAvailable = false; this._browserSpeak(text); }
+        } else { this._ttsAvailable = false; this._browserSpeak(text); }
+      } catch(e) { this._ttsAvailable = false; this._browserSpeak(text); }
     },
 
     _browserSpeak(text) {
+      this._startWave();
       if ('speechSynthesis' in window) {
         const u = new SpeechSynthesisUtterance(text);
-        u.onend = () => { this.state = 'idle'; this.liveTranscript = ''; };
+        u.onend = () => { this.state = 'idle'; this.liveTranscript = ''; this._stopWave(); };
         speechSynthesis.speak(u);
-      } else { this.state = 'idle'; }
+      } else { this.state = 'idle'; this._stopWave(); }
     },
 
     endSession() {
