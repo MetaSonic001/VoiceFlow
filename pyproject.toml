@@ -50,7 +50,12 @@ dependencies = [
     "Django>=6.0",
     "django-htmx>=1.27",
     "whitenoise>=6.7",
-]
+    # ── Patent Claim Features ────────────────────────────────────
+    "twilio>=9.0",
+    "cryptography>=44.0",
+    "slowapi>=0.1.9",
+    "apscheduler>=3.10",
+    "psutil>=6.0",]
 
 [project.optional-dependencies]
 dev = [

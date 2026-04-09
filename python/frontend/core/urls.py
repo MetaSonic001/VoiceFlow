@@ -70,4 +70,8 @@ urlpatterns = [
     path("api/billing/usage/", api_proxy.billing_usage, name="api_billing_usage"),
     path("api/pipelines/", api_proxy.pipelines_api, name="api_pipelines"),
     path("api/reports/", api_proxy.reports_api, name="api_reports"),
+    path("api/notifications/", api_proxy.notifications_api, name="api_notifications"),
+    path("api/notification-read/<str:notif_id>/", api_proxy.notification_read, name="api_notification_read"),
+    path("api/notifications-read-all/", api_proxy.notifications_read_all, name="api_notifications_read_all"),
+    path("api/system/health-check/", api_proxy.system_health, name="api_system_health"),
 ]

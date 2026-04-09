@@ -1,18 +1,28 @@
 {% extends "base_dashboard.html" %}{% block title %}Notifications — VoiceFlow AI{% endblock %}
 {% block content %}
-<div class="mb-8"><h1 class="text-2xl font-bold">Notifications</h1><p class="text-gray-500 text-sm mt-1">System alerts and updates</p></div>
-<div class="space-y-3">
-  <div class="bg-white rounded-xl border p-4 flex items-start gap-3">
-    <div class="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center flex-shrink-0"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></div>
-    <div><div class="font-medium text-sm">System Update</div><div class="text-xs text-gray-500">New voice cloning feature available. Try it in Settings &gt; Voice.</div><div class="text-xs text-gray-400 mt-1">2 hours ago</div></div>
+<div class="mb-8 flex items-center justify-between">
+  <div><h1 class="text-2xl font-bold">Notifications</h1><p class="text-gray-500 text-sm mt-1">System alerts and updates{% if unread_count %} — <span class="text-indigo-600 font-semibold">{{ unread_count }} unread</span>{% endif %}</p></div>
+  {% if notifications %}<button hx-post="/api/notifications-read-all/" hx-swap="none" hx-on::after-request="location.reload()" class="text-sm text-indigo-600 hover:underline">Mark all read</button>{% endif %}
+</div>
+<div class="space-y-3" hx-get="/dashboard/notifications/" hx-trigger="every 30s" hx-swap="innerHTML" hx-select=".space-y-3">
+  {% for n in notifications %}
+  <div class="bg-white rounded-xl border p-4 flex items-start gap-3 {% if not n.isRead %}border-l-4 border-l-indigo-500{% endif %}">
+    <div class="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0
+      {% if n.type == 'success' %}bg-green-100 text-green-600{% elif n.type == 'warning' %}bg-yellow-100 text-yellow-600{% elif n.type == 'error' %}bg-red-100 text-red-600{% else %}bg-blue-100 text-blue-600{% endif %}">
+      {% if n.type == 'success' %}<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>{% elif n.type == 'warning' %}<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01"/></svg>{% elif n.type == 'error' %}<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>{% else %}<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>{% endif %}
+    </div>
+    <div class="flex-1">
+      <div class="font-medium text-sm">{{ n.title }}</div>
+      <div class="text-xs text-gray-500">{{ n.message }}</div>
+      <div class="text-xs text-gray-400 mt-1">{{ n.createdAt|truncatechars:19 }}</div>
+    </div>
+    {% if not n.isRead %}<button hx-post="/api/notification-read/{{ n.id }}/" hx-swap="none" hx-on::after-request="this.closest('.border-l-4').classList.remove('border-l-4','border-l-indigo-500')" class="text-xs text-gray-400 hover:text-indigo-600">✓</button>{% endif %}
   </div>
-  <div class="bg-white rounded-xl border p-4 flex items-start gap-3">
-    <div class="w-8 h-8 rounded-full bg-green-100 text-green-600 flex items-center justify-center flex-shrink-0"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg></div>
-    <div><div class="font-medium text-sm">Agent Deployed</div><div class="text-xs text-gray-500">Customer Support Agent is now live and accepting calls.</div><div class="text-xs text-gray-400 mt-1">5 hours ago</div></div>
+  {% empty %}
+  <div class="text-center py-12 text-gray-400">
+    <svg class="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
+    <p>No notifications yet</p>
   </div>
-  <div class="bg-white rounded-xl border p-4 flex items-start gap-3">
-    <div class="w-8 h-8 rounded-full bg-yellow-100 text-yellow-600 flex items-center justify-center flex-shrink-0"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg></div>
-    <div><div class="font-medium text-sm">Retraining Required</div><div class="text-xs text-gray-500">3 conversations flagged for review in the retraining queue.</div><div class="text-xs text-gray-400 mt-1">1 day ago</div></div>
-  </div>
+  {% endfor %}
 </div>
 {% endblock %}

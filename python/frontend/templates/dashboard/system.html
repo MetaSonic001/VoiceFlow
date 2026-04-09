@@ -1,21 +1,35 @@
 {% extends "base_dashboard.html" %}
 {% block title %}System Health — VoiceFlow AI{% endblock %}
 {% block content %}
-<div x-data="{ metrics: {} }" x-init="fetch('/api/system/metrics/',{headers:{'X-CSRFToken':CSRF}}).then(r=>r.json()).then(d=>metrics=d).catch(()=>{})">
-  <div class="mb-8"><h1 class="text-2xl font-bold">System Health</h1><p class="text-gray-500 text-sm mt-1">Monitor infrastructure and service status</p></div>
+{% load json_tags %}
+<div x-data="systemHealth()" x-init="refresh()">
+  <div class="mb-8 flex items-center justify-between">
+    <div><h1 class="text-2xl font-bold">System Health</h1><p class="text-gray-500 text-sm mt-1">Monitor infrastructure and service status — auto-refreshes every 30s</p></div>
+    <button @click="refresh()" class="text-sm text-indigo-600 hover:underline">↻ Refresh</button>
+  </div>
   <div class="grid md:grid-cols-4 gap-6 mb-8">
-    <div class="bg-white rounded-xl border p-5"><div class="text-sm text-gray-500">Uptime</div><div class="text-2xl font-bold text-green-600 mt-1" x-text="metrics.uptime || '99.9%'">99.9%</div></div>
-    <div class="bg-white rounded-xl border p-5"><div class="text-sm text-gray-500">CPU Usage</div><div class="text-2xl font-bold mt-1" x-text="(metrics.cpu||'—')+'%'">—</div><div class="w-full h-2 bg-gray-200 rounded-full mt-2"><div class="h-2 bg-blue-500 rounded-full" :style="'width:'+(metrics.cpu||0)+'%'"></div></div></div>
-    <div class="bg-white rounded-xl border p-5"><div class="text-sm text-gray-500">Memory</div><div class="text-2xl font-bold mt-1" x-text="(metrics.memory||'—')+'%'">—</div><div class="w-full h-2 bg-gray-200 rounded-full mt-2"><div class="h-2 bg-purple-500 rounded-full" :style="'width:'+(metrics.memory||0)+'%'"></div></div></div>
-    <div class="bg-white rounded-xl border p-5"><div class="text-sm text-gray-500">Disk</div><div class="text-2xl font-bold mt-1" x-text="(metrics.disk||'—')+'%'">—</div><div class="w-full h-2 bg-gray-200 rounded-full mt-2"><div class="h-2 bg-orange-500 rounded-full" :style="'width:'+(metrics.disk||0)+'%'"></div></div></div>
+    <div class="bg-white rounded-xl border p-5"><div class="text-sm text-gray-500">Uptime</div><div class="text-2xl font-bold text-green-600 mt-1" x-text="formatUptime(h.uptime_seconds)">—</div></div>
+    <div class="bg-white rounded-xl border p-5"><div class="text-sm text-gray-500">CPU Usage</div><div class="text-2xl font-bold mt-1" x-text="(h.system?.cpu_percent??'—')+'%'">—</div><div class="w-full h-2 bg-gray-200 rounded-full mt-2"><div class="h-2 bg-blue-500 rounded-full transition-all" :style="'width:'+(h.system?.cpu_percent||0)+'%'"></div></div></div>
+    <div class="bg-white rounded-xl border p-5"><div class="text-sm text-gray-500">Memory</div><div class="text-2xl font-bold mt-1" x-text="(h.system?.memory_percent??'—')+'%'">—</div><div class="text-xs text-gray-400" x-text="(h.system?.memory_used_gb||0)+' / '+(h.system?.memory_total_gb||0)+' GB'"></div><div class="w-full h-2 bg-gray-200 rounded-full mt-2"><div class="h-2 bg-purple-500 rounded-full transition-all" :style="'width:'+(h.system?.memory_percent||0)+'%'"></div></div></div>
+    <div class="bg-white rounded-xl border p-5"><div class="text-sm text-gray-500">Disk</div><div class="text-2xl font-bold mt-1" x-text="(h.system?.disk_percent??'—')+'%'">—</div><div class="text-xs text-gray-400" x-text="(h.system?.disk_used_gb||0)+' / '+(h.system?.disk_total_gb||0)+' GB'"></div><div class="w-full h-2 bg-gray-200 rounded-full mt-2"><div class="h-2 bg-orange-500 rounded-full transition-all" :style="'width:'+(h.system?.disk_percent||0)+'%'"></div></div></div>
   </div>
   <div class="bg-white rounded-xl border p-6">
     <h3 class="font-semibold mb-4">Service Status</h3>
-    <div class="grid md:grid-cols-3 gap-4">
-      {% for svc in "API Server,Database,Redis,Worker Queue,File Storage,Email" %}
-      <div class="flex items-center gap-3 p-3 rounded-lg border"><div class="w-3 h-3 rounded-full bg-green-500"></div><span class="text-sm font-medium">{{ svc }}</span><span class="ml-auto text-xs text-green-600">Healthy</span></div>
-      {% endfor %}
+    <div class="grid md:grid-cols-2 gap-4">
+      <template x-for="[name, info] in Object.entries(h.services || {})" :key="name">
+        <div class="flex items-center gap-3 p-3 rounded-lg border">
+          <div class="w-3 h-3 rounded-full" :class="info.status==='healthy'?'bg-green-500':info.status==='degraded'?'bg-yellow-500':'bg-red-500'"></div>
+          <span class="text-sm font-medium capitalize" x-text="name"></span>
+          <span class="ml-auto text-xs" :class="info.status==='healthy'?'text-green-600':info.status==='degraded'?'text-yellow-600':'text-red-600'" x-text="info.status"></span>
+          <span class="text-xs text-gray-400" x-show="info.latency_ms!==undefined" x-text="info.latency_ms+'ms'"></span>
+        </div>
+      </template>
     </div>
   </div>
 </div>
+<script>
+function systemHealth(){return{h:{{ health|safe_json }},
+  async refresh(){try{const r=await fetch('/api/system/health-check/',{headers:{'X-CSRFToken':getCookie('csrftoken')}});if(r.ok)this.h=await r.json()}catch(e){}setTimeout(()=>this.refresh(),30000)},
+  formatUptime(s){if(!s)return'—';const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return(d?d+'d ':'')+(h?h+'h ':'')+(m+'m')}}}
+</script>
 {% endblock %}

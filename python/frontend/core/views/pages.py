@@ -95,12 +95,12 @@ def billing(request):
 @login_required
 def system(request):
     client = get_client(request)
-    metrics = {}
+    health = {}
     try:
-        metrics = client.get_system_metrics()
+        health = client.get_system_health()
     except Exception:
         pass
-    return render(request, "dashboard/system.html", {"metrics": metrics})
+    return render(request, "dashboard/system.html", {"health": health})
 
 
 @login_required
@@ -148,12 +148,30 @@ def api_docs(request):
 
 @login_required
 def notifications(request):
-    return render(request, "dashboard/notifications.html")
+    client = get_client(request)
+    notif_data = {}
+    try:
+        notif_data = client.get_notifications()
+    except Exception:
+        pass
+    return render(request, "dashboard/notifications.html", {
+        "notifications": notif_data.get("notifications", []),
+        "unread_count": notif_data.get("unreadCount", 0),
+    })
 
 
 @login_required
 def audit(request):
-    return render(request, "dashboard/audit.html")
+    client = get_client(request)
+    audit_data = {}
+    try:
+        audit_data = client.get_audit_logs(limit=50)
+    except Exception:
+        pass
+    return render(request, "dashboard/audit.html", {
+        "logs": audit_data.get("logs", []),
+        "total": audit_data.get("total", 0),
+    })
 
 
 @login_required
@@ -163,7 +181,13 @@ def backup(request):
 
 @login_required
 def reports(request):
-    return render(request, "dashboard/reports.html")
+    client = get_client(request)
+    pipeline_list = []
+    try:
+        pipeline_list = client.get_reports().get("pipelines", [])
+    except Exception:
+        pass
+    return render(request, "dashboard/reports.html", {"reports": pipeline_list})
 
 
 @login_required

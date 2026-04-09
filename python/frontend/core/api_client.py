@@ -290,6 +290,29 @@ class BackendClient:
     def get_reports(self):
         return self._get("/admin/pipelines")
 
+    # ── Notifications ──────────────────────────────────────────────────
+    def get_notifications(self, unread_only=False):
+        params = {"unread_only": "true"} if unread_only else {}
+        return self._get("/api/notifications", params=params)
+
+    def mark_notification_read(self, notif_id: str):
+        return self._post(f"/api/notifications/{notif_id}/read")
+
+    def mark_all_notifications_read(self):
+        return self._post("/api/notifications/read-all")
+
+    # ── Audit Log ──────────────────────────────────────────────────────
+    def get_audit_logs(self, limit=50, offset=0):
+        return self._get("/api/audit", params={"limit": limit, "offset": offset})
+
+    # ── System Health ──────────────────────────────────────────────────
+    def get_system_health(self):
+        return self._get("/api/system/health")
+
+    # ── Voice Calls ────────────────────────────────────────────────────
+    def get_voice_calls(self, agent_id: str):
+        return self._get(f"/api/voice/calls/{agent_id}")
+
 
 def get_client(request) -> BackendClient:
     """Build a BackendClient from the current Django request."""

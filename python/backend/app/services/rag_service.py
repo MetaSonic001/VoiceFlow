@@ -624,11 +624,15 @@ MAX_RETRIES = 4
 
 
 def _resolve_groq_key(tenant: Optional[Tenant]) -> Optional[str]:
-    """Get tenant Groq key or fall back to platform key."""
+    """Get tenant Groq key (decrypt if encrypted) or fall back to platform key."""
     if tenant and tenant.settings:
         key = tenant.settings.get("groqApiKey")
-        if key and isinstance(key, str) and key.startswith("gsk_"):
-            return key
+        if key and isinstance(key, str):
+            # Decrypt if encrypted
+            from app.services.credentials import decrypt_safe
+            decrypted = decrypt_safe(key)
+            if decrypted and decrypted.startswith("gsk_"):
+                return decrypted
     return settings.GROQ_API_KEY
 
 

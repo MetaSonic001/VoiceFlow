@@ -6,10 +6,12 @@ import json
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, UploadFile, File, Form
+from fastapi import APIRouter, Depends, Request, UploadFile, File, Form
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from app.database import get_db
 from app.auth import AuthContext, get_auth
@@ -19,9 +21,15 @@ from app.config import settings
 logger = logging.getLogger("voiceflow.runner")
 router = APIRouter()
 
+def _tenant_key(request: Request) -> str:
+    return request.headers.get("x-tenant-id", get_remote_address(request))
+
+limiter = Limiter(key_func=_tenant_key, storage_uri=f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}/1")
+
 
 @router.post("/chat")
-async def chat(request_data: dict, auth: AuthContext = Depends(get_auth), db: AsyncSession = Depends(get_db)):
+@limiter.limit("30/minute")
+async def chat(request: Request, request_data: dict, auth: AuthContext = Depends(get_auth), db: AsyncSession = Depends(get_db)):
     message = request_data.get("message", "").strip()
     agent_id = request_data.get("agentId")
     session_id = request_data.get("sessionId", "default")

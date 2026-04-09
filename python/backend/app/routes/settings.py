@@ -1,7 +1,8 @@
 """
 /api/settings routes — mirrors Express src/routes/settings.ts
-Twilio + Groq credential management.
+Twilio + Groq credential management with AES-256-GCM encryption (Claim 9).
 """
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
@@ -12,6 +13,7 @@ from app.database import get_db
 from app.auth import AuthContext, get_auth
 from app.models import Tenant
 from app.config import settings
+from app.services.credentials import encrypt, decrypt_safe, mask
 
 router = APIRouter()
 
@@ -101,12 +103,12 @@ async def save_twilio(body: dict, auth: AuthContext = Depends(get_auth), db: Asy
     tenant.settings = {
         **existing,
         "twilioAccountSid": account_sid,
-        "twilioAuthToken": auth_token,
+        "twilioAuthToken": encrypt(auth_token),
         "twilioCredentialsVerified": True,
-        "twilioCredentialsUpdatedAt": __import__("datetime").datetime.now().isoformat(),
+        "twilioCredentialsUpdatedAt": datetime.now(timezone.utc).isoformat(),
     }
     await db.commit()
-    return {"success": True, "message": "Twilio credentials saved.", "accountSid": account_sid}
+    return {"success": True, "message": "Twilio credentials saved (encrypted).", "accountSid": account_sid}
 
 
 @router.get("/twilio")
@@ -169,14 +171,14 @@ async def save_groq(body: dict, auth: AuthContext = Depends(get_auth), db: Async
     existing = tenant.settings or {}
     tenant.settings = {
         **existing,
-        "groqApiKey": api_key,
+        "groqApiKey": encrypt(api_key),
         "groqKeyVerified": True,
-        "groqKeyUpdatedAt": __import__("datetime").datetime.now().isoformat(),
+        "groqKeyUpdatedAt": datetime.now(timezone.utc).isoformat(),
     }
     await db.commit()
 
-    masked = api_key[:7] + "••••••••" + api_key[-4:]
-    return {"success": True, "message": "Groq API key verified and saved.", "maskedKey": masked}
+    masked = mask(api_key, prefix_len=7, suffix_len=4)
+    return {"success": True, "message": "Groq API key verified and saved (encrypted).", "maskedKey": masked}
 
 
 @router.get("/groq")
@@ -188,7 +190,8 @@ async def get_groq(auth: AuthContext = Depends(get_auth), db: AsyncSession = Dep
     masked_key = None
     raw = s.get("groqApiKey")
     if raw and isinstance(raw, str):
-        masked_key = raw[:7] + "••••••••" + raw[-4:]
+        decrypted = decrypt_safe(raw)
+        masked_key = mask(decrypted, prefix_len=7, suffix_len=4)
 
     return {
         "configured": bool(masked_key),

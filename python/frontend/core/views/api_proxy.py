@@ -375,3 +375,47 @@ def reports_api(request):
         return JsonResponse(client.get_reports())
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
+
+
+# ── Notifications ──────────────────────────────────────────────────────
+
+@login_required
+@require_http_methods(["GET"])
+def notifications_api(request):
+    client = get_client(request)
+    try:
+        return JsonResponse(client.get_notifications())
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
+@require_http_methods(["POST"])
+def notification_read(request, notif_id):
+    client = get_client(request)
+    try:
+        return JsonResponse(client.mark_notification_read(notif_id))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@require_http_methods(["POST"])
+def notifications_read_all(request):
+    client = get_client(request)
+    try:
+        return JsonResponse(client.mark_all_notifications_read())
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+# ── System Health ──────────────────────────────────────────────────────
+
+@login_required
+@require_http_methods(["GET"])
+def system_health(request):
+    client = get_client(request)
+    try:
+        return JsonResponse(client.get_system_health())
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)

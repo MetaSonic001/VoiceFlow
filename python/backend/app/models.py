@@ -286,3 +286,37 @@ class Pipeline(Base):
     updatedAt: Mapped[datetime] = mapped_column("updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     tenant = relationship("Tenant", back_populates="pipelines")
+
+
+# ── AuditLog ──────────────────────────────────────────────────────────────────
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    tenantId: Mapped[str] = mapped_column("tenantId", String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    userId: Mapped[Optional[str]] = mapped_column("userId", String, nullable=True)
+    action: Mapped[str] = mapped_column(String, nullable=False)
+    resource: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    resourceId: Mapped[Optional[str]] = mapped_column("resourceId", String, nullable=True)
+    details: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)
+    ipAddress: Mapped[Optional[str]] = mapped_column("ipAddress", String, nullable=True)
+    createdAt: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+
+    tenant = relationship("Tenant")
+
+
+# ── Notification ──────────────────────────────────────────────────────────────
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    tenantId: Mapped[str] = mapped_column("tenantId", String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    userId: Mapped[Optional[str]] = mapped_column("userId", String, nullable=True)
+    type: Mapped[str] = mapped_column(String, nullable=False)  # info, warning, success, error
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    isRead: Mapped[bool] = mapped_column("isRead", Boolean, default=False)
+    link: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    createdAt: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())

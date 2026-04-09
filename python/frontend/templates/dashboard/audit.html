@@ -1,14 +1,26 @@
 {% extends "base_dashboard.html" %}{% block title %}Audit Log — VoiceFlow AI{% endblock %}
 {% block content %}
-<div class="mb-8"><h1 class="text-2xl font-bold">Audit Log</h1><p class="text-gray-500 text-sm mt-1">Track all system activities</p></div>
+<div class="mb-8"><h1 class="text-2xl font-bold">Audit Log</h1><p class="text-gray-500 text-sm mt-1">Track all system activities — {{ total }} total entries</p></div>
 <div class="bg-white rounded-xl border overflow-hidden">
   <table class="w-full text-sm">
-    <thead class="bg-gray-50 border-b"><tr><th class="px-5 py-3 text-left font-medium text-gray-500">Time</th><th class="px-5 py-3 text-left font-medium text-gray-500">User</th><th class="px-5 py-3 text-left font-medium text-gray-500">Action</th><th class="px-5 py-3 text-left font-medium text-gray-500">Resource</th></tr></thead>
+    <thead class="bg-gray-50 border-b"><tr><th class="px-5 py-3 text-left font-medium text-gray-500">Time</th><th class="px-5 py-3 text-left font-medium text-gray-500">User</th><th class="px-5 py-3 text-left font-medium text-gray-500">Action</th><th class="px-5 py-3 text-left font-medium text-gray-500">Resource</th><th class="px-5 py-3 text-left font-medium text-gray-500">IP</th></tr></thead>
     <tbody class="divide-y">
-      <tr class="hover:bg-gray-50"><td class="px-5 py-3 text-gray-400">Just now</td><td class="px-5 py-3">{{ request.user.username }}</td><td class="px-5 py-3"><span class="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">viewed</span></td><td class="px-5 py-3">Audit Log</td></tr>
-      <tr class="hover:bg-gray-50"><td class="px-5 py-3 text-gray-400">5 min ago</td><td class="px-5 py-3">{{ request.user.username }}</td><td class="px-5 py-3"><span class="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs">created</span></td><td class="px-5 py-3">Agent</td></tr>
-      <tr class="hover:bg-gray-50"><td class="px-5 py-3 text-gray-400">1 hour ago</td><td class="px-5 py-3">{{ request.user.username }}</td><td class="px-5 py-3"><span class="px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded text-xs">updated</span></td><td class="px-5 py-3">Settings</td></tr>
-      <tr class="hover:bg-gray-50"><td class="px-5 py-3 text-gray-400">3 hours ago</td><td class="px-5 py-3">{{ request.user.username }}</td><td class="px-5 py-3"><span class="px-2 py-0.5 bg-purple-100 text-purple-700 rounded text-xs">uploaded</span></td><td class="px-5 py-3">Knowledge Base</td></tr>
+      {% for l in logs %}
+      <tr class="hover:bg-gray-50">
+        <td class="px-5 py-3 text-gray-400 whitespace-nowrap">{{ l.createdAt|truncatechars:19 }}</td>
+        <td class="px-5 py-3">{{ l.userId|default:"system" }}</td>
+        <td class="px-5 py-3">
+          {% if "create" in l.action or "save" in l.action %}<span class="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs">{{ l.action }}</span>
+          {% elif "delete" in l.action or "remove" in l.action %}<span class="px-2 py-0.5 bg-red-100 text-red-700 rounded text-xs">{{ l.action }}</span>
+          {% elif "update" in l.action or "edit" in l.action %}<span class="px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded text-xs">{{ l.action }}</span>
+          {% else %}<span class="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">{{ l.action }}</span>{% endif %}
+        </td>
+        <td class="px-5 py-3">{{ l.resource|default:"—" }}</td>
+        <td class="px-5 py-3 text-gray-400 text-xs">{{ l.ipAddress|default:"—" }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="5" class="px-5 py-12 text-center text-gray-400">No audit log entries yet. Actions like creating agents, uploading documents, and changing settings will appear here.</td></tr>
+      {% endfor %}
     </tbody>
   </table>
 </div>

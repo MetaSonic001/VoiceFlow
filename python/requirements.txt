@@ -46,6 +46,13 @@ Django==6.0.4
 django-htmx==1.27.0
 whitenoise>=6.7
 
+# ── Patent Claim Features ─────────────────────────────────────
+twilio>=9.0
+cryptography>=44.0
+slowapi>=0.1.9
+apscheduler>=3.10
+psutil>=6.0
+
 # ── Shared ────────────────────────────────────────────────────
 httpx>=0.28
 psycopg2-binary>=2.9

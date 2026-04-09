@@ -1,6 +1,7 @@
 """
 VoiceFlow Python Backend — main.py
 Drop-in replacement for Express backend. Same port (8000), same routes, same DB.
+Patent Claims: 9 (encryption), 13 (rate-limiting), 7 (scheduler), 8/12/15 (voice).
 """
 import logging
 import time
@@ -8,6 +9,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -84,8 +88,14 @@ async def lifespan(app: FastAPI):
 
     await seed_demo()
     logger.info(f"Python backend ready on port {settings.PORT}")
+
+    # Start retraining scheduler (Claim 7)
+    from app.services.scheduler import start_scheduler, stop_scheduler
+    start_scheduler()
+
     yield
     # Shutdown
+    stop_scheduler()
     logger.info("Shutting down...")
 
 
@@ -94,6 +104,23 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+# ── Per-tenant rate limiting (Claim 13) ──────────────────────────────────────
+
+def _tenant_key(request: Request) -> str:
+    """Rate-limit key: tenant ID from header, falling back to IP."""
+    return request.headers.get("x-tenant-id", get_remote_address(request))
+
+limiter = Limiter(key_func=_tenant_key, storage_uri=f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}/1")
+app.state.limiter = limiter
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        {"error": "Rate limit exceeded. Please slow down.", "retry_after": str(exc.detail)},
+        status_code=429,
+    )
 
 # CORS — same config as Express
 app.add_middleware(
@@ -124,7 +151,7 @@ async def health():
 from app.routes import auth, onboarding, agents, documents, templates, runner
 from app.routes import analytics, logs, brands, settings as settings_routes
 from app.routes import ingestion, users, retraining, admin, tts, rag
-from app.routes import widget
+from app.routes import widget, voice, voice_ws, platform
 
 # WITHOUT /api prefix (matches Express)
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])
@@ -147,6 +174,9 @@ app.include_router(retraining.router, prefix="/api/retraining", tags=["Retrainin
 app.include_router(brands.router, prefix="/api/brands", tags=["Brands"])
 app.include_router(tts.router, prefix="/api/tts", tags=["TTS"])
 app.include_router(widget.router, prefix="/api/widget", tags=["Widget"])
+app.include_router(voice.router, prefix="/api/voice", tags=["Voice"])
+app.include_router(voice_ws.router, prefix="/api/voice", tags=["VoiceWS"])
+app.include_router(platform.router, prefix="/api", tags=["Platform"])
 
 
 # ── Twilio proxy (matches Express /twilio/numbers) ──────────────────────────
@@ -158,9 +188,11 @@ async def twilio_numbers(auth: AuthContext = Depends(get_auth), db: AsyncSession
     tenant = result.scalar_one_or_none()
     s = (tenant.settings or {}) if tenant else {}
     sid = s.get("twilioAccountSid")
-    token = s.get("twilioAuthToken")
-    if not sid or not token:
+    token_enc = s.get("twilioAuthToken")
+    if not sid or not token_enc:
         return {"numbers": []}
+    from app.services.credentials import decrypt_safe
+    token = decrypt_safe(token_enc)
     try:
         import httpx as _httpx
         async with _httpx.AsyncClient(timeout=10) as client:
