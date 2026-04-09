@@ -1,24 +1,18 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { auth } from '@clerk/nextjs/server'
-import { resolveUserEmail } from '@/lib/clerk-helpers'
+
+const DEMO_EMAIL = 'demo@voiceflow.local'
 
 export async function POST(req: Request) {
-  const session = await auth()
-  const userId = session.userId
-  if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
   const body = await req.json().catch(() => ({}))
   const { name } = body
   if (!name) return NextResponse.json({ error: 'Missing name' }, { status: 400 })
-  const userEmail = await resolveUserEmail()
-  if (!userEmail) return NextResponse.json({ error: 'Unable to resolve user email' }, { status: 400 })
 
   try {
     const tenant = await prisma.tenant.create({ data: { name } })
-    // ensure onboarding progress points to this tenant
     await prisma.onboardingProgress.upsert({
-      where: { userEmail },
-      create: { userEmail, tenantId: tenant.id },
+      where: { userEmail: DEMO_EMAIL },
+      create: { userEmail: DEMO_EMAIL, tenantId: tenant.id },
       update: { tenantId: tenant.id },
     })
     return NextResponse.json({ success: true, tenant_id: tenant.id })

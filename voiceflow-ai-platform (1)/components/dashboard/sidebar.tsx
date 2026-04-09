@@ -7,13 +7,11 @@ import { Badge } from "@/components/ui/badge"
 import { Brain, Bot, BarChart3, Settings, HelpCircle, LogOut, Users, Phone, Activity, FileText, BookOpen, Code, Database, Archive, CreditCard, Zap, Bell, Mic, Shield, RefreshCw, Globe } from "lucide-react"
 import Link from "next/link"
 import { useRouter, usePathname } from "next/navigation"
-import { useClerk } from '@clerk/nextjs'
 
 export function DashboardSidebar() {
   const [isLoggingOut, setIsLoggingOut] = useState(false)
   const router = useRouter()
   const pathname = usePathname()
-  const { signOut } = useClerk()
 
   const menuItems = [
     { id: "agents", label: "AI Agents", icon: Bot, badge: "3", href: "/dashboard" },
@@ -48,13 +46,11 @@ export function DashboardSidebar() {
   const handleLogout = async () => {
     setIsLoggingOut(true)
     try {
-      // Clear all cached auth data
       localStorage.removeItem('auth_token')
       localStorage.removeItem('clerk_token')
       localStorage.removeItem('auth_user')
       localStorage.removeItem('session_id')
-      // Sign out via Clerk (clears Clerk session cookies)
-      await signOut({ redirectUrl: '/' })
+      router.push('/')
     } catch (error) {
       console.error("Logout error:", error)
       router.push("/")

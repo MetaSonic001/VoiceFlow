@@ -3,7 +3,6 @@ import MotionWrapper from './ui/MotionWrapper'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Button } from './ui/button';
 import { Mic, Menu, X } from 'lucide-react';
-import { useUser } from '@clerk/nextjs';
 import { useRouter } from 'next/navigation';
 
 interface HeaderProps {
@@ -13,7 +12,6 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({ onLoginClick, onSignupClick }) => {
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
-  const { isSignedIn } = useUser();
   const router = useRouter();
 
   const handleDashboardClick = () => {
@@ -51,20 +49,12 @@ export const Header: React.FC<HeaderProps> = ({ onLoginClick, onSignupClick }) =
           </nav>
 
           <div className="hidden md:flex items-center space-x-4">
-            {isSignedIn ? (
-              <Button onClick={handleDashboardClick} className="bg-blue-600 hover:bg-blue-700">
+              <Button variant="ghost" onClick={onLoginClick}>
                 Dashboard
               </Button>
-            ) : (
-              <>
-                <Button variant="ghost" onClick={onLoginClick}>
-                  Sign In
-                </Button>
-                <Button onClick={onSignupClick} className="bg-blue-600 hover:bg-blue-700">
-                  Get Started Free
-                </Button>
-              </>
-            )}
+              <Button onClick={onSignupClick} className="bg-blue-600 hover:bg-blue-700">
+                Get Started Free
+              </Button>
           </div>
 
           <div className="md:hidden">
@@ -99,20 +89,12 @@ export const Header: React.FC<HeaderProps> = ({ onLoginClick, onSignupClick }) =
                 </a>
               ))}
               <div className="flex flex-col space-y-2 pt-4 border-t border-gray-200">
-                {isSignedIn ? (
-                  <Button onClick={handleDashboardClick} className="justify-start bg-blue-600 hover:bg-blue-700">
+                  <Button variant="ghost" onClick={onLoginClick} className="justify-start">
                     Dashboard
                   </Button>
-                ) : (
-                  <>
-                    <Button variant="ghost" onClick={onLoginClick} className="justify-start">
-                      Sign In
-                    </Button>
-                    <Button onClick={onSignupClick} className="justify-start bg-blue-600 hover:bg-blue-700">
-                      Get Started Free
-                    </Button>
-                  </>
-                )}
+                  <Button onClick={onSignupClick} className="justify-start bg-blue-600 hover:bg-blue-700">
+                    Get Started Free
+                  </Button>
               </div>
             </div>
           </motion.div>

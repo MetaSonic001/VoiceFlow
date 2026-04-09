@@ -4,7 +4,7 @@ import type React from "react"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Brain } from "lucide-react"
-import { useClerk } from '@clerk/nextjs'
+import { useRouter } from 'next/navigation'
 
 interface AuthModalProps {
   open: boolean
@@ -14,15 +14,11 @@ interface AuthModalProps {
 }
 
 export function AuthModal({ open, onOpenChange, mode }: AuthModalProps) {
-  const clerk = useClerk()
+  const router = useRouter()
 
-  const handleClerkAuth = () => {
+  const handleAuth = () => {
     onOpenChange(false)
-    if (mode === 'signup') {
-      clerk.openSignUp?.()
-    } else {
-      clerk.openSignIn?.()
-    }
+    router.push(mode === 'signup' ? '/onboarding' : '/dashboard')
   }
 
   return (
@@ -42,7 +38,7 @@ export function AuthModal({ open, onOpenChange, mode }: AuthModalProps) {
           </DialogDescription>
         </DialogHeader>
 
-        <Button onClick={handleClerkAuth} className="w-full h-11">
+        <Button onClick={handleAuth} className="w-full h-11">
           {mode === "login" ? "Sign In" : "Sign Up"}
         </Button>
       </DialogContent>

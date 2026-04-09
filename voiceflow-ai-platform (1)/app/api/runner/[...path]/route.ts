@@ -1,59 +1,36 @@
 import { NextResponse } from 'next/server'
-import { auth } from '@clerk/nextjs/server'
 
 export const runtime = 'nodejs'
 
+const DEMO_TENANT = 'demo-tenant'
+const DEMO_USER = 'demo-user'
+
 export async function handler(req: Request, { params }: { params: { path: string[] } }) {
   const path = params.path.join('/')
-
-  // Allow unauthenticated access for voice agent audio endpoint
-  const isVoiceAgentAudio = path === 'audio'
-  const session: any = await auth()
-
-  if (!isVoiceAgentAudio && !session?.userId) {
-    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
-  }
-
   const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000'
   const url = `${backendUrl.replace(/\/$/, '')}/api/runner/${path}`
 
   const headers: Record<string, string> = {}
 
-  // Don't copy content-type for FormData - let fetch set it automatically
   const contentType = req.headers.get('content-type')
   if (!contentType?.includes('multipart/form-data')) {
-    req.headers.forEach((v, k) => {
-      headers[k] = v
-    })
+    req.headers.forEach((v, k) => { headers[k] = v })
   } else {
-    // Copy other headers but not content-type for FormData
     req.headers.forEach((v, k) => {
-      if (k.toLowerCase() !== 'content-type') {
-        headers[k] = v
-      }
+      if (k.toLowerCase() !== 'content-type') headers[k] = v
     })
   }
 
-  // add api-key for server-to-server
-  if (process.env.BACKEND_API_KEY) headers['X-API-Key'] = process.env.BACKEND_API_KEY
-  // add tenant and user headers
-  // Prefer the tenant ID the client already sent (set by api-client from localStorage auth_user.tenantId,
-  // which is a real Prisma UUID created during clerk_sync).  Only fall back to session identifiers
-  // (which are Clerk IDs, not DB UUIDs) if the client somehow didn't supply one.
-  if (!headers['x-tenant-id']) {
-    headers['x-tenant-id'] = session?.orgId || session?.userId || 'default-tenant'
-  }
-  if (session?.userId) {
-    headers['x-user-id'] = session.userId
-  } else if (isVoiceAgentAudio) {
-    // For voice agent demo, use a default user
-    headers['x-user-id'] = 'demo-user'
-  }
+  // Ensure demo headers
+  headers['x-tenant-id'] = headers['x-tenant-id'] || DEMO_TENANT
+  headers['x-user-id'] = headers['x-user-id'] || DEMO_USER
 
   const res = await fetch(url, {
     method: req.method,
     headers,
-    body: req.method !== 'GET' && req.method !== 'HEAD' ? req.body : undefined
+    body: req.method !== 'GET' && req.method !== 'HEAD' ? req.body : undefined,
+    // @ts-ignore
+    duplex: 'half',
   })
   const text = await res.text()
   return new NextResponse(text, { status: res.status })

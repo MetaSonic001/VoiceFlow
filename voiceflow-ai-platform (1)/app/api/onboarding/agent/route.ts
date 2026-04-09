@@ -1,21 +1,20 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { auth } from '@clerk/nextjs/server'
-import { resolveUserEmail } from '@/lib/clerk-helpers'
+
+const DEMO_TENANT = 'demo-tenant'
+const DEMO_USER = 'demo-user'
+const DEMO_EMAIL = 'demo@voiceflow.local'
 
 export async function POST(req: Request) {
-  const { userId, getToken } = await auth()
-  if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
   const body = await req.json().catch(() => ({}))
   const { name, role, templateId, description, channels } = body
   if (!name) return NextResponse.json({ error: 'Missing name' }, { status: 400 })
-  const userEmail = await resolveUserEmail()
-  if (!userEmail) return NextResponse.json({ error: 'Unable to resolve user email' }, { status: 400 })
 
   try {
-    const progress = await prisma.onboardingProgress.findUnique({ where: { userEmail } })
-    const tenantId = progress?.tenantId
-    if (!tenantId) return NextResponse.json({ error: 'No tenant associated with user' }, { status: 400 })
+    // Use demo-tenant or look up from onboarding progress
+    let tenantId = DEMO_TENANT
+    const progress = await prisma.onboardingProgress.findUnique({ where: { userEmail: DEMO_EMAIL } })
+    if (progress?.tenantId) tenantId = progress.tenantId
 
     const agent = await prisma.agent.create({
       data: {
@@ -26,10 +25,15 @@ export async function POST(req: Request) {
         ...(templateId ? { templateId } : {}),
       },
     })
-    // update onboarding progress with agent id
-    await prisma.onboardingProgress.update({ where: { userEmail }, data: { agentId: agent.id } })
 
-    // Create AgentConfiguration so the full profile is persisted
+    // Update onboarding progress with agent id
+    await prisma.onboardingProgress.upsert({
+      where: { userEmail: DEMO_EMAIL },
+      create: { userEmail: DEMO_EMAIL, agentId: agent.id, tenantId },
+      update: { agentId: agent.id },
+    })
+
+    // Create AgentConfiguration
     try {
       await prisma.agentConfiguration.create({
         data: {
@@ -45,24 +49,19 @@ export async function POST(req: Request) {
       console.warn('Failed to create AgentConfiguration:', cfgErr)
     }
 
-    // Mirror creation to Express backend
+    // Mirror to Express backend
     try {
       const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000'
-      const backendKey = process.env.BACKEND_API_KEY || ''
-      const token = await getToken()
       await fetch(`${backendUrl.replace(/\/$/, '')}/onboarding/agent`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-API-Key': backendKey,
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
           'x-tenant-id': tenantId,
-          'x-user-id': userId,
+          'x-user-id': DEMO_USER,
         },
         body: JSON.stringify({ name, role, templateId, description, channels }),
       })
     } catch (err) {
-      // ignore backend mirror failure; still return success from Prisma
       console.warn('Failed to mirror agent to backend:', err)
     }
 

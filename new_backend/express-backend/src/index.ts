@@ -190,6 +190,40 @@ async function setupTwilioWebhooks(): Promise<void> {
 server.listen(PORT, () => {
   console.log(`Express server running on port ${PORT}`);
 
+  // Seed demo tenant + user so the no-auth frontend works out of the box
+  (async () => {
+    try {
+      const existing = await prisma.tenant.findUnique({ where: { id: 'demo-tenant' } });
+      if (!existing) {
+        await prisma.tenant.create({
+          data: {
+            id: 'demo-tenant',
+            name: 'Demo Organization',
+            domain: 'demo.voiceflow.local',
+            apiKey: 'sk-demo-' + Date.now(),
+            isActive: true,
+          },
+        });
+        console.log('[seed] Created demo tenant');
+      }
+
+      const existingUser = await prisma.user.findUnique({ where: { id: 'demo-user' } });
+      if (!existingUser) {
+        await prisma.user.create({
+          data: {
+            id: 'demo-user',
+            email: 'demo@voiceflow.local',
+            name: 'Demo User',
+            tenantId: 'demo-tenant',
+          },
+        });
+        console.log('[seed] Created demo user');
+      }
+    } catch (err: any) {
+      console.warn('[seed] Demo seed failed (non-fatal):', err?.message);
+    }
+  })();
+
   // Initialize WebRTC signaling (Socket.IO)
   initWebRTCSignaling(server, prisma, redis);
 

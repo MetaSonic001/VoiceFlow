@@ -1,8 +1,12 @@
 // API Client Configuration and Utilities
-// Proxied routes go through Next.js API routes (same-origin) which add Clerk auth
+// Proxied routes go through Next.js API routes (same-origin)
 const API_BASE_URL = ""
 // Direct Express calls — for endpoints without a Next.js proxy route
 export const DIRECT_API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+
+// Demo mode constants
+const DEMO_TENANT_ID = "demo-tenant"
+const DEMO_USER_ID = "demo-user"
 
 export class ApiError extends Error {
   constructor(
@@ -17,40 +21,25 @@ export class ApiError extends Error {
 
 class ApiClient {
   private baseUrl: string
-  private tenantId: string | null = null
-  private tokenProvider: (() => Promise<string | null>) | null = null
+  private tenantId: string = DEMO_TENANT_ID
 
   constructor(baseUrl: string = DIRECT_API_URL) {
     this.baseUrl = baseUrl
-    // Try to get tenant ID from localStorage on initialization
-    if (typeof window !== 'undefined') {
-      const user = localStorage.getItem('auth_user')
-      if (user) {
-        try {
-          const userData = JSON.parse(user)
-          this.tenantId = userData.tenantId
-        } catch (e) {
-          console.warn('Failed to parse user data for tenant ID')
-        }
-      }
-    }
   }
 
   setTenantId(tenantId: string) {
     this.tenantId = tenantId
   }
 
-  // Called once from ClerkSync to wire up fresh-token retrieval on every request
-  setTokenProvider(provider: () => Promise<string | null>) {
-    this.tokenProvider = provider
-  }
+  // No-op in demo mode (kept for compatibility)
+  setTokenProvider(_provider: () => Promise<string | null>) {}
 
   private async request<T>(endpoint: string, options: RequestInit = {}, _isRetry = false): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`
     return this._fetch<T>(url, options, _isRetry)
   }
 
-  // Calls routed through Next.js API proxy routes (same-origin, Clerk auth added server-side)
+  // Calls routed through Next.js API proxy routes (same-origin)
   private async proxyRequest<T>(endpoint: string, options: RequestInit = {}, _isRetry = false): Promise<T> {
     const url = `${API_BASE_URL}${endpoint}`
     return this._fetch<T>(url, options, _isRetry)
@@ -64,39 +53,16 @@ class ApiClient {
       ...options,
       headers: {
         ...(isFormData ? {} : { "Content-Type": "application/json" }),
+        'x-tenant-id': this.tenantId,
+        'x-user-id': DEMO_USER_ID,
         ...options.headers,
       },
-    }
-
-    // Add tenant ID header for multi-tenant isolation
-    if (this.tenantId) {
-      config.headers = {
-        ...config.headers,
-        'x-tenant-id': this.tenantId,
-      }
-    }
-
-    // Get a fresh Clerk JWT for every request
-    try {
-      const token = this.tokenProvider ? await this.tokenProvider() : null
-      if (token) {
-        config.headers = {
-          ...config.headers,
-          Authorization: `Bearer ${token}`,
-        }
-      }
-    } catch (error) {
-      console.warn('Failed to get Clerk token:', error)
     }
 
     try {
       const response = await fetch(url, config)
 
       if (!response.ok) {
-        // On 401, retry once with a fresh token (handles edge case of token expiring mid-flight)
-        if (response.status === 401 && !_isRetry && this.tokenProvider) {
-          return this._fetch<T>(url, options, true)
-        }
         const errorData = await response.json().catch(() => ({}))
         throw new ApiError(errorData.message || `HTTP ${response.status}`, response.status, errorData)
       }
@@ -118,22 +84,11 @@ class ApiClient {
     return String(err)
   }
 
-  // Auth endpoints
-  // Legacy auth helpers kept as no-ops; Clerk is the only auth source now.
-  private persistAuth(_token: string, user: any) {
-    if (typeof window === 'undefined') return
-    if (user) {
-      localStorage.setItem('auth_user', JSON.stringify(user))
-      if (user.tenantId) {
-        this.setTenantId(user.tenantId)
-      }
-    }
-  }
+  // Auth helpers — in demo mode these are simplified
+  private persistAuth(_token: string, user: any) {}
 
   async getCurrentUser() {
-    const raw = typeof window !== 'undefined' ? localStorage.getItem('auth_user') : null
-    if (raw) return JSON.parse(raw)
-    return null
+    return { id: DEMO_USER_ID, tenantId: DEMO_TENANT_ID, email: 'demo@voiceflow.local' }
   }
 
   // Onboarding endpoints

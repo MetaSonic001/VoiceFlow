@@ -1,86 +1,57 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
-import { auth } from '@clerk/nextjs/server'
-import { resolveUserEmail } from '@/lib/clerk-helpers'
 import { prisma } from '@/lib/prisma'
 
+const DEMO_EMAIL = 'demo@voiceflow.local'
+const DEMO_TENANT = 'demo-tenant'
+
 export async function POST(req: NextRequest) {
-  const session = await auth()
-  const userId = session.userId
-  if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
-
   try {
-    const email = await resolveUserEmail()
-    if (!email) return NextResponse.json({ error: 'Unable to resolve user email from Clerk' }, { status: 400 })
-
-    // Forward to Express backend's /auth/clerk_sync
-    const backendUrl = process.env.BACKEND_URL || process.env.NEW_BACKEND_URL || 'http://localhost:8000'
-    const backendKey = process.env.BACKEND_API_KEY || ''
-    console.log(`clerk_sync: resolved email=${email}; forwarding to backend ${backendUrl}/auth/clerk_sync`)
-    const resp = await fetch(`${backendUrl.replace(/\/$/, '')}/auth/clerk_sync`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-Key': backendKey,
-      },
-      body: JSON.stringify({ email }),
+    // In demo mode, ensure demo user + tenant exist and return them
+    let user = await prisma.user.findUnique({
+      where: { email: DEMO_EMAIL },
+      include: { tenant: true, brand: true },
     })
 
-    const body = await resp.json().catch(() => null)
-    if (!resp.ok) {
-      console.error('Backend returned non-OK for /auth/clerk_sync', { status: resp.status, body })
-      return NextResponse.json({ error: 'Backend error', details: body }, { status: resp.status })
-    }
+    let needs_onboarding = !user
 
-    // Determine onboarding status locally
-    try {
-      let user = await prisma.user.findUnique({
-        where: { email },
-        include: { tenant: true, brand: true },
-      });
-
-      let needs_onboarding = !user;
-
-      if (!user) {
-        const tenant = await prisma.tenant.create({
-          data: { name: `${email.split('@')[0]}'s Organization` },
-        });
-
-        let brand: any = null;
-        try {
-          brand = await prisma.brand.create({
-            data: { tenantId: tenant.id, name: 'Default Brand' },
-          });
-        } catch { /* brand model may not exist */ }
-
-        user = await prisma.user.create({
-          data: {
-            email,
-            tenantId: tenant.id,
-            ...(brand ? { brandId: brand.id } : {}),
-          },
-          include: { tenant: true, brand: true },
-        });
-
-        console.log(`Created new tenant ${tenant.id} for user ${email}`);
+    if (!user) {
+      let tenant = await prisma.tenant.findUnique({ where: { id: DEMO_TENANT } })
+      if (!tenant) {
+        tenant = await prisma.tenant.create({
+          data: { id: DEMO_TENANT, name: 'Demo Organization' },
+        })
       }
 
-      return NextResponse.json({
-        ...body,
-        needs_onboarding,
-        user: {
-          id: user.id,
-          email: user.email,
-          tenantId: user.tenantId,
-          brandId: (user as any).brandId ?? null,
-          tenant: user.tenant,
-          brand: (user as any).brand ?? null,
+      let brand: any = null
+      try {
+        brand = await prisma.brand.create({
+          data: { tenantId: tenant.id, name: 'Default Brand' },
+        })
+      } catch { /* brand model may not exist */ }
+
+      user = await prisma.user.create({
+        data: {
+          id: 'demo-user',
+          email: DEMO_EMAIL,
+          tenantId: tenant.id,
+          ...(brand ? { brandId: brand.id } : {}),
         },
-      });
-    } catch (e) {
-      const combined = Object.assign({}, body, { needs_onboarding: null, onboarding_error: String(e) })
-      return NextResponse.json(combined)
+        include: { tenant: true, brand: true },
+      })
     }
+
+    return NextResponse.json({
+      needs_onboarding,
+      user: {
+        id: user.id,
+        email: user.email,
+        tenantId: user.tenantId,
+        brandId: (user as any).brandId ?? null,
+        tenant: user.tenant,
+        brand: (user as any).brand ?? null,
+      },
+    })
   } catch (err) {
     console.error('Error in /api/auth/clerk_sync:', err)
     return NextResponse.json({ error: String(err) }, { status: 500 })
