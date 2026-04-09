@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+{% block title %}Chat — {{ agent.name|default:"Agent" }}{% endblock %}
+{% block content %}
+<div x-data="chatApp()" class="h-screen flex flex-col bg-gray-50">
+  <!-- Header -->
+  <div class="bg-white border-b px-6 py-3 flex items-center justify-between flex-shrink-0">
+    <div class="flex items-center gap-3">
+      <a href="{% url 'agent_detail' agent.id|default:'' %}" class="text-gray-400 hover:text-gray-600"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg></a>
+      <div class="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-sm">{{ agent.name|default:"A"|make_list|first }}</div>
+      <div><div class="font-semibold text-sm">{{ agent.name|default:"Agent" }}</div><div class="text-xs text-green-500">Online</div></div>
+    </div>
+    <div class="flex items-center gap-2">
+      <button @click="toggleVoice()" :class="voiceMode ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-600'" class="p-2 rounded-lg hover:opacity-80" :title="voiceMode ? 'Switch to text' : 'Switch to voice'">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Messages -->
+  <div class="flex-1 overflow-y-auto px-6 py-4 space-y-4" x-ref="messagesContainer">
+    <!-- Welcome message -->
+    <div class="flex justify-start">
+      <div class="bg-white border rounded-2xl rounded-bl-md px-4 py-3 max-w-md shadow-sm">
+        <p class="text-sm" x-text="firstMessage">{{ agent.first_message|default:"Hello! How can I help you today?" }}</p>
+      </div>
+    </div>
+    <template x-for="(msg, i) in messages" :key="i">
+      <div :class="msg.role==='user' ? 'flex justify-end' : 'flex justify-start'">
+        <div :class="msg.role==='user' ? 'bg-blue-600 text-white rounded-2xl rounded-br-md' : 'bg-white border rounded-2xl rounded-bl-md shadow-sm'" class="px-4 py-3 max-w-md">
+          <p class="text-sm whitespace-pre-wrap" x-text="msg.text"></p>
+          <div x-show="msg.audioUrl" class="mt-2"><audio :src="msg.audioUrl" controls class="h-8 w-full"></audio></div>
+        </div>
+      </div>
+    </template>
+    <div x-show="typing" class="flex justify-start">
+      <div class="bg-white border rounded-2xl px-4 py-3 shadow-sm"><div class="flex gap-1"><span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></span><span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay:.15s"></span><span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay:.3s"></span></div></div>
+    </div>
+  </div>
+
+  <!-- Voice mode overlay -->
+  <div x-show="voiceMode" x-transition class="flex-1 absolute inset-0 top-14 bg-gray-50/95 z-10 flex flex-col items-center justify-center">
+    <div class="relative">
+      <div :class="recording ? 'scale-110 bg-red-100' : 'bg-gray-100'" class="w-32 h-32 rounded-full flex items-center justify-center transition-all duration-300">
+        <div x-show="recording" class="absolute inset-0 rounded-full bg-red-200 animate-ping opacity-30"></div>
+        <svg class="w-12 h-12" :class="recording ? 'text-red-500' : 'text-gray-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>
+      </div>
+    </div>
+    <p class="mt-6 text-gray-500 text-sm" x-text="recording ? 'Listening…' : 'Tap to speak'"></p>
+    <button @mousedown="startRecording()" @mouseup="stopRecording()" @touchstart.prevent="startRecording()" @touchend.prevent="stopRecording()" class="mt-4 px-8 py-3 rounded-full text-white font-medium" :class="recording ? 'bg-red-500' : 'bg-blue-600 hover:bg-blue-700'">
+      <span x-text="recording ? 'Release to send' : 'Hold to talk'"></span>
+    </button>
+  </div>
+
+  <!-- Text input -->
+  <div x-show="!voiceMode" class="border-t bg-white px-6 py-3 flex-shrink-0">
+    <div class="flex gap-3 max-w-3xl mx-auto">
+      <input x-model="input" @keydown.enter="sendText()" type="text" class="flex-1 border rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-200 focus:border-blue-400 outline-none" placeholder="Type a message…" :disabled="typing">
+      <button @click="sendText()" :disabled="!input.trim() || typing" class="px-5 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 disabled:opacity-50">Send</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function chatApp() {
+  return {
+    messages: [],
+    input: '',
+    typing: false,
+    voiceMode: false,
+    recording: false,
+    mediaRecorder: null,
+    audioChunks: [],
+    sessionId: 'chat-' + Date.now(),
+    agentId: '{{ agent.id|default:"" }}',
+    firstMessage: '{{ agent.first_message|default:"Hello! How can I help you today?"|escapejs }}',
+
+    toggleVoice() { this.voiceMode = !this.voiceMode; },
+
+    async sendText() {
+      const text = this.input.trim();
+      if (!text) return;
+      this.input = '';
+      this.messages.push({role:'user', text});
+      this.typing = true;
+      this.$nextTick(()=>this.scrollToBottom());
+      try {
+        const r = await apiFetch('/api/chat/', {
+          method: 'POST',
+          body: JSON.stringify({agentId:this.agentId, message:text, sessionId:this.sessionId}),
+        });
+        const d = await r.json();
+        const reply = d.response || d.reply || d.message || 'No response';
+        this.messages.push({role:'agent', text:reply});
+        // Auto TTS for agent responses
+        this.speakResponse(reply);
+      } catch(e) {
+        this.messages.push({role:'agent', text:'Error connecting to agent'});
+      }
+      this.typing = false;
+      this.$nextTick(()=>this.scrollToBottom());
+    },
+
+    async speakResponse(text) {
+      try {
+        const r = await fetch('/api/tts/', {
+          method:'POST',
+          headers:{'Content-Type':'application/json','X-CSRFToken':getCsrfToken()},
+          body:JSON.stringify({text, voiceId:''}),
+        });
+        if (r.ok) {
+          const blob = await r.blob();
+          const url = URL.createObjectURL(blob);
+          const audio = new Audio(url);
+          audio.play();
+          // Add audio URL to last agent message
+          const lastAgent = [...this.messages].reverse().find(m=>m.role==='agent');
+          if (lastAgent) lastAgent.audioUrl = url;
+        }
+      } catch(e) { console.log('TTS unavailable'); }
+    },
+
+    async startRecording() {
+      if (this.recording) return;
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+        this.mediaRecorder = new MediaRecorder(stream, {mimeType:'audio/webm'});
+        this.audioChunks = [];
+        this.mediaRecorder.ondataavailable = e => { if(e.data.size>0) this.audioChunks.push(e.data); };
+        this.mediaRecorder.onstop = () => {
+          stream.getTracks().forEach(t=>t.stop());
+          const blob = new Blob(this.audioChunks, {type:'audio/webm'});
+          this.sendAudio(blob);
+        };
+        this.mediaRecorder.start();
+        this.recording = true;
+      } catch(e) { showToast('Microphone access denied','error'); }
+    },
+
+    stopRecording() {
+      if (this.mediaRecorder && this.recording) {
+        this.mediaRecorder.stop();
+        this.recording = false;
+      }
+    },
+
+    async sendAudio(blob) {
+      this.messages.push({role:'user', text:'🎙️ Voice message'});
+      this.typing = true;
+      this.$nextTick(()=>this.scrollToBottom());
+      try {
+        const fd = new FormData();
+        fd.append('audio', blob, 'recording.webm');
+        fd.append('agentId', this.agentId);
+        fd.append('sessionId', this.sessionId);
+        const r = await fetch('/api/audio/', {
+          method:'POST', body:fd, headers:{'X-CSRFToken':getCsrfToken()},
+        });
+        const d = await r.json();
+        const transcript = d.transcript || '';
+        const reply = d.response || d.reply || 'No response';
+        if (transcript) {
+          // Update user message with transcript
+          const lastUser = [...this.messages].reverse().find(m=>m.role==='user');
+          if (lastUser) lastUser.text = transcript;
+        }
+        this.messages.push({role:'agent', text:reply});
+        this.speakResponse(reply);
+      } catch(e) {
+        this.messages.push({role:'agent', text:'Error processing audio'});
+      }
+      this.typing = false;
+      this.$nextTick(()=>this.scrollToBottom());
+    },
+
+    scrollToBottom() {
+      const c = this.$refs.messagesContainer;
+      if (c) c.scrollTop = c.scrollHeight;
+    }
+  };
+}
+</script>
+{% endblock %}

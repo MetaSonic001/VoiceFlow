@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}VoiceFlow AI{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: { accent: '#6366f1' },
+          fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+        }
+      }
+    }
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.8/dist/htmx.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  {% block extra_head %}{% endblock %}
+  <style>
+    [x-cloak] { display: none !important; }
+    .fade-in { animation: fadeIn .3s ease-in; }
+    @keyframes fadeIn { from { opacity:0; transform:translateY(8px) } to { opacity:1; transform:translateY(0) } }
+    @keyframes pulse-ring { 0% { transform:scale(.8); opacity:1 } 100% { transform:scale(2.2); opacity:0 } }
+    .pulse-ring::before { content:''; position:absolute; inset:-8px; border-radius:50%; border:3px solid currentColor; animation:pulse-ring 1.5s ease-out infinite; }
+    .glass { background: rgba(255,255,255,.7); backdrop-filter: blur(12px); }
+    ::-webkit-scrollbar { width:6px } ::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:3px }
+  </style>
+</head>
+<body class="font-sans antialiased bg-gray-50 text-gray-900">
+  <!-- Toast container -->
+  <div id="toast-container" class="fixed top-4 right-4 z-[100] space-y-2"></div>
+
+  {% block body %}{% endblock %}
+
+  <script>
+    // CSRF token helper for fetch
+    function getCookie(name) {
+      const v = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
+      return v ? v.pop() : '';
+    }
+    const CSRF = getCookie('csrftoken');
+
+    function apiFetch(url, opts = {}) {
+      opts.headers = Object.assign({'X-CSRFToken': CSRF}, opts.headers || {});
+      if (opts.json) {
+        opts.body = JSON.stringify(opts.json);
+        opts.headers['Content-Type'] = 'application/json';
+        delete opts.json;
+      }
+      return fetch(url, opts).then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const ct = r.headers.get('content-type') || '';
+        if (ct.includes('json')) return r.json();
+        return r;
+      });
+    }
+
+    function showToast(msg, type='success') {
+      const c = document.getElementById('toast-container');
+      const colors = { success:'bg-green-500', error:'bg-red-500', info:'bg-blue-500' };
+      const el = document.createElement('div');
+      el.className = `${colors[type]||colors.info} text-white px-4 py-3 rounded-lg shadow-lg text-sm fade-in flex items-center gap-2`;
+      el.innerHTML = `<span>${msg}</span>`;
+      c.appendChild(el);
+      setTimeout(() => { el.style.opacity='0'; el.style.transition='opacity .3s'; setTimeout(()=>el.remove(), 300) }, 4000);
+    }
+  </script>
+  {% block extra_js %}{% endblock %}
+</body>
+</html>

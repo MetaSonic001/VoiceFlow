@@ -1,21 +1,37 @@
 import { NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
 
-const DEMO_EMAIL = 'demo@voiceflow.local'
+const DEMO_TENANT = 'demo-tenant'
+const DEMO_USER = 'demo-user'
+
+// Pure proxy to Python backend — stores company profile in tenant settings
+export async function GET() {
+  try {
+    const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000'
+    const r = await fetch(`${backendUrl.replace(/\/$/, '')}/onboarding/company`, {
+      headers: { 'x-tenant-id': DEMO_TENANT, 'x-user-id': DEMO_USER },
+    })
+    const data = await r.json().catch(() => ({}))
+    return NextResponse.json(data, { status: r.status })
+  } catch (err) {
+    return NextResponse.json({ error: String(err) }, { status: 500 })
+  }
+}
 
 export async function POST(req: Request) {
-  const body = await req.json().catch(() => ({}))
-  const { name } = body
-  if (!name) return NextResponse.json({ error: 'Missing name' }, { status: 400 })
-
   try {
-    const tenant = await prisma.tenant.create({ data: { name } })
-    await prisma.onboardingProgress.upsert({
-      where: { userEmail: DEMO_EMAIL },
-      create: { userEmail: DEMO_EMAIL, tenantId: tenant.id },
-      update: { tenantId: tenant.id },
+    const body = await req.json()
+    const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000'
+    const r = await fetch(`${backendUrl.replace(/\/$/, '')}/onboarding/company`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-tenant-id': DEMO_TENANT,
+        'x-user-id': DEMO_USER,
+      },
+      body: JSON.stringify(body),
     })
-    return NextResponse.json({ success: true, tenant_id: tenant.id })
+    const data = await r.json().catch(() => ({}))
+    return NextResponse.json(data, { status: r.status })
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 })
   }

@@ -1,0 +1,36 @@
+{% extends "base_dashboard.html" %}
+{% block title %}Call Widget — VoiceFlow AI{% endblock %}
+{% block content %}
+<div class="mb-8"><h1 class="text-2xl font-bold">Embeddable Widget</h1><p class="text-gray-500 text-sm mt-1">Embed your AI agent on any website</p></div>
+
+<div class="bg-white rounded-xl border p-6 mb-6">
+  <h3 class="font-semibold mb-3">How it works</h3>
+  <div class="grid md:grid-cols-3 gap-6 text-sm text-gray-600">
+    <div class="flex items-start gap-3"><div class="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold flex-shrink-0">1</div><div>Copy the embed code for your agent</div></div>
+    <div class="flex items-start gap-3"><div class="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold flex-shrink-0">2</div><div>Paste it into your website HTML</div></div>
+    <div class="flex items-start gap-3"><div class="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold flex-shrink-0">3</div><div>Your visitors can chat with the agent</div></div>
+  </div>
+</div>
+
+{% for agent in agents %}
+<div class="bg-white rounded-xl border p-5 mb-4" x-data="{copied:false}">
+  <div class="flex items-center justify-between">
+    <div><span class="font-semibold">{{ agent.name }}</span> <span class="text-xs px-2 py-1 rounded-full {% if agent.status == 'active' %}bg-green-100 text-green-700{% else %}bg-gray-100 text-gray-600{% endif %} ml-2">{{ agent.status }}</span></div>
+    <button @click="navigator.clipboard.writeText('<script src=\'https://app.voiceflow.ai/widget/{{ agent.id }}/embed.js\'><\/script>'); copied=true; setTimeout(()=>copied=false,2000)" class="px-3 py-1.5 border rounded-lg text-sm hover:bg-gray-50" x-text="copied?'Copied!':'Copy Code'">Copy Code</button>
+  </div>
+  <code class="block mt-3 p-3 bg-gray-50 rounded-lg text-xs font-mono text-gray-600">&lt;script src="https://app.voiceflow.ai/widget/{{ agent.id }}/embed.js"&gt;&lt;/script&gt;</code>
+</div>
+{% empty %}
+<div class="bg-white rounded-xl border p-12 text-center text-gray-400">No agents yet. Create an agent first.</div>
+{% endfor %}
+
+<div class="bg-white rounded-xl border p-6 mt-6">
+  <h3 class="font-semibold mb-4">REST API</h3>
+  <div class="space-y-3 text-sm">
+    <div class="flex items-center gap-3"><span class="px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-mono">POST</span><code class="text-gray-600">/api/runner/chat</code><span class="text-gray-400 ml-auto">Send a message</span></div>
+    <div class="flex items-center gap-3"><span class="px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-mono">POST</span><code class="text-gray-600">/api/runner/audio</code><span class="text-gray-400 ml-auto">Send audio</span></div>
+    <div class="flex items-center gap-3"><span class="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-mono">GET</span><code class="text-gray-600">/api/agents/</code><span class="text-gray-400 ml-auto">List agents</span></div>
+    <div class="flex items-center gap-3"><span class="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-mono">WS</span><code class="text-gray-600">/ws/{'{'}session_id{'}'}</code><span class="text-gray-400 ml-auto">WebSocket stream</span></div>
+  </div>
+</div>
+{% endblock %}

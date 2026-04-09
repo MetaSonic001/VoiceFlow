@@ -7,22 +7,21 @@ const DEMO_EMAIL = 'demo@voiceflow.local'
 
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}))
-  const { name, role, templateId, description, channels } = body
+  const { name, role, templateId, description, channels, brandId } = body
   if (!name) return NextResponse.json({ error: 'Missing name' }, { status: 400 })
 
   try {
-    // Use demo-tenant or look up from onboarding progress
-    let tenantId = DEMO_TENANT
-    const progress = await prisma.onboardingProgress.findUnique({ where: { userEmail: DEMO_EMAIL } })
-    if (progress?.tenantId) tenantId = progress.tenantId
+    const tenantId = DEMO_TENANT
 
     const agent = await prisma.agent.create({
       data: {
         name,
         tenantId,
+        userId: DEMO_USER,
         ...(description ? { description } : {}),
         ...(channels ? { channels } : {}),
         ...(templateId ? { templateId } : {}),
+        ...(brandId ? { brandId } : {}),
       },
     })
 
@@ -49,22 +48,7 @@ export async function POST(req: Request) {
       console.warn('Failed to create AgentConfiguration:', cfgErr)
     }
 
-    // Mirror to Express backend
-    try {
-      const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000'
-      await fetch(`${backendUrl.replace(/\/$/, '')}/onboarding/agent`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-tenant-id': tenantId,
-          'x-user-id': DEMO_USER,
-        },
-        body: JSON.stringify({ name, role, templateId, description, channels }),
-      })
-    } catch (err) {
-      console.warn('Failed to mirror agent to backend:', err)
-    }
-
+    // No mirror to backend — Prisma writes to the same DB that the Python backend reads
     return NextResponse.json({ success: true, agent_id: agent.id })
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 })

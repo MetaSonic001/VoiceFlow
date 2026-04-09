@@ -1,0 +1,133 @@
+{% extends "base_dashboard.html" %}
+{% block title %}Dashboard — VoiceFlow AI{% endblock %}
+
+{% block content %}
+<div x-data="dashboardApp()" x-init="init()">
+  <!-- Header -->
+  <div class="flex items-center justify-between mb-8">
+    <div>
+      <h1 class="text-2xl font-bold">AI Agents</h1>
+      <p class="text-gray-500 text-sm mt-1">Manage and monitor your voice agents</p>
+    </div>
+    <div class="flex gap-3">
+      <a href="{% url 'onboarding' %}" class="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-purple-600 text-white text-sm font-medium rounded-lg hover:shadow-lg transition-all">
+        + Create Agent
+      </a>
+    </div>
+  </div>
+
+  <!-- Metrics row -->
+  <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
+    <div class="bg-white rounded-xl border border-gray-200 p-4">
+      <div class="text-2xl font-bold text-blue-600" x-text="agents.length">0</div>
+      <div class="text-xs text-gray-500 mt-1">Total Agents</div>
+    </div>
+    <div class="bg-white rounded-xl border border-gray-200 p-4">
+      <div class="text-2xl font-bold text-green-600" x-text="agents.filter(a=>a.status==='active').length">0</div>
+      <div class="text-xs text-gray-500 mt-1">Active Agents</div>
+    </div>
+    <div class="bg-white rounded-xl border border-gray-200 p-4">
+      <div class="text-2xl font-bold text-purple-600" x-text="metrics.totalInteractions || '—'">—</div>
+      <div class="text-xs text-gray-500 mt-1">Total Interactions</div>
+    </div>
+    <div class="bg-white rounded-xl border border-gray-200 p-4">
+      <div class="text-2xl font-bold text-orange-600" x-text="metrics.successRate ? metrics.successRate+'%' : '—'">—</div>
+      <div class="text-xs text-gray-500 mt-1">Success Rate</div>
+    </div>
+    <div class="bg-white rounded-xl border border-gray-200 p-4">
+      <div class="text-2xl font-bold text-cyan-600" x-text="metrics.avgResponseTime || '—'">—</div>
+      <div class="text-xs text-gray-500 mt-1">Avg Response</div>
+    </div>
+    <div class="bg-white rounded-xl border border-gray-200 p-4">
+      <div class="text-2xl font-bold text-pink-600" x-text="metrics.satisfaction ? metrics.satisfaction+'%' : '—'">—</div>
+      <div class="text-xs text-gray-500 mt-1">Satisfaction</div>
+    </div>
+  </div>
+
+  <!-- Search & Filter -->
+  <div class="flex flex-wrap gap-3 mb-6">
+    <input type="text" x-model="search" placeholder="Search agents..." class="px-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none w-64">
+    <template x-for="f in ['All','active','paused','draft']">
+      <button @click="filter=f" :class="filter===f ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 border border-gray-200'" class="px-4 py-2 rounded-lg text-sm font-medium transition" x-text="f==='All'?'All':f.charAt(0).toUpperCase()+f.slice(1)"></button>
+    </template>
+  </div>
+
+  <!-- Empty state -->
+  <template x-if="filteredAgents.length === 0 && !loading">
+    <div class="text-center py-16 bg-white rounded-2xl border border-gray-200">
+      <div class="w-16 h-16 rounded-full bg-blue-50 flex items-center justify-center mx-auto mb-4">
+        <svg class="w-8 h-8 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
+      </div>
+      <h3 class="text-lg font-semibold mb-2">No agents yet</h3>
+      <p class="text-gray-500 text-sm mb-6">Create your first AI agent to get started</p>
+      <a href="{% url 'onboarding' %}" class="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-purple-600 text-white text-sm font-medium rounded-lg">Create Agent</a>
+    </div>
+  </template>
+
+  <!-- Agent grid -->
+  <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+    <template x-for="agent in filteredAgents" :key="agent.id">
+      <div class="bg-white rounded-xl border border-gray-200 hover:shadow-lg hover:border-blue-200 transition-all cursor-pointer group" @click="window.location='/dashboard/agents/'+agent.id+'/'">
+        <div class="p-5">
+          <div class="flex items-start justify-between mb-3">
+            <div>
+              <h3 class="font-semibold" x-text="agent.name"></h3>
+              <p class="text-sm text-gray-500" x-text="agent.role || agent.template || 'AI Agent'"></p>
+            </div>
+            <span :class="{
+              'bg-green-100 text-green-700': agent.status==='active',
+              'bg-yellow-100 text-yellow-700': agent.status==='paused',
+              'bg-gray-100 text-gray-600': agent.status==='draft'
+            }" class="px-2 py-1 rounded-full text-xs font-medium" x-text="agent.status"></span>
+          </div>
+          <div class="flex items-center gap-4 text-sm text-gray-500">
+            <span x-text="(agent.totalCalls||0)+' calls'"></span>
+            <span x-text="(agent.successRate||0)+'% success'"></span>
+          </div>
+          <div class="flex gap-2 mt-4 pt-4 border-t border-gray-100">
+            <a :href="'/dashboard/agents/'+agent.id+'/chat/'" @click.stop class="flex-1 text-center py-2 bg-blue-50 text-blue-600 text-sm font-medium rounded-lg hover:bg-blue-100 transition">Chat</a>
+            <button @click.stop="toggleAgent(agent)" class="px-3 py-2 border border-gray-200 rounded-lg text-sm hover:bg-gray-50 transition" x-text="agent.status==='active'?'Pause':'Activate'"></button>
+            <button @click.stop="deleteAgent(agent)" class="px-3 py-2 border border-red-200 text-red-600 rounded-lg text-sm hover:bg-red-50 transition">Delete</button>
+          </div>
+        </div>
+      </div>
+    </template>
+  </div>
+</div>
+
+<script>
+function dashboardApp() {
+  return {
+    agents: {{ agents|safe }},
+    metrics: {{ metrics|safe }},
+    search: '',
+    filter: 'All',
+    loading: false,
+    init() {},
+    get filteredAgents() {
+      return this.agents.filter(a => {
+        if (this.filter !== 'All' && a.status !== this.filter) return false;
+        if (this.search && !a.name.toLowerCase().includes(this.search.toLowerCase())) return false;
+        return true;
+      });
+    },
+    async toggleAgent(agent) {
+      const action = agent.status === 'active' ? 'pause' : 'activate';
+      try {
+        await apiFetch(`/api/agents/${agent.id}/${action}/`, {method:'POST'});
+        agent.status = action === 'pause' ? 'paused' : 'active';
+        showToast(`Agent ${action}d`);
+      } catch(e) { showToast('Failed: '+e.message, 'error'); }
+    },
+    async deleteAgent(agent) {
+      if (!confirm('Delete ' + agent.name + '?')) return;
+      try {
+        await apiFetch(`/api/agents/${agent.id}/`, {method:'DELETE'});
+        this.agents = this.agents.filter(a => a.id !== agent.id);
+        showToast('Agent deleted');
+      } catch(e) { showToast('Failed: '+e.message, 'error'); }
+    }
+  }
+}
+</script>
+{% endblock %}

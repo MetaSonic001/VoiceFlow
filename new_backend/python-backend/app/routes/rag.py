@@ -5,7 +5,7 @@ Query and conversation management.
 import json
 import logging
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -78,4 +78,4 @@ async def get_conversation(session_id: str, agentId: str = "", auth: AuthContext
 
 @router.delete("/conversation/{session_id}")
 async def delete_conversation(session_id: str, auth: AuthContext = Depends(get_auth)):
-    return JSONResponse(None, status_code=204)
+    return Response(status_code=204)

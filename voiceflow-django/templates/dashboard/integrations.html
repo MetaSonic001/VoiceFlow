@@ -1,0 +1,26 @@
+{% extends "base_dashboard.html" %}{% block title %}Integrations — VoiceFlow AI{% endblock %}
+{% block content %}
+<div class="mb-8"><h1 class="text-2xl font-bold">Integrations</h1><p class="text-gray-500 text-sm mt-1">Connect third-party services</p></div>
+<div class="grid md:grid-cols-3 gap-6">
+  {% for item in integrations %}
+  <div class="bg-white rounded-xl border p-5 flex flex-col">
+    <div class="flex items-center gap-3 mb-3"><div class="w-10 h-10 rounded-lg bg-{{ item.color|default:'gray' }}-100 flex items-center justify-center text-{{ item.color|default:'gray' }}-600 font-bold text-lg">{{ item.name|make_list|first }}</div><span class="font-semibold">{{ item.name }}</span></div>
+    <p class="text-sm text-gray-500 flex-1">{{ item.description|default:"Connect and configure." }}</p>
+    <div class="mt-4"><span class="text-xs px-2 py-1 rounded-full {% if item.status == 'connected' %}bg-green-100 text-green-700{% else %}bg-gray-100 text-gray-500{% endif %}">{{ item.status|default:"Not connected" }}</span></div>
+  </div>
+  {% empty %}
+  <div class="bg-white rounded-xl border p-5 flex flex-col">
+    <div class="flex items-center gap-3 mb-3"><div class="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center text-green-600 font-bold text-lg">T</div><span class="font-semibold">Twilio</span></div>
+    <p class="text-sm text-gray-500 flex-1">Phone calls and SMS.</p><div class="mt-4"><span class="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-500">Not connected</span></div>
+  </div>
+  <div class="bg-white rounded-xl border p-5 flex flex-col">
+    <div class="flex items-center gap-3 mb-3"><div class="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-lg">S</div><span class="font-semibold">Slack</span></div>
+    <p class="text-sm text-gray-500 flex-1">Team notifications.</p><div class="mt-4"><span class="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-500">Not connected</span></div>
+  </div>
+  <div class="bg-white rounded-xl border p-5 flex flex-col">
+    <div class="flex items-center gap-3 mb-3"><div class="w-10 h-10 rounded-lg bg-purple-100 flex items-center justify-center text-purple-600 font-bold text-lg">W</div><span class="font-semibold">WhatsApp</span></div>
+    <p class="text-sm text-gray-500 flex-1">Messaging channel.</p><div class="mt-4"><span class="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-500">Not connected</span></div>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

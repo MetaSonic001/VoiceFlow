@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+
+{% block body %}
+<div class="flex min-h-screen">
+  <!-- Sidebar -->
+  {% include "partials/sidebar.html" %}
+
+  <!-- Main content -->
+  <main class="flex-1 ml-64 bg-gray-50">
+    <div class="p-6 lg:p-8">
+      {% block content %}{% endblock %}
+    </div>
+  </main>
+</div>
+{% endblock %}

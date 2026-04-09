@@ -1,0 +1,25 @@
+{% extends "base_dashboard.html" %}
+{% block title %}API Documentation — VoiceFlow AI{% endblock %}
+{% block content %}
+<div class="mb-8"><h1 class="text-2xl font-bold">API Documentation</h1><p class="text-gray-500 text-sm mt-1">Interactive API reference</p></div>
+<div x-data="{open: null}" class="space-y-4">
+  {% for cat in "Authentication,Agents,Conversations,Analytics,Knowledge,Settings" %}
+  <div class="bg-white rounded-xl border">
+    <button @click="open=open==='{{ cat }}'?null:'{{ cat }}'" class="w-full flex items-center justify-between p-5 text-left">
+      <span class="font-semibold">{{ cat }}</span>
+      <svg :class="open==='{{ cat }}'?'rotate-180':''" class="w-5 h-5 text-gray-400 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+    </button>
+    <div x-show="open==='{{ cat }}'" x-cloak class="border-t px-5 pb-5 text-sm text-gray-600">
+      <div class="py-3">
+        <div class="flex items-center gap-2"><span class="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-mono">GET</span><code>/api/{{ cat|lower }}/</code></div>
+        <p class="text-gray-400 mt-1">List all {{ cat|lower }} resources.</p>
+      </div>
+      <div class="py-3 border-t">
+        <div class="flex items-center gap-2"><span class="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs font-mono">POST</span><code>/api/{{ cat|lower }}/</code></div>
+        <p class="text-gray-400 mt-1">Create a new {{ cat|lower }} resource.</p>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

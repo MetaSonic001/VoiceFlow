@@ -1,0 +1,42 @@
+{% extends "base_dashboard.html" %}
+{% block title %}Retraining — VoiceFlow AI{% endblock %}
+{% block content %}
+<div x-data="retrainingApp()">
+  <div class="flex items-center justify-between mb-8">
+    <div><h1 class="text-2xl font-bold">Retraining Queue</h1><p class="text-gray-500 text-sm mt-1">Review and improve agent responses (Patent Claim 7: Continuous Improvement Loop)</p></div>
+    <button @click="triggerPipeline" class="px-4 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 transition">Run Pipeline Now</button>
+  </div>
+
+  <div class="grid md:grid-cols-4 gap-4 mb-6">
+    <div class="bg-white rounded-xl border p-4 text-center"><div class="text-xl font-bold text-yellow-600">{{ stats.pending|default:"0" }}</div><div class="text-xs text-gray-500">Pending</div></div>
+    <div class="bg-white rounded-xl border p-4 text-center"><div class="text-xl font-bold text-green-600">{{ stats.approved|default:"0" }}</div><div class="text-xs text-gray-500">Approved</div></div>
+    <div class="bg-white rounded-xl border p-4 text-center"><div class="text-xl font-bold text-red-600">{{ stats.rejected|default:"0" }}</div><div class="text-xs text-gray-500">Rejected</div></div>
+    <div class="bg-white rounded-xl border p-4 text-center"><div class="text-xl font-bold text-blue-600">{{ stats.flagged|default:"0" }}</div><div class="text-xs text-gray-500">Flagged</div></div>
+  </div>
+
+  <div class="bg-white rounded-xl border">
+    {% for ex in examples %}
+    <div class="p-4 border-b space-y-2">
+      <div class="text-sm"><span class="font-medium text-gray-700">User Query:</span> {{ ex.userQuery|default:ex.query }}</div>
+      <div class="text-sm text-red-600"><span class="font-medium">Bad Response:</span> {{ ex.badResponse|default:ex.response }}</div>
+      <div class="text-sm text-green-600"><span class="font-medium">Ideal Response:</span> {{ ex.idealResponse|default:"(not set)" }}</div>
+      <div class="flex gap-2 mt-2">
+        <button class="px-3 py-1 bg-green-100 text-green-700 text-xs rounded-lg" onclick="showToast('Approved')">Approve</button>
+        <button class="px-3 py-1 bg-red-100 text-red-700 text-xs rounded-lg" onclick="showToast('Rejected')">Reject</button>
+      </div>
+    </div>
+    {% empty %}
+    <div class="p-12 text-center text-gray-400 text-sm">No retraining examples yet. Flag bad responses from call logs.</div>
+    {% endfor %}
+  </div>
+</div>
+<script>
+function retrainingApp() {
+  return {
+    async triggerPipeline() {
+      try { await apiFetch('/api/retraining/trigger/', {method:'POST'}); showToast('Pipeline triggered'); } catch(e) { showToast('Failed','error'); }
+    }
+  }
+}
+</script>
+{% endblock %}

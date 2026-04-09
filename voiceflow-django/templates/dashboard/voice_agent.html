@@ -1,0 +1,198 @@
+{% extends "base_dashboard.html" %}
+{% block title %}Voice Agent — VoiceFlow AI{% endblock %}
+{% block content %}
+<div x-data="voiceAgentApp()" class="space-y-6">
+  <div class="flex items-center justify-between">
+    <div><h1 class="text-2xl font-bold">Voice Agent</h1><p class="text-gray-500 text-sm mt-1">Talk with your agents in real-time — Gemini Live style</p></div>
+    <div class="flex items-center gap-3">
+      <select x-model="selectedAgentId" @change="onAgentChange()" class="border rounded-lg px-3 py-2 text-sm">
+        <option value="">Select an agent</option>
+        {% for a in agents %}
+        <option value="{{ a.id }}">{{ a.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+
+  <!-- Main voice interface -->
+  <div class="bg-white rounded-2xl border overflow-hidden">
+    <!-- Visualization area -->
+    <div class="bg-gradient-to-br from-gray-900 via-gray-800 to-blue-900 text-white p-12 flex flex-col items-center justify-center min-h-[400px] relative">
+      <!-- Agent avatar -->
+      <div class="relative mb-8">
+        <div :class="state==='listening' ? 'scale-110' : state==='speaking' ? 'scale-105' : ''" class="w-28 h-28 rounded-full bg-white/10 backdrop-blur flex items-center justify-center transition-all duration-500">
+          <div x-show="state==='listening'" class="absolute inset-0 rounded-full border-2 border-blue-400 animate-ping opacity-40"></div>
+          <div x-show="state==='speaking'" class="absolute inset-0 rounded-full border-2 border-green-400 animate-pulse opacity-60"></div>
+          <svg class="w-14 h-14 text-white/80" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>
+        </div>
+      </div>
+
+      <!-- Waveform bars -->
+      <div class="flex items-end gap-1 h-16 mb-6">
+        <template x-for="i in 24" :key="i">
+          <div class="w-1.5 rounded-full transition-all duration-150" :class="state==='listening' ? 'bg-blue-400' : state==='speaking' ? 'bg-green-400' : 'bg-white/20'" :style="'height:' + (state!=='idle' ? (Math.random()*50+10) : 4) + 'px'" x-effect="if(state!=='idle') { setInterval(()=>$el.style.height=(Math.random()*50+10)+'px', 150) }"></div>
+        </template>
+      </div>
+
+      <!-- Status text -->
+      <div class="text-lg font-light" x-text="stateLabel"></div>
+      <div x-show="selectedAgentName" class="text-sm text-white/50 mt-1" x-text="'Talking to ' + selectedAgentName"></div>
+
+      <!-- Live transcript -->
+      <div x-show="liveTranscript" class="mt-6 max-w-md text-center">
+        <div class="bg-white/10 backdrop-blur rounded-xl px-4 py-3 text-sm text-white/80" x-text="liveTranscript"></div>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="p-6 flex items-center justify-center gap-4 bg-gray-50">
+      <button @click="toggleMute()" :class="muted ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-600'" class="p-3 rounded-full hover:opacity-80 transition">
+        <svg x-show="!muted" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072M18.364 5.636a9 9 0 010 12.728M12 18.75a.75.75 0 01-.75-.75V6a.75.75 0 011.5 0v12a.75.75 0 01-.75.75z"/></svg>
+        <svg x-show="muted" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"/></svg>
+      </button>
+
+      <!-- Main talk button -->
+      <button @mousedown="startTalking()" @mouseup="stopTalking()" @touchstart.prevent="startTalking()" @touchend.prevent="stopTalking()" :disabled="!selectedAgentId" :class="state==='listening' ? 'bg-red-500 scale-110' : 'bg-blue-600 hover:bg-blue-700'" class="w-20 h-20 rounded-full text-white flex items-center justify-center transition-all duration-200 shadow-lg disabled:opacity-40 disabled:cursor-not-allowed">
+        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>
+      </button>
+
+      <button @click="endSession()" class="p-3 rounded-full bg-gray-100 text-gray-600 hover:bg-red-100 hover:text-red-600 transition" title="End session">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Conversation transcript -->
+  <div class="bg-white rounded-xl border p-6">
+    <h3 class="font-semibold mb-4">Conversation Transcript</h3>
+    <div class="space-y-3 max-h-64 overflow-y-auto" x-ref="transcript">
+      <template x-for="(msg, i) in messages" :key="i">
+        <div class="flex gap-3">
+          <div :class="msg.role==='user' ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-600'" class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0" x-text="msg.role==='user' ? 'Y' : 'A'"></div>
+          <div>
+            <div class="text-xs text-gray-400" x-text="msg.role==='user' ? 'You' : selectedAgentName"></div>
+            <div class="text-sm" x-text="msg.text"></div>
+          </div>
+        </div>
+      </template>
+      <div x-show="messages.length===0" class="text-center text-gray-400 text-sm py-8">Select an agent and hold the button to start talking.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+function voiceAgentApp() {
+  return {
+    selectedAgentId: '',
+    selectedAgentName: '',
+    state: 'idle', // idle, listening, processing, speaking
+    muted: false,
+    messages: [],
+    liveTranscript: '',
+    mediaRecorder: null,
+    audioChunks: [],
+    sessionId: 'voice-' + Date.now(),
+    currentAudio: null,
+
+    get stateLabel() {
+      return {idle:'Ready',listening:'Listening…',processing:'Thinking…',speaking:'Speaking…'}[this.state] || 'Ready';
+    },
+
+    onAgentChange() {
+      const agents = {{ agents|safe }};
+      const a = agents.find(a => a.id === this.selectedAgentId);
+      this.selectedAgentName = a ? a.name : '';
+      this.messages = [];
+      this.sessionId = 'voice-' + Date.now();
+    },
+
+    toggleMute() { this.muted = !this.muted; if (this.currentAudio) this.currentAudio.muted = this.muted; },
+
+    async startTalking() {
+      if (this.state === 'listening' || !this.selectedAgentId) return;
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+        this.mediaRecorder = new MediaRecorder(stream, {mimeType:'audio/webm'});
+        this.audioChunks = [];
+        this.mediaRecorder.ondataavailable = e => { if(e.data.size>0) this.audioChunks.push(e.data); };
+        this.mediaRecorder.onstop = () => {
+          stream.getTracks().forEach(t=>t.stop());
+          const blob = new Blob(this.audioChunks, {type:'audio/webm'});
+          this.processAudio(blob);
+        };
+        this.mediaRecorder.start();
+        this.state = 'listening';
+        this.liveTranscript = '';
+      } catch(e) { showToast('Microphone access denied','error'); }
+    },
+
+    stopTalking() {
+      if (this.mediaRecorder && this.state === 'listening') {
+        this.mediaRecorder.stop();
+        this.state = 'processing';
+      }
+    },
+
+    async processAudio(blob) {
+      try {
+        const fd = new FormData();
+        fd.append('audio', blob, 'recording.webm');
+        fd.append('agentId', this.selectedAgentId);
+        fd.append('sessionId', this.sessionId);
+        const r = await fetch('/api/audio/', {
+          method: 'POST', body: fd,
+          headers: {'X-CSRFToken': getCsrfToken()},
+        });
+        const d = await r.json();
+        const transcript = d.transcript || 'Audio message';
+        const reply = d.response || d.reply || 'No response';
+        this.messages.push({role:'user', text:transcript});
+        this.messages.push({role:'agent', text:reply});
+        this.liveTranscript = reply;
+        this.$nextTick(()=>{
+          const t = this.$refs.transcript;
+          if (t) t.scrollTop = t.scrollHeight;
+        });
+        // TTS playback
+        await this.speak(reply);
+      } catch(e) {
+        this.messages.push({role:'agent', text:'Error processing audio'});
+        this.liveTranscript = 'Error processing audio';
+        this.state = 'idle';
+      }
+    },
+
+    async speak(text) {
+      this.state = 'speaking';
+      try {
+        const r = await fetch('/api/tts/', {
+          method:'POST',
+          headers:{'Content-Type':'application/json','X-CSRFToken':getCsrfToken()},
+          body:JSON.stringify({text, voiceId:''}),
+        });
+        if (r.ok) {
+          const blob = await r.blob();
+          const url = URL.createObjectURL(blob);
+          this.currentAudio = new Audio(url);
+          this.currentAudio.muted = this.muted;
+          this.currentAudio.onended = () => { this.state = 'idle'; this.liveTranscript = ''; };
+          await this.currentAudio.play();
+        } else {
+          this.state = 'idle';
+        }
+      } catch(e) { this.state = 'idle'; }
+    },
+
+    endSession() {
+      if (this.currentAudio) { this.currentAudio.pause(); this.currentAudio = null; }
+      if (this.mediaRecorder && this.state==='listening') this.mediaRecorder.stop();
+      this.state = 'idle';
+      this.liveTranscript = '';
+      this.messages = [];
+      this.sessionId = 'voice-' + Date.now();
+      showToast('Session ended','info');
+    }
+  };
+}
+</script>
+{% endblock %}

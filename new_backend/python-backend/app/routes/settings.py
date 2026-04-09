@@ -15,6 +15,37 @@ from app.config import settings
 
 router = APIRouter()
 
+
+# ── General settings (GET/PUT /settings) ─────────────────────────────────────
+
+@router.get("/")
+@router.get("")
+async def get_settings(auth: AuthContext = Depends(get_auth), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Tenant).where(Tenant.id == auth.tenant_id))
+    tenant = result.scalar_one_or_none()
+    s = (tenant.settings or {}) if tenant else {}
+    return {
+        "notifications": s.get("notifications", {}),
+        "security": s.get("security", {}),
+        "system": s.get("system", {}),
+    }
+
+
+@router.put("/")
+@router.put("")
+async def update_settings(body: dict, auth: AuthContext = Depends(get_auth), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Tenant).where(Tenant.id == auth.tenant_id))
+    tenant = result.scalar_one_or_none()
+    if not tenant:
+        return JSONResponse({"error": "Tenant not found"}, status_code=404)
+    existing = tenant.settings or {}
+    for key in ("notifications", "security", "system"):
+        if key in body:
+            existing[key] = {**(existing.get(key) or {}), **body[key]}
+    tenant.settings = existing
+    await db.commit()
+    return {"success": True}
+
 # Groq models list — mirrors Express GROQ_PRODUCTION_MODELS
 GROQ_PRODUCTION_MODELS = [
     {

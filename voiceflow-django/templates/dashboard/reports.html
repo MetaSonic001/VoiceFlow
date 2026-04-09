@@ -1,0 +1,23 @@
+{% extends "base_dashboard.html" %}{% block title %}Reports — VoiceFlow AI{% endblock %}
+{% block content %}
+<div class="mb-8"><h1 class="text-2xl font-bold">Reports</h1><p class="text-gray-500 text-sm mt-1">Generate and download reports</p></div>
+<div class="grid md:grid-cols-3 gap-6 mb-8">
+  {% for r in reports %}
+  <div class="bg-white rounded-xl border p-5">
+    <div class="font-semibold mb-1">{{ r.name }}</div>
+    <div class="text-xs text-gray-400 mb-3">{{ r.type|default:"Summary" }} • {{ r.created_at|default:"N/A" }}</div>
+    <button class="text-sm text-blue-600 hover:underline">Download</button>
+  </div>
+  {% empty %}
+  <div class="col-span-3 text-center py-8 text-gray-400 bg-white rounded-xl border">No reports generated yet.</div>
+  {% endfor %}
+</div>
+<div class="bg-white rounded-xl border p-6">
+  <h3 class="font-semibold mb-4">Generate Report</h3>
+  <div class="flex gap-4 items-end flex-wrap">
+    <div><label class="block text-xs text-gray-500 mb-1">Type</label><select class="border rounded-lg px-3 py-2 text-sm"><option>Analytics Summary</option><option>Call Logs</option><option>Agent Performance</option><option>Billing</option></select></div>
+    <div><label class="block text-xs text-gray-500 mb-1">Period</label><select class="border rounded-lg px-3 py-2 text-sm"><option>Last 7 days</option><option>Last 30 days</option><option>Last 90 days</option></select></div>
+    <button class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">Generate</button>
+  </div>
+</div>
+{% endblock %}

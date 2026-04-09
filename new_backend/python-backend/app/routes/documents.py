@@ -1,7 +1,7 @@
 """
 /api/documents routes — mirrors Express src/routes/documents.ts
 """
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -106,4 +106,4 @@ async def delete_document(doc_id: str, auth: AuthContext = Depends(get_auth), db
         return JSONResponse({"error": "Document not found"}, status_code=404)
     await db.delete(doc)
     await db.commit()
-    return JSONResponse(None, status_code=204)
+    return Response(status_code=204)

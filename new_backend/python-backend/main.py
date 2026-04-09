@@ -6,12 +6,14 @@ import logging
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request, Response, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.database import AsyncSessionLocal
+from app.database import AsyncSessionLocal, get_db
+from app.auth import AuthContext, get_auth
 from app.models import Tenant, User
 
 logger = logging.getLogger("voiceflow")
@@ -118,6 +120,7 @@ app.include_router(auth.router, prefix="/auth", tags=["Auth"])
 app.include_router(onboarding.router, prefix="/onboarding", tags=["Onboarding"])
 app.include_router(analytics.router, prefix="/analytics", tags=["Analytics"])
 app.include_router(admin.router, prefix="/admin", tags=["Admin"])
+app.include_router(settings_routes.router, prefix="/settings", tags=["Settings-NoPrefix"])
 
 # WITH /api prefix (matches Express)
 app.include_router(agents.router, prefix="/api/agents", tags=["Agents"])
@@ -132,6 +135,38 @@ app.include_router(logs.router, prefix="/api/logs", tags=["Logs"])
 app.include_router(retraining.router, prefix="/api/retraining", tags=["Retraining"])
 app.include_router(brands.router, prefix="/api/brands", tags=["Brands"])
 app.include_router(tts.router, prefix="/api/tts", tags=["TTS"])
+
+
+# ── Twilio proxy (matches Express /twilio/numbers) ──────────────────────────
+
+@app.get("/twilio/numbers")
+async def twilio_numbers(auth: AuthContext = Depends(get_auth), db: AsyncSession = Depends(get_db)):
+    """Return Twilio numbers. Requires Twilio credentials in tenant settings."""
+    result = await db.execute(select(Tenant).where(Tenant.id == auth.tenant_id))
+    tenant = result.scalar_one_or_none()
+    s = (tenant.settings or {}) if tenant else {}
+    sid = s.get("twilioAccountSid")
+    token = s.get("twilioAuthToken")
+    if not sid or not token:
+        return {"numbers": []}
+    try:
+        import httpx as _httpx
+        async with _httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"https://api.twilio.com/2010-04-01/Accounts/{sid}/IncomingPhoneNumbers.json",
+                auth=(sid, token),
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                return {
+                    "numbers": [
+                        {"sid": n.get("sid"), "phone_number": n.get("phone_number"), "friendly_name": n.get("friendly_name")}
+                        for n in data.get("incoming_phone_numbers", [])
+                    ]
+                }
+    except Exception:
+        pass
+    return {"numbers": []}
 
 
 if __name__ == "__main__":

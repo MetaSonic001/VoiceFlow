@@ -1,0 +1,73 @@
+from django.urls import path
+from core.views import (
+    landing, auth, dashboard, onboarding, chat, pages, api_proxy,
+)
+
+urlpatterns = [
+    # Landing
+    path("", landing.home, name="home"),
+
+    # Auth
+    path("auth/login/", auth.login_view, name="login"),
+    path("auth/register/", auth.register_view, name="register"),
+    path("auth/logout/", auth.logout_view, name="logout"),
+
+    # Onboarding
+    path("onboarding/", onboarding.flow, name="onboarding"),
+
+    # Dashboard
+    path("dashboard/", dashboard.index, name="dashboard"),
+    path("dashboard/agents/<str:agent_id>/", dashboard.agent_detail, name="agent_detail"),
+    path("dashboard/agents/<str:agent_id>/chat/", chat.agent_chat, name="agent_chat"),
+    path("dashboard/voice-agent/", chat.voice_agent, name="voice_agent"),
+
+    # Dashboard pages
+    path("dashboard/analytics/", pages.analytics, name="analytics"),
+    path("dashboard/calls/", pages.calls, name="calls"),
+    path("dashboard/knowledge/", pages.knowledge, name="knowledge"),
+    path("dashboard/settings/", pages.settings_page, name="settings"),
+    path("dashboard/billing/", pages.billing, name="billing"),
+    path("dashboard/system/", pages.system, name="system"),
+    path("dashboard/users/", pages.users, name="users"),
+    path("dashboard/retraining/", pages.retraining, name="retraining"),
+    path("dashboard/widget/", pages.widget, name="widget"),
+    path("dashboard/api-docs/", pages.api_docs, name="api_docs"),
+    path("dashboard/notifications/", pages.notifications, name="notifications"),
+    path("dashboard/audit/", pages.audit, name="audit"),
+    path("dashboard/backup/", pages.backup, name="backup"),
+    path("dashboard/reports/", pages.reports, name="reports"),
+    path("dashboard/integrations/", pages.integrations, name="integrations"),
+    path("dashboard/pipelines/", pages.pipelines, name="pipelines"),
+
+    # API proxy endpoints (for HTMX / JS calls from the browser)
+    path("api/agents/", api_proxy.agents_list, name="api_agents"),
+    path("api/agents/<str:agent_id>/", api_proxy.agent_detail_api, name="api_agent_detail"),
+    path("api/agents/<str:agent_id>/activate/", api_proxy.agent_activate, name="api_agent_activate"),
+    path("api/agents/<str:agent_id>/pause/", api_proxy.agent_pause, name="api_agent_pause"),
+    path("api/agents/<str:agent_id>/deploy/", api_proxy.agent_deploy, name="api_agent_deploy"),
+    path("api/chat/", api_proxy.chat_send, name="api_chat"),
+    path("api/audio/", api_proxy.audio_send, name="api_audio"),
+    path("api/tts/", api_proxy.tts_synthesize, name="api_tts"),
+    path("api/voice/presets/", api_proxy.voice_presets, name="api_voice_presets"),
+    path("api/voice/clone/", api_proxy.voice_clone, name="api_voice_clone"),
+    path("api/onboarding/company/", api_proxy.onboarding_company, name="api_onboarding_company"),
+    path("api/onboarding/knowledge/", api_proxy.onboarding_knowledge, name="api_onboarding_knowledge"),
+    path("api/onboarding/agent-config/", api_proxy.onboarding_agent_config, name="api_onboarding_agent_config"),
+    path("api/knowledge/", api_proxy.knowledge_list, name="api_knowledge"),
+    path("api/knowledge/company-profile/", api_proxy.company_profile, name="api_company_profile"),
+    path("api/knowledge/company-knowledge/", api_proxy.company_knowledge, name="api_company_knowledge"),
+    path("api/documents/upload/", api_proxy.document_upload, name="api_document_upload"),
+    path("api/documents/ingest-url/", api_proxy.document_ingest_url, name="api_document_ingest_url"),
+    path("api/settings/", api_proxy.settings_api, name="api_settings"),
+    path("api/settings/twilio/", api_proxy.twilio_credentials, name="api_twilio_credentials"),
+    path("api/settings/groq/", api_proxy.groq_api_key, name="api_groq_key"),
+    path("api/analytics/overview/", api_proxy.analytics_overview, name="api_analytics"),
+    path("api/call-logs/", api_proxy.call_logs_api, name="api_call_logs"),
+    path("api/retraining/", api_proxy.retraining_api, name="api_retraining"),
+    path("api/retraining/trigger/", api_proxy.retraining_trigger, name="api_retraining_trigger"),
+    path("api/system/metrics/", api_proxy.system_metrics, name="api_system_metrics"),
+    path("api/users/", api_proxy.users_api, name="api_users"),
+    path("api/billing/usage/", api_proxy.billing_usage, name="api_billing_usage"),
+    path("api/pipelines/", api_proxy.pipelines_api, name="api_pipelines"),
+    path("api/reports/", api_proxy.reports_api, name="api_reports"),
+]

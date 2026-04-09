@@ -2,7 +2,7 @@
 /api/agents routes — mirrors Express src/routes/agents.ts
 GET /, GET /:id, POST /, PUT /:id, DELETE /:id
 """
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -174,4 +174,26 @@ async def delete_agent(agent_id: str, auth: AuthContext = Depends(get_auth), db:
         return JSONResponse({"error": "Agent not found"}, status_code=404)
     await db.delete(agent)
     await db.commit()
-    return JSONResponse(None, status_code=204)
+    return Response(status_code=204)
+
+
+@router.post("/{agent_id}/activate")
+async def activate_agent(agent_id: str, auth: AuthContext = Depends(get_auth), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.tenantId == auth.tenant_id))
+    agent = result.scalar_one_or_none()
+    if not agent:
+        return JSONResponse({"error": "Agent not found"}, status_code=404)
+    agent.status = "active"
+    await db.commit()
+    return {"success": True}
+
+
+@router.post("/{agent_id}/pause")
+async def pause_agent(agent_id: str, auth: AuthContext = Depends(get_auth), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.tenantId == auth.tenant_id))
+    agent = result.scalar_one_or_none()
+    if not agent:
+        return JSONResponse({"error": "Agent not found"}, status_code=404)
+    agent.status = "paused"
+    await db.commit()
+    return {"success": True}

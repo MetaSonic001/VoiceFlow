@@ -1,0 +1,210 @@
+{% extends "base.html" %}
+{% block title %}Get Started — VoiceFlow AI{% endblock %}
+{% block body_class %}bg-gray-50{% endblock %}
+{% block content %}
+<div x-data="onboardingApp()" class="min-h-screen flex flex-col">
+  <!-- Progress bar -->
+  <div class="bg-white border-b sticky top-0 z-30">
+    <div class="max-w-4xl mx-auto px-6 py-4">
+      <div class="flex items-center justify-between mb-3">
+        <a href="{% url 'dashboard' %}" class="text-sm text-gray-400 hover:text-gray-600">&larr; Skip to Dashboard</a>
+        <span class="text-sm text-gray-500" x-text="'Step ' + step + ' of 7'"></span>
+      </div>
+      <div class="w-full bg-gray-200 rounded-full h-2"><div class="bg-blue-600 h-2 rounded-full transition-all duration-500" :style="'width:' + (step/7*100) + '%'"></div></div>
+      <div class="flex justify-between mt-2">
+        <template x-for="(label, i) in stepLabels" :key="i">
+          <span class="text-[10px] text-gray-400 cursor-pointer" :class="step > i+1 ? 'text-blue-600' : step===i+1 ? 'text-gray-700 font-semibold' : ''" @click="if(i+1<step) step=i+1" x-text="label"></span>
+        </template>
+      </div>
+    </div>
+  </div>
+
+  <div class="flex-1 flex items-start justify-center pt-8 pb-16 px-4">
+    <div class="w-full max-w-2xl">
+
+      <!-- Step 1: Company -->
+      <div x-show="step===1" x-transition>
+        <h2 class="text-2xl font-bold mb-2">Tell us about your company</h2>
+        <p class="text-gray-500 text-sm mb-6">This helps agents answer questions about your business.</p>
+        <div class="space-y-4">
+          <div><label class="block text-sm font-medium mb-1">Company Name</label><input x-model="company.name" type="text" class="w-full border rounded-lg px-4 py-2.5" placeholder="Acme Corp"></div>
+          <div><label class="block text-sm font-medium mb-1">Industry</label><input x-model="company.industry" type="text" class="w-full border rounded-lg px-4 py-2.5" placeholder="Technology, Healthcare, Finance…"></div>
+          <div><label class="block text-sm font-medium mb-1">Description</label><textarea x-model="company.description" rows="3" class="w-full border rounded-lg px-4 py-2.5" placeholder="What does your company do?"></textarea></div>
+          <div><label class="block text-sm font-medium mb-1">Website</label><input x-model="company.website" type="url" class="w-full border rounded-lg px-4 py-2.5" placeholder="https://example.com"></div>
+        </div>
+      </div>
+
+      <!-- Step 2: Choose Template -->
+      <div x-show="step===2" x-transition>
+        <h2 class="text-2xl font-bold mb-2">Choose an agent template</h2>
+        <p class="text-gray-500 text-sm mb-6">Select a starting point — you can customize later.</p>
+        <div class="grid sm:grid-cols-2 gap-4">
+          {% for t in templates %}
+          <div @click="selectedTemplate='{{ t.id }}'; agentConfig.persona='{{ t.persona|escapejs }}'" :class="selectedTemplate==='{{ t.id }}' ? 'border-blue-500 ring-2 ring-blue-200' : 'border-gray-200'" class="border rounded-xl p-4 cursor-pointer hover:shadow-md transition-all">
+            <div class="font-semibold">{{ t.name }}</div>
+            <div class="text-xs text-gray-500 mt-1">{{ t.description }}</div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- Step 3: Agent Config -->
+      <div x-show="step===3" x-transition>
+        <h2 class="text-2xl font-bold mb-2">Configure your agent</h2>
+        <p class="text-gray-500 text-sm mb-6">Set the name, greeting, and persona.</p>
+        <div class="space-y-4">
+          <div><label class="block text-sm font-medium mb-1">Agent Name</label><input x-model="agentConfig.name" type="text" class="w-full border rounded-lg px-4 py-2.5" placeholder="My Agent"></div>
+          <div><label class="block text-sm font-medium mb-1">First Message</label><input x-model="agentConfig.firstMessage" type="text" class="w-full border rounded-lg px-4 py-2.5" placeholder="Hello! How can I help you today?"></div>
+          <div><label class="block text-sm font-medium mb-1">Persona / System Prompt</label><textarea x-model="agentConfig.persona" rows="4" class="w-full border rounded-lg px-4 py-2.5" placeholder="You are a helpful assistant…"></textarea></div>
+        </div>
+      </div>
+
+      <!-- Step 4: Knowledge -->
+      <div x-show="step===4" x-transition>
+        <h2 class="text-2xl font-bold mb-2">Add knowledge</h2>
+        <p class="text-gray-500 text-sm mb-6">Upload documents or add a website URL for the agent to learn from.</p>
+        <div class="space-y-4">
+          <div class="border-2 border-dashed rounded-xl p-8 text-center cursor-pointer hover:border-blue-400 transition" @click="$refs.fileInput.click()">
+            <input x-ref="fileInput" type="file" class="hidden" @change="knowledgeFile=$event.target.files[0]" accept=".pdf,.txt,.doc,.docx">
+            <div class="text-gray-400"><svg class="w-8 h-8 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg></div>
+            <div x-show="!knowledgeFile" class="text-sm text-gray-400">Click to upload PDF, TXT, DOC</div>
+            <div x-show="knowledgeFile" class="text-sm text-blue-600 font-medium" x-text="knowledgeFile?.name"></div>
+          </div>
+          <div class="text-center text-gray-400 text-xs">— or —</div>
+          <div><label class="block text-sm font-medium mb-1">Website URL</label><input x-model="knowledgeUrl" type="url" class="w-full border rounded-lg px-4 py-2.5" placeholder="https://docs.example.com"></div>
+        </div>
+      </div>
+
+      <!-- Step 5: Voice -->
+      <div x-show="step===5" x-transition>
+        <h2 class="text-2xl font-bold mb-2">Choose a voice</h2>
+        <p class="text-gray-500 text-sm mb-6">Select a voice for your AI agent or clone a custom one.</p>
+        <div x-data="{presets:[], loading:true}" x-init="fetch('/api/voice/presets/').then(r=>r.json()).then(d=>{presets=d.voices||[];loading=false}).catch(()=>loading=false)">
+          <div x-show="loading" class="text-center text-gray-400 py-8">Loading voices…</div>
+          <div x-show="!loading" class="grid sm:grid-cols-3 gap-3">
+            <template x-for="v in presets" :key="v.id">
+              <div @click="selectedVoice=v.id" :class="selectedVoice===v.id ? 'border-blue-500 ring-2 ring-blue-200' : 'border-gray-200'" class="border rounded-xl p-3 cursor-pointer hover:shadow-sm transition-all text-center">
+                <div class="text-sm font-medium" x-text="v.name"></div>
+                <div class="text-xs text-gray-400" x-text="v.gender || 'Neural'"></div>
+              </div>
+            </template>
+          </div>
+          <div x-show="!loading && presets.length===0" class="text-center text-gray-400 py-8 text-sm">Voice presets unavailable. You can set this later in Settings.</div>
+        </div>
+      </div>
+
+      <!-- Step 6: Channels -->
+      <div x-show="step===6" x-transition>
+        <h2 class="text-2xl font-bold mb-2">Enable channels</h2>
+        <p class="text-gray-500 text-sm mb-6">Where will your agent be available?</p>
+        <div class="space-y-3">
+          <label class="flex items-center gap-3 p-4 border rounded-xl cursor-pointer hover:bg-gray-50"><input type="checkbox" x-model="channels.web" class="rounded border-gray-300 text-blue-600"><div><div class="font-medium text-sm">Web Chat Widget</div><div class="text-xs text-gray-400">Embed on your website</div></div></label>
+          <label class="flex items-center gap-3 p-4 border rounded-xl cursor-pointer hover:bg-gray-50"><input type="checkbox" x-model="channels.phone" class="rounded border-gray-300 text-blue-600"><div><div class="font-medium text-sm">Phone (Twilio)</div><div class="text-xs text-gray-400">Inbound &amp; outbound calls</div></div></label>
+          <label class="flex items-center gap-3 p-4 border rounded-xl cursor-pointer hover:bg-gray-50"><input type="checkbox" x-model="channels.whatsapp" class="rounded border-gray-300 text-blue-600"><div><div class="font-medium text-sm">WhatsApp</div><div class="text-xs text-gray-400">Messaging via WhatsApp Business</div></div></label>
+          <label class="flex items-center gap-3 p-4 border rounded-xl cursor-pointer hover:bg-gray-50"><input type="checkbox" x-model="channels.api" class="rounded border-gray-300 text-blue-600"><div><div class="font-medium text-sm">REST API</div><div class="text-xs text-gray-400">Integrate programmatically</div></div></label>
+        </div>
+      </div>
+
+      <!-- Step 7: Test & Deploy -->
+      <div x-show="step===7" x-transition>
+        <h2 class="text-2xl font-bold mb-2">Test your agent</h2>
+        <p class="text-gray-500 text-sm mb-6">Try a quick conversation then deploy.</p>
+        <div class="bg-white border rounded-xl p-6 mb-4">
+          <div class="flex flex-col gap-3 min-h-[200px] mb-4" id="testChat">
+            <div class="self-start bg-gray-100 rounded-lg px-4 py-2 text-sm max-w-xs" x-text="agentConfig.firstMessage || 'Hello! How can I help?'"></div>
+            <template x-for="(msg,i) in testMessages" :key="i">
+              <div :class="msg.role==='user' ? 'self-end bg-blue-600 text-white' : 'self-start bg-gray-100'" class="rounded-lg px-4 py-2 text-sm max-w-xs" x-text="msg.text"></div>
+            </template>
+          </div>
+          <div class="flex gap-2">
+            <input x-model="testInput" @keydown.enter="sendTest()" class="flex-1 border rounded-lg px-3 py-2 text-sm" placeholder="Type a message…">
+            <button @click="sendTest()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm">Send</button>
+          </div>
+        </div>
+        <button @click="deployAgent()" :disabled="deploying" class="w-full py-3 bg-green-600 text-white rounded-xl font-semibold hover:bg-green-700 disabled:opacity-50" x-text="deploying ? 'Deploying…' : '🚀 Deploy Agent'"></button>
+      </div>
+
+      <!-- Nav buttons -->
+      <div class="flex justify-between mt-8">
+        <button x-show="step>1" @click="step--" class="px-6 py-2.5 border rounded-lg text-sm hover:bg-gray-50">Back</button>
+        <div x-show="step<=1"></div>
+        <button x-show="step<7" @click="nextStep()" :disabled="saving" class="px-6 py-2.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50 ml-auto" x-text="saving ? 'Saving…' : 'Continue'"></button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function onboardingApp() {
+  return {
+    step: 1,
+    stepLabels: ['Company','Template','Config','Knowledge','Voice','Channels','Test'],
+    saving: false, deploying: false,
+    company: {name:'', industry:'', description:'', website:''},
+    selectedTemplate: '',
+    agentConfig: {name:'', firstMessage:'Hello! How can I help you today?', persona:''},
+    knowledgeFile: null, knowledgeUrl: '',
+    selectedVoice: '',
+    channels: {web:true, phone:false, whatsapp:false, api:false},
+    testMessages: [], testInput: '',
+    createdAgentId: null,
+
+    async nextStep() {
+      this.saving = true;
+      try {
+        if (this.step === 1) {
+          await apiFetch('/api/onboarding/company/', {method:'POST', body:JSON.stringify(this.company)});
+        } else if (this.step === 3) {
+          const r = await apiFetch('/api/agents/', {method:'POST', body:JSON.stringify({
+            name: this.agentConfig.name || 'My Agent',
+            first_message: this.agentConfig.firstMessage,
+            system_prompt: this.agentConfig.persona,
+            template_id: this.selectedTemplate,
+          })});
+          const d = await r.json();
+          this.createdAgentId = d.id || d.agent?.id;
+        } else if (this.step === 4) {
+          if (this.knowledgeFile) {
+            const fd = new FormData();
+            fd.append('file', this.knowledgeFile);
+            await fetch('/api/documents/upload/', {method:'POST', body:fd, headers:{'X-CSRFToken': getCsrfToken()}});
+          }
+          if (this.knowledgeUrl) {
+            await apiFetch('/api/documents/ingest-url/', {method:'POST', body:JSON.stringify({url:this.knowledgeUrl})});
+          }
+        }
+      } catch(e) { console.error(e); }
+      this.saving = false;
+      this.step++;
+    },
+
+    async sendTest() {
+      if (!this.testInput.trim()) return;
+      const msg = this.testInput.trim();
+      this.testInput = '';
+      this.testMessages.push({role:'user', text:msg});
+      try {
+        const r = await apiFetch('/api/chat/', {method:'POST', body:JSON.stringify({
+          agentId: this.createdAgentId || '', message: msg, sessionId: 'onboarding-test',
+        })});
+        const d = await r.json();
+        this.testMessages.push({role:'agent', text: d.response || d.reply || 'No response'});
+      } catch(e) {
+        this.testMessages.push({role:'agent', text:'Error: could not reach agent'});
+      }
+    },
+
+    async deployAgent() {
+      if (!this.createdAgentId) { showToast('Create an agent first','error'); return; }
+      this.deploying = true;
+      try {
+        await apiFetch(`/api/agents/${this.createdAgentId}/activate/`, {method:'POST'});
+        showToast('Agent deployed!','success');
+        setTimeout(()=> window.location.href = '/dashboard/', 1000);
+      } catch(e) { showToast('Deploy failed','error'); }
+      this.deploying = false;
+    }
+  };
+}
+</script>
+{% endblock %}
