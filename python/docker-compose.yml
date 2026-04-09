@@ -68,7 +68,7 @@ services:
 
   tts-service:
     build:
-      context: ../tts-service
+      context: ./tts-service
       dockerfile: Dockerfile
     ports:
       - "8003:8003"

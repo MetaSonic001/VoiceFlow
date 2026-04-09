@@ -2,7 +2,10 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+# Load shared .env from python/ directory, then local .env as override
+_python_dir = Path(__file__).resolve().parent.parent.parent
+load_dotenv(_python_dir / ".env")
+load_dotenv(override=False)  # local .env if exists
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 

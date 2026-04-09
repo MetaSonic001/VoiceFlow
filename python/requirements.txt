@@ -1,0 +1,27 @@
+# ═══════════════════════════════════════════════════════════════
+# VoiceFlow Python — Combined Requirements
+# Backend (FastAPI) + Frontend (Django)
+# TTS service has its own requirements (runs in Docker)
+# ═══════════════════════════════════════════════════════════════
+
+# ── FastAPI Backend ───────────────────────────────────────────
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+sqlalchemy[asyncio]==2.0.36
+asyncpg==0.30.0
+pydantic==2.10.3
+pydantic-settings==2.7.0
+python-multipart==0.0.18
+redis[hiredis]==5.2.1
+PyJWT==2.10.1
+python-jose[cryptography]==3.3.0
+
+# ── Django Frontend ───────────────────────────────────────────
+Django==6.0.4
+django-htmx==1.27.0
+whitenoise>=6.7
+
+# ── Shared ────────────────────────────────────────────────────
+httpx>=0.28
+psycopg2-binary>=2.9
+python-dotenv>=1.0
