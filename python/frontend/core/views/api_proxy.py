@@ -135,6 +135,17 @@ def tts_synthesize(request):
 
 
 @login_required
+@require_http_methods(["POST"])
+def tts_preview(request):
+    data = _json_body(request)
+    try:
+        result = get_client(request).preview_voice(voice_id=data.get("voiceId", "preset-aria"))
+        return JsonResponse(result)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
 def voice_presets(request):
     try:
         return JsonResponse(get_client(request).get_preset_voices())

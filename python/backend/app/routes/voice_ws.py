@@ -1,6 +1,6 @@
 """
 /api/voice/ws — Patent Claim 15: WebRTC WebSocket pipeline.
-Browser sends audio chunks over WebSocket → STT (Whisper) → RAG pipeline → TTS response.
+Browser sends audio chunks over WebSocket → STT (Whisper) → RAG pipeline → TTS (Edge TTS) → audio back.
 Falls back to Groq Whisper API if local faster-whisper isn't available.
 """
 import asyncio
@@ -11,6 +11,7 @@ import logging
 import wave
 from datetime import datetime, timezone
 
+import edge_tts
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -119,6 +120,8 @@ async def voice_websocket(websocket: WebSocket, agent_id: str):
     groq_key = await _get_groq_key(tenant_id)
     session_id = f"ws-{agent_id}-{int(datetime.now(timezone.utc).timestamp())}"
     audio_buffer = bytearray()
+    # Voice config — client can send {"type":"config","voiceId":"preset-davis"}
+    selected_voice = "en-US-AriaNeural"
 
     try:
         while True:
@@ -130,7 +133,14 @@ async def voice_websocket(websocket: WebSocket, agent_id: str):
 
             msg_type = msg.get("type", "")
 
-            if msg_type == "audio":
+            if msg_type == "config":
+                # Client sends voice preference
+                vid = msg.get("voiceId", "")
+                from app.routes.tts import resolve_edge_voice
+                selected_voice = resolve_edge_voice(vid)
+                await websocket.send_json({"type": "config_ack", "voice": selected_voice})
+
+            elif msg_type == "audio":
                 # Accumulate audio chunks
                 chunk = base64.b64decode(msg.get("data", ""))
                 audio_buffer.extend(chunk)
@@ -177,6 +187,21 @@ async def voice_websocket(websocket: WebSocket, agent_id: str):
                     "text": response_text,
                     "sources": sources,
                 })
+
+                # 2b. Generate TTS audio via Edge TTS and send over WebSocket
+                try:
+                    communicate = edge_tts.Communicate(response_text, selected_voice)
+                    audio_buf = io.BytesIO()
+                    async for chunk in communicate.stream():
+                        if chunk["type"] == "audio":
+                            audio_buf.write(chunk["data"])
+                    audio_b64 = base64.b64encode(audio_buf.getvalue()).decode()
+                    await websocket.send_json({
+                        "type": "audio",
+                        "data": f"data:audio/mp3;base64,{audio_b64}",
+                    })
+                except Exception:
+                    logger.warning("Edge TTS failed in WebSocket, client will use browser speech")
 
                 # 3. Persist as call log
                 async with AsyncSessionLocal() as db:

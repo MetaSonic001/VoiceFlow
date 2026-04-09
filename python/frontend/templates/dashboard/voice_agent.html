@@ -1,9 +1,9 @@
 {% extends "base_dashboard.html" %}
 {% block title %}Voice Agent — VoiceFlow AI{% endblock %}
 {% block content %}
-<div x-data="voiceAgentApp()" class="space-y-6">
+<div x-data="voiceAgentApp()" x-init="loadVoices()" class="space-y-6">
   <div class="flex items-center justify-between">
-    <div><h1 class="text-2xl font-bold">Voice Agent</h1><p class="text-gray-500 text-sm mt-1">Talk with your agents in real-time — Gemini Live style</p></div>
+    <div><h1 class="text-2xl font-bold">Voice Agent</h1><p class="text-gray-500 text-sm mt-1">Seamless back-and-forth voice conversation with your AI agents</p></div>
     <div class="flex items-center gap-3">
       <select x-model="selectedAgentId" @change="onAgentChange()" class="border rounded-lg px-3 py-2 text-sm">
         <option value="">Select an agent</option>
@@ -14,11 +14,66 @@
     </div>
   </div>
 
+  <!-- Voice Selection Panel -->
+  <div class="bg-white rounded-xl border p-5">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="font-semibold text-sm">Agent Voice</h3>
+      <div class="flex gap-2">
+        <button @click="voiceTab='edge'" :class="voiceTab==='edge' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'" class="px-3 py-1 rounded-full text-xs font-medium transition">Edge TTS (13 voices)</button>
+        <button @click="voiceTab='chatterbox'" :class="voiceTab==='chatterbox' ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-600'" class="px-3 py-1 rounded-full text-xs font-medium transition">Chatterbox (Clone)</button>
+      </div>
+    </div>
+
+    <!-- Edge TTS voices -->
+    <div x-show="voiceTab==='edge'" class="space-y-2">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+        <template x-for="v in voices" :key="v.id">
+          <div @click="selectVoice(v.id)" :class="selectedVoiceId===v.id ? 'ring-2 ring-blue-500 bg-blue-50' : 'bg-gray-50 hover:bg-gray-100'" class="flex items-center justify-between p-3 rounded-lg cursor-pointer transition group">
+            <div class="flex items-center gap-3 min-w-0">
+              <div :class="v.gender==='Female' ? 'bg-pink-100 text-pink-600' : 'bg-blue-100 text-blue-600'" class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0" x-text="v.name[0]"></div>
+              <div class="min-w-0">
+                <div class="text-sm font-medium truncate" x-text="v.name"></div>
+                <div class="text-xs text-gray-400 truncate" x-text="v.gender + ' · ' + v.style"></div>
+              </div>
+            </div>
+            <button @click.stop="previewVoice(v.id)" :disabled="previewingId===v.id" class="p-1.5 rounded-full hover:bg-white transition opacity-0 group-hover:opacity-100 flex-shrink-0" :class="previewingId===v.id ? 'opacity-100' : ''">
+              <svg x-show="previewingId!==v.id" class="w-4 h-4 text-gray-500" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+              <svg x-show="previewingId===v.id" class="w-4 h-4 text-blue-500 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9"/></svg>
+            </button>
+          </div>
+        </template>
+      </div>
+      <div x-show="selectedVoiceId" class="flex items-center gap-2 mt-3 pt-3 border-t">
+        <span class="text-xs text-gray-500">Selected:</span>
+        <span class="text-xs font-semibold text-blue-700" x-text="voices.find(v=>v.id===selectedVoiceId)?.name || ''"></span>
+        <button @click="previewVoice(selectedVoiceId)" :disabled="previewingId" class="ml-auto text-xs text-blue-600 hover:underline">Preview selected voice</button>
+      </div>
+    </div>
+
+    <!-- Chatterbox (clone voice) -->
+    <div x-show="voiceTab==='chatterbox'" class="space-y-3">
+      <div class="bg-purple-50 rounded-lg p-4 text-sm text-purple-800">
+        <p class="font-medium mb-1">Clone Your Voice</p>
+        <p class="text-xs text-purple-600">Upload a 10-60 second audio clip of your voice (or your brand's voice). Chatterbox will clone it so the agent speaks in that voice. Requires the Chatterbox TTS service on port 8003.</p>
+      </div>
+      <div class="flex items-center gap-3">
+        <label class="flex-1">
+          <input type="file" accept="audio/*" @change="cloneFile=$event.target.files[0]" class="block w-full text-sm text-gray-500 file:mr-3 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100">
+        </label>
+        <button @click="uploadClone()" :disabled="!cloneFile || cloneUploading" class="px-4 py-2 bg-purple-600 text-white text-xs font-semibold rounded-lg disabled:opacity-40 hover:bg-purple-700 transition">
+          <span x-show="!cloneUploading">Upload & Clone</span>
+          <span x-show="cloneUploading">Cloning…</span>
+        </button>
+      </div>
+      <div x-show="cloneResult" class="text-xs text-green-700 bg-green-50 rounded-lg p-3" x-text="cloneResult"></div>
+      <div x-show="cloneError" class="text-xs text-red-700 bg-red-50 rounded-lg p-3" x-text="cloneError"></div>
+    </div>
+  </div>
+
   <!-- Main voice interface -->
   <div class="bg-white rounded-2xl border overflow-hidden">
     <!-- Visualization area -->
     <div class="bg-gradient-to-br from-gray-900 via-gray-800 to-blue-900 text-white p-12 flex flex-col items-center justify-center min-h-[400px] relative">
-      <!-- Agent avatar -->
       <div class="relative mb-8">
         <div :class="state==='listening' ? 'scale-110' : state==='speaking' ? 'scale-105' : ''" class="w-28 h-28 rounded-full bg-white/10 backdrop-blur flex items-center justify-center transition-all duration-500">
           <div x-show="state==='listening'" class="absolute inset-0 rounded-full border-2 border-blue-400 animate-ping opacity-40"></div>
@@ -27,18 +82,15 @@
         </div>
       </div>
 
-      <!-- Waveform bars -->
       <div class="flex items-end gap-1 h-16 mb-6">
         <template x-for="i in 24" :key="i">
-          <div class="w-1.5 rounded-full transition-all duration-150" :class="state==='listening' ? 'bg-blue-400' : state==='speaking' ? 'bg-green-400' : 'bg-white/20'" :style="'height:' + (state!=='idle' ? (_waveTick, Math.random()*50+10) : 4) + 'px'"></div>
+          <div class="w-1.5 rounded-full transition-all duration-150" :class="state==='listening' ? 'bg-blue-400' : state==='speaking' ? 'bg-green-400' : state==='processing' ? 'bg-yellow-400' : 'bg-white/20'" :style="'height:' + (state!=='idle' ? (_waveTick, Math.random()*50+10) : 4) + 'px'"></div>
         </template>
       </div>
 
-      <!-- Status text -->
       <div class="text-lg font-light" x-text="stateLabel"></div>
-      <div x-show="selectedAgentName" class="text-sm text-white/50 mt-1" x-text="'Talking to ' + selectedAgentName"></div>
+      <div x-show="selectedAgentName" class="text-sm text-white/50 mt-1" x-text="continuous ? 'Continuous conversation with ' + selectedAgentName : 'Talking to ' + selectedAgentName"></div>
 
-      <!-- Live transcript -->
       <div x-show="liveTranscript" class="mt-6 max-w-md text-center">
         <div class="bg-white/10 backdrop-blur rounded-xl px-4 py-3 text-sm text-white/80" x-text="liveTranscript"></div>
       </div>
@@ -46,19 +98,28 @@
 
     <!-- Controls -->
     <div class="p-6 flex items-center justify-center gap-4 bg-gray-50">
-      <button @click="toggleMute()" :class="muted ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-600'" class="p-3 rounded-full hover:opacity-80 transition">
+      <button @click="toggleMute()" :class="muted ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-600'" class="p-3 rounded-full hover:opacity-80 transition" title="Mute/Unmute">
         <svg x-show="!muted" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072M18.364 5.636a9 9 0 010 12.728M12 18.75a.75.75 0 01-.75-.75V6a.75.75 0 011.5 0v12a.75.75 0 01-.75.75z"/></svg>
         <svg x-show="muted" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"/></svg>
       </button>
 
-      <!-- Main talk button -->
-      <button @mousedown="startTalking()" @mouseup="stopTalking()" @touchstart.prevent="startTalking()" @touchend.prevent="stopTalking()" :disabled="!selectedAgentId" :class="state==='listening' ? 'bg-red-500 scale-110' : 'bg-blue-600 hover:bg-blue-700'" class="w-20 h-20 rounded-full text-white flex items-center justify-center transition-all duration-200 shadow-lg disabled:opacity-40 disabled:cursor-not-allowed">
-        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>
+      <button @click="toggleContinuous()" :class="continuous ? 'bg-green-100 text-green-700 ring-2 ring-green-400' : 'bg-gray-100 text-gray-600'" class="px-4 py-2 rounded-full text-xs font-semibold hover:opacity-80 transition flex items-center gap-1.5" title="Toggle continuous conversation">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        <span x-text="continuous ? 'Continuous ON' : 'Continuous'"></span>
+      </button>
+
+      <button @click="continuous ? toggleConversation() : null" @mousedown="!continuous ? startTalking() : null" @mouseup="!continuous ? stopTalking() : null" @touchstart.prevent="!continuous ? startTalking() : toggleConversation()" @touchend.prevent="!continuous ? stopTalking() : null" :disabled="!selectedAgentId" :class="state==='listening' ? 'bg-red-500 scale-110' : state==='idle' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-yellow-500'" class="w-20 h-20 rounded-full text-white flex items-center justify-center transition-all duration-200 shadow-lg disabled:opacity-40 disabled:cursor-not-allowed">
+        <svg x-show="state!=='listening'" class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>
+        <svg x-show="state==='listening'" class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"/></svg>
       </button>
 
       <button @click="endSession()" class="p-3 rounded-full bg-gray-100 text-gray-600 hover:bg-red-100 hover:text-red-600 transition" title="End session">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
+    </div>
+
+    <div class="px-6 pb-4 text-center">
+      <p class="text-xs text-gray-400" x-text="continuous ? 'Click the mic to start. Speak naturally — silence auto-sends. Agent replies, then auto-listens again.' : 'Hold the mic button to talk, release to send. Or enable Continuous mode above.'"></p>
     </div>
   </div>
 
@@ -75,7 +136,7 @@
           </div>
         </div>
       </template>
-      <div x-show="messages.length===0" class="text-center text-gray-400 text-sm py-8">Select an agent and hold the button to start talking.</div>
+      <div x-show="messages.length===0" class="text-center text-gray-400 text-sm py-8">Select an agent and click the mic to start a conversation.</div>
     </div>
   </div>
 </div>
@@ -83,25 +144,125 @@
 <script>
 function voiceAgentApp() {
   return {
+    // Agent
     selectedAgentId: '',
     selectedAgentName: '',
-    state: 'idle', // idle, listening, processing, speaking
+    // Voice selection
+    voiceTab: 'edge',
+    voices: [],
+    selectedVoiceId: 'preset-aria',
+    previewingId: null,
+    _previewAudio: null,
+    // Clone
+    cloneFile: null,
+    cloneUploading: false,
+    cloneResult: '',
+    cloneError: '',
+    // Conversation
+    state: 'idle',
     muted: false,
+    continuous: false,
     messages: [],
     liveTranscript: '',
-    mediaRecorder: null,
-    audioChunks: [],
     sessionId: 'voice-' + Date.now(),
     currentAudio: null,
     ws: null,
-    _ttsAvailable: true,
-    _waveInterval: null,
     _waveTick: 0,
+    _waveInterval: null,
+    _audioCtx: null,
+    _stream: null,
+    _processor: null,
+    _pendingText: null,
+    _silenceThreshold: 0.01,
+    _silenceMs: 1500,
+    _lastSoundTime: 0,
 
     get stateLabel() {
       return {idle:'Ready',listening:'Listening…',processing:'Thinking…',speaking:'Speaking…'}[this.state] || 'Ready';
     },
 
+    // ── Voice loading & preview ──────────────────────────
+    async loadVoices() {
+      try {
+        const r = await fetch('/api/voice/presets/', {headers:{'X-CSRFToken':getCookie('csrftoken')}});
+        if (r.ok) {
+          const data = await r.json();
+          this.voices = data.voices || [];
+        }
+      } catch(e) {
+        // Fallback voices
+        this.voices = [
+          {id:'preset-aria',name:'Aria',gender:'Female',style:'Friendly & warm'},
+          {id:'preset-jenny',name:'Jenny',gender:'Female',style:'Professional'},
+          {id:'preset-guy',name:'Guy',gender:'Male',style:'News anchor'},
+          {id:'preset-davis',name:'Davis',gender:'Male',style:'Deep & authoritative'},
+        ];
+      }
+    },
+
+    selectVoice(id) {
+      this.selectedVoiceId = id;
+      // Send config to WebSocket if connected
+      if (this.ws && this.ws.readyState === 1) {
+        this.ws.send(JSON.stringify({type:'config', voiceId: id}));
+      }
+    },
+
+    async previewVoice(voiceId) {
+      if (this.previewingId) {
+        // Stop current preview
+        if (this._previewAudio) { this._previewAudio.pause(); this._previewAudio = null; }
+        this.previewingId = null;
+        return;
+      }
+      this.previewingId = voiceId;
+      try {
+        const r = await fetch('/api/tts/preview/', {
+          method:'POST',
+          headers:{'Content-Type':'application/json','X-CSRFToken':getCookie('csrftoken')},
+          body:JSON.stringify({voiceId}),
+        });
+        if (r.ok) {
+          const data = await r.json();
+          if (data.audioUrl) {
+            this._previewAudio = new Audio(data.audioUrl);
+            this._previewAudio.onended = () => { this.previewingId = null; this._previewAudio = null; };
+            this._previewAudio.onerror = () => { this.previewingId = null; };
+            await this._previewAudio.play();
+            return;
+          }
+        }
+        this.previewingId = null;
+      } catch(e) { this.previewingId = null; }
+    },
+
+    async uploadClone() {
+      if (!this.cloneFile) return;
+      this.cloneUploading = true;
+      this.cloneResult = '';
+      this.cloneError = '';
+      try {
+        const form = new FormData();
+        form.append('audio', this.cloneFile);
+        const r = await fetch('/api/voice/clone/', {
+          method:'POST',
+          headers:{'X-CSRFToken':getCookie('csrftoken')},
+          body: form,
+        });
+        const data = await r.json();
+        if (r.ok) {
+          this.cloneResult = 'Voice cloned successfully! Voice ID: ' + (data.voiceId || 'custom');
+          this.voiceTab = 'edge'; // switch back so they can also pick it
+        } else {
+          this.cloneError = data.error || 'Clone failed';
+        }
+      } catch(e) {
+        this.cloneError = 'Chatterbox TTS service is not running. Start it on port 8003 to enable voice cloning.';
+      }
+      this.cloneUploading = false;
+    },
+
+    // ── Agent change & WebSocket ─────────────────────────
     onAgentChange() {
       const agents = {{ agents|safe }};
       const a = agents.find(a => a.id === this.selectedAgentId);
@@ -117,27 +278,45 @@ function voiceAgentApp() {
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
       const backendHost = location.hostname + ':8000';
       this.ws = new WebSocket(`${proto}://${backendHost}/api/voice/ws/${this.selectedAgentId}`);
+      this.ws.onopen = () => {
+        console.log('Voice WS connected');
+        // Send voice config
+        this.ws.send(JSON.stringify({type:'config', voiceId: this.selectedVoiceId}));
+      };
       this.ws.onmessage = (e) => {
         const msg = JSON.parse(e.data);
         if (msg.type === 'transcript') {
           if (msg.text) {
             this.messages.push({role:'user', text:msg.text});
             this.liveTranscript = msg.text;
+            this.$nextTick(()=>{const t=this.$refs.transcript;if(t)t.scrollTop=t.scrollHeight});
           }
         } else if (msg.type === 'response') {
           this.messages.push({role:'agent', text:msg.text});
           this.liveTranscript = msg.text;
           this.$nextTick(()=>{const t=this.$refs.transcript;if(t)t.scrollTop=t.scrollHeight});
-          this.speak(msg.text);
+          this._pendingText = msg.text;
+        } else if (msg.type === 'audio') {
+          this._playAudio(msg.data);
         } else if (msg.type === 'error') {
           this.liveTranscript = msg.message;
-          this.state = 'idle';
+          if (this._pendingText) { this._browserSpeak(this._pendingText); this._pendingText = null; }
+          else { this.state = 'idle'; this._stopWave(); }
+        } else if (msg.type === 'config_ack') {
+          console.log('Voice set to', msg.voice);
         }
       };
-      this.ws.onclose = () => { this.ws = null; };
+      this.ws.onclose = () => {
+        this.ws = null;
+        if (this.state === 'listening') this._stopMic();
+        this.state = 'idle';
+        this._stopWave();
+      };
     },
 
+    // ── Controls ─────────────────────────────────────────
     toggleMute() { this.muted = !this.muted; if (this.currentAudio) this.currentAudio.muted = this.muted; },
+    toggleContinuous() { this.continuous = !this.continuous; },
 
     _startWave() {
       if (this._waveInterval) return;
@@ -147,96 +326,165 @@ function voiceAgentApp() {
       if (this._waveInterval) { clearInterval(this._waveInterval); this._waveInterval = null; }
     },
 
+    toggleConversation() {
+      if (this.state === 'idle') {
+        this.startTalking();
+      } else if (this.state === 'listening') {
+        this._sendEndAndProcess();
+      } else if (this.state === 'speaking') {
+        if (this.currentAudio) { this.currentAudio.pause(); this.currentAudio = null; }
+        if ('speechSynthesis' in window) speechSynthesis.cancel();
+        this.state = 'idle';
+        this._stopWave();
+      }
+    },
+
+    // ── Microphone ───────────────────────────────────────
     async startTalking() {
-      if (this.state === 'listening' || !this.selectedAgentId) return;
+      if (this.state === 'listening' || this.state === 'processing' || !this.selectedAgentId) return;
+      if (!this.ws || this.ws.readyState !== 1) { this.connectWs(); await new Promise(r => setTimeout(r, 500)); }
+      if (!this.ws || this.ws.readyState !== 1) { typeof showToast==='function' && showToast('WebSocket not connected','error'); return; }
       try {
         const stream = await navigator.mediaDevices.getUserMedia({audio:{sampleRate:16000,channelCount:1}});
-        // Use AudioWorklet / ScriptProcessor to capture raw PCM
         const audioCtx = new AudioContext({sampleRate:16000});
         const source = audioCtx.createMediaStreamSource(stream);
         const processor = audioCtx.createScriptProcessor(4096, 1, 1);
         this._audioCtx = audioCtx;
         this._stream = stream;
         this._processor = processor;
-        this.audioChunks = [];
+        this._lastSoundTime = Date.now();
 
         processor.onaudioprocess = (e) => {
+          if (this.state !== 'listening') return;
           const f32 = e.inputBuffer.getChannelData(0);
           const i16 = new Int16Array(f32.length);
-          for(let i=0;i<f32.length;i++) i16[i]=Math.max(-32768,Math.min(32767,Math.round(f32[i]*32767)));
-          this.audioChunks.push(i16.buffer);
-          // Send chunk over WebSocket
+          let maxAmp = 0;
+          for (let i = 0; i < f32.length; i++) {
+            i16[i] = Math.max(-32768, Math.min(32767, Math.round(f32[i] * 32767)));
+            const abs = Math.abs(f32[i]);
+            if (abs > maxAmp) maxAmp = abs;
+          }
           if (this.ws && this.ws.readyState === 1) {
-            const b64 = btoa(String.fromCharCode(...new Uint8Array(i16.buffer)));
-            this.ws.send(JSON.stringify({type:'audio', data:b64}));
+            const bytes = new Uint8Array(i16.buffer);
+            let b64 = '';
+            for (let i = 0; i < bytes.length; i += 8192) {
+              b64 += String.fromCharCode(...bytes.subarray(i, i + 8192));
+            }
+            this.ws.send(JSON.stringify({type:'audio', data: btoa(b64)}));
+          }
+          // VAD
+          if (maxAmp > this._silenceThreshold) { this._lastSoundTime = Date.now(); }
+          if (this.continuous && (Date.now() - this._lastSoundTime > this._silenceMs) && this._lastSoundTime > 0) {
+            this._sendEndAndProcess();
           }
         };
+
         source.connect(processor);
         processor.connect(audioCtx.destination);
         this.state = 'listening';
         this.liveTranscript = '';
         this._startWave();
-      } catch(e) { showToast('Microphone access denied','error'); }
+      } catch(e) { typeof showToast==='function' && showToast('Microphone access denied','error'); }
+    },
+
+    _stopMic() {
+      if (this._processor) { try { this._processor.disconnect(); } catch(e){} this._processor = null; }
+      if (this._stream) { this._stream.getTracks().forEach(t => t.stop()); this._stream = null; }
+      if (this._audioCtx) { try { this._audioCtx.close(); } catch(e){} this._audioCtx = null; }
+    },
+
+    _sendEndAndProcess() {
+      if (this.state !== 'listening') return;
+      this._stopMic();
+      this.state = 'processing';
+      this._startWave();
+      if (this.ws && this.ws.readyState === 1) {
+        this.ws.send(JSON.stringify({type:'end'}));
+      }
     },
 
     stopTalking() {
-      if (this.state === 'listening') {
-        // Stop audio capture
-        if (this._processor) this._processor.disconnect();
-        if (this._stream) this._stream.getTracks().forEach(t=>t.stop());
-        if (this._audioCtx) this._audioCtx.close();
-        this.state = 'processing';
-        // Signal end of utterance
-        if (this.ws && this.ws.readyState === 1) {
-          this.ws.send(JSON.stringify({type:'end'}));
-        }
+      if (this.state === 'listening') { this._sendEndAndProcess(); }
+    },
+
+    // ── Audio playback ───────────────────────────────────
+    _playAudio(dataUrl) {
+      this.state = 'speaking';
+      this._startWave();
+      try {
+        this.currentAudio = new Audio(dataUrl);
+        this.currentAudio.muted = this.muted;
+        this.currentAudio.onended = () => { this._onSpeakDone(); };
+        this.currentAudio.onerror = () => {
+          if (this._pendingText) { this._browserSpeak(this._pendingText); }
+          else { this._onSpeakDone(); }
+        };
+        this.currentAudio.play().catch(() => {
+          if (this._pendingText) { this._browserSpeak(this._pendingText); }
+          else { this._onSpeakDone(); }
+        });
+      } catch(e) {
+        if (this._pendingText) { this._browserSpeak(this._pendingText); }
+        else { this._onSpeakDone(); }
+      }
+      this._pendingText = null;
+    },
+
+    _onSpeakDone() {
+      this.currentAudio = null;
+      this._stopWave();
+      this.liveTranscript = '';
+      if (this.continuous && this.ws && this.ws.readyState === 1) {
+        this.state = 'idle';
+        setTimeout(() => this.startTalking(), 300);
+      } else {
+        this.state = 'idle';
       }
     },
 
     async speak(text) {
       this.state = 'speaking';
-      if (!this._ttsAvailable) { this._browserSpeak(text); return; }
+      this._startWave();
       try {
         const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 2000);
+        const timer = setTimeout(() => ctrl.abort(), 5000);
         const r = await fetch('/api/tts/', {
           method:'POST',
           headers:{'Content-Type':'application/json','X-CSRFToken':getCookie('csrftoken')},
-          body:JSON.stringify({text, voiceId:''}),
+          body:JSON.stringify({text, voiceId: this.selectedVoiceId}),
           signal: ctrl.signal,
         });
         clearTimeout(timer);
         if (r.ok) {
           const data = await r.json();
-          if (data.audioUrl) {
-            this.currentAudio = new Audio(data.audioUrl);
-            this.currentAudio.muted = this.muted;
-            this._startWave();
-            this.currentAudio.onended = () => { this.state = 'idle'; this.liveTranscript = ''; this._stopWave(); };
-            await this.currentAudio.play();
-          } else { this._ttsAvailable = false; this._browserSpeak(text); }
-        } else { this._ttsAvailable = false; this._browserSpeak(text); }
-      } catch(e) { this._ttsAvailable = false; this._browserSpeak(text); }
+          if (data.audioUrl) { this._playAudio(data.audioUrl); return; }
+        }
+      } catch(e) {}
+      this._browserSpeak(text);
     },
 
     _browserSpeak(text) {
+      this.state = 'speaking';
       this._startWave();
       if ('speechSynthesis' in window) {
         const u = new SpeechSynthesisUtterance(text);
-        u.onend = () => { this.state = 'idle'; this.liveTranscript = ''; this._stopWave(); };
+        u.onend = () => { this._onSpeakDone(); };
         speechSynthesis.speak(u);
-      } else { this.state = 'idle'; this._stopWave(); }
+      } else { this._onSpeakDone(); }
     },
 
     endSession() {
+      this.continuous = false;
       if (this.currentAudio) { this.currentAudio.pause(); this.currentAudio = null; }
-      if (this.state==='listening') this.stopTalking();
+      if ('speechSynthesis' in window) speechSynthesis.cancel();
+      if (this.state === 'listening') this._stopMic();
       if (this.ws) { this.ws.close(); this.ws = null; }
       this.state = 'idle';
       this.liveTranscript = '';
+      this._stopWave();
       this.messages = [];
       this.sessionId = 'voice-' + Date.now();
-      showToast('Session ended','info');
+      typeof showToast==='function' && showToast('Session ended','info');
     }
   };
 }

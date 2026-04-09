@@ -145,6 +145,10 @@ class BackendClient:
         """Returns JSON dict with audioUrl from TTS service."""
         return self._post("/api/tts/synthesise", json={"text": text, "voiceId": voice_id})
 
+    def preview_voice(self, voice_id: str):
+        """Generate a preview audio clip for a voice."""
+        return self._post("/api/tts/preview", json={"voiceId": voice_id})
+
     # ── Knowledge Base (proxied to onboarding/documents) ───────────────
     def get_knowledge_base(self):
         return self._get("/api/documents/", params={"limit": 100})

@@ -48,6 +48,7 @@ urlpatterns = [
     path("api/chat/", api_proxy.chat_send, name="api_chat"),
     path("api/audio/", api_proxy.audio_send, name="api_audio"),
     path("api/tts/", api_proxy.tts_synthesize, name="api_tts"),
+    path("api/tts/preview/", api_proxy.tts_preview, name="api_tts_preview"),
     path("api/voice/presets/", api_proxy.voice_presets, name="api_voice_presets"),
     path("api/voice/clone/", api_proxy.voice_clone, name="api_voice_clone"),
     path("api/onboarding/company/", api_proxy.onboarding_company, name="api_onboarding_company"),
