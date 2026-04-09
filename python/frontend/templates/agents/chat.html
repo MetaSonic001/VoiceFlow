@@ -1,11 +1,18 @@
-{% extends "base.html" %}
+{% extends "base_dashboard.html" %}
 {% block title %}Chat — {{ agent.name|default:"Agent" }}{% endblock %}
+{# base.html only renders {% block body %}; chat used {% block content %} on base.html so nothing appeared. #}
 {% block content %}
-<div x-data="chatApp()" class="h-screen flex flex-col bg-gray-50">
+{{ agent.systemPrompt|default:"Hello! How can I help you today?"|truncatechars:280|json_script:"vf-chat-first-msg" }}
+{{ agent.id|default:""|json_script:"vf-chat-agent-id" }}
+<div x-data="chatApp()" class="relative flex flex-col bg-gray-50 rounded-xl border border-gray-200 shadow-sm overflow-hidden" style="min-height: calc(100vh - 7rem); max-height: calc(100vh - 7rem);">
   <!-- Header -->
   <div class="bg-white border-b px-6 py-3 flex items-center justify-between flex-shrink-0">
     <div class="flex items-center gap-3">
-      <a href="{% url 'agent_detail' agent.id|default:'' %}" class="text-gray-400 hover:text-gray-600"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg></a>
+      {% if agent.id %}
+      <a href="{% url 'agent_detail' agent.id %}" class="text-gray-400 hover:text-gray-600"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg></a>
+      {% else %}
+      <a href="{% url 'dashboard' %}" class="text-gray-400 hover:text-gray-600"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg></a>
+      {% endif %}
       <div class="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-sm">{{ agent.name|default:"A"|make_list|first }}</div>
       <div><div class="font-semibold text-sm">{{ agent.name|default:"Agent" }}</div><div class="text-xs text-green-500">Online</div></div>
     </div>
@@ -38,7 +45,7 @@
   </div>
 
   <!-- Voice mode overlay -->
-  <div x-show="voiceMode" x-transition class="flex-1 absolute inset-0 top-14 bg-gray-50/95 z-10 flex flex-col items-center justify-center">
+  <div x-show="voiceMode" x-transition class="absolute inset-0 top-[52px] bg-gray-50/95 z-10 flex flex-col items-center justify-center">
     <div class="relative">
       <div :class="recording ? 'scale-110 bg-red-100' : 'bg-gray-100'" class="w-32 h-32 rounded-full flex items-center justify-center transition-all duration-300">
         <div x-show="recording" class="absolute inset-0 rounded-full bg-red-200 animate-ping opacity-30"></div>
@@ -62,6 +69,11 @@
 
 <script>
 function chatApp() {
+  function _parseJsonScript(id, fallback) {
+    const el = document.getElementById(id);
+    if (!el || !el.textContent) return fallback;
+    try { return JSON.parse(el.textContent); } catch (e) { return fallback; }
+  }
   return {
     messages: [],
     input: '',
@@ -71,8 +83,8 @@ function chatApp() {
     mediaRecorder: null,
     audioChunks: [],
     sessionId: 'chat-' + Date.now(),
-    agentId: '{{ agent.id|default:"" }}',
-    firstMessage: '{{ agent.systemPrompt|default:"Hello! How can I help you today?"|truncatechars:100|escapejs }}' || 'Hello! How can I help you today?',
+    agentId: _parseJsonScript('vf-chat-agent-id', ''),
+    firstMessage: _parseJsonScript('vf-chat-first-msg', 'Hello! How can I help you today?'),
 
     toggleVoice() { this.voiceMode = !this.voiceMode; },
 

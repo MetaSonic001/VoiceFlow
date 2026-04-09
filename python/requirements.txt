@@ -16,6 +16,7 @@ redis[hiredis]==5.2.1
 PyJWT==2.10.1
 python-jose[cryptography]==3.3.0
 aiofiles>=24.0
+edge-tts>=6.1
 
 # ── Document Ingestion Pipeline ──────────────────────────────
 docling>=2.0
@@ -23,6 +24,10 @@ paddleocr>=3.0
 paddlepaddle>=3.0
 sentence-transformers>=3.0
 chromadb>=1.0
+# ChromaDB only requires OTLP gRPC exporter >=1.2; pip can install proto 1.11.x while
+# opentelemetry-api/sdk resolve to 1.41.x, which breaks with protobuf 5+ on import.
+opentelemetry-exporter-otlp-proto-grpc~=1.41.0
+opentelemetry-proto~=1.41.0
 langchain-text-splitters>=0.3
 rank-bm25>=0.2
 numpy>=1.26

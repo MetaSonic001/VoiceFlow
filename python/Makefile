@@ -117,7 +117,7 @@ all: docker wait backend-bg frontend-bg ## Start everything
 
 .PHONY: docker
 docker: ## Start Docker services (Postgres, MinIO, ChromaDB, Redis)
-	docker compose up -d postgres voiceflow-minio chroma redis
+	docker compose up -d postgres minio chroma redis
 	@echo Docker services started.
 
 .PHONY: docker-all
@@ -136,7 +136,7 @@ backend: ## Start FastAPI backend (foreground, port 8000)
 
 .PHONY: backend-bg
 backend-bg: ## Start FastAPI backend (background window)
-	start "VoiceFlow Backend" cmd /k "cd /d %CD%\backend && $(PYTHON) -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload"
+	cmd /c start "VoiceFlow Backend" cmd /k "cd /d %CD%\backend && $(PYTHON) -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload"
 
 .PHONY: frontend
 frontend: ## Start Django frontend (foreground, port 8090)
@@ -144,7 +144,7 @@ frontend: ## Start Django frontend (foreground, port 8090)
 
 .PHONY: frontend-bg
 frontend-bg: ## Start Django frontend (background window)
-	start "VoiceFlow Frontend" cmd /k "cd /d %CD%\frontend && $(PYTHON) manage.py runserver 8090"
+	cmd /c start "VoiceFlow Frontend" cmd /k "cd /d %CD%\frontend && $(PYTHON) manage.py runserver 8090"
 
 # ─── STOP SERVICES ────────────────────────────────────────────────
 

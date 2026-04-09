@@ -25,8 +25,8 @@ class Settings(BaseSettings):
     # Groq LLM
     GROQ_API_KEY: Optional[str] = None
 
-    # External services
-    FASTAPI_URL: str = "http://localhost:8001"
+    # Base URL for this API when handlers call themselves via HTTP (onboarding → ingestion).
+    FASTAPI_URL: str = "http://127.0.0.1:8000"
     TTS_SERVICE_URL: str = "http://localhost:8003"
     FRONTEND_URL: str = "http://localhost:3000"
 

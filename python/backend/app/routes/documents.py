@@ -79,7 +79,7 @@ async def get_document(doc_id: str, auth: AuthContext = Depends(get_auth), db: A
 @router.post("/upload")
 async def upload_document(
     file: UploadFile = File(...),
-    agentId: str = Form(...),
+    agentId: str = Form(""),
     auth: AuthContext = Depends(get_auth),
     db: AsyncSession = Depends(get_db),
 ):
@@ -87,8 +87,20 @@ async def upload_document(
     Upload a file, store in MinIO, and trigger the ingestion pipeline.
     Supports: PDF, DOCX, PPTX, XLSX, TXT, CSV, images (PNG/JPG/TIFF).
     """
-    # Validate agent belongs to tenant
-    r = await db.execute(select(Agent).where(Agent.id == agentId, Agent.tenantId == auth.tenant_id))
+    resolved_agent_id = (agentId or "").strip()
+    if not resolved_agent_id:
+        r0 = await db.execute(
+            select(Agent).where(Agent.tenantId == auth.tenant_id).order_by(Agent.createdAt.desc()).limit(1)
+        )
+        agent0 = r0.scalar_one_or_none()
+        if not agent0:
+            return JSONResponse(
+                {"error": "agentId is required (no agents exist for this tenant yet)"},
+                status_code=400,
+            )
+        resolved_agent_id = agent0.id
+
+    r = await db.execute(select(Agent).where(Agent.id == resolved_agent_id, Agent.tenantId == auth.tenant_id))
     if not r.scalar_one_or_none():
         return JSONResponse({"error": "Access denied"}, status_code=403)
 
@@ -127,7 +139,7 @@ async def upload_document(
     doc = Document(
         url=None,
         s3Path=f"{bucket}/{s3_key}" if s3_key else None,
-        agentId=agentId,
+        agentId=resolved_agent_id,
         tenantId=auth.tenant_id,
         title=file.filename,
         status="processing",
@@ -147,7 +159,7 @@ async def upload_document(
                 file_bytes=file_bytes,
                 filename=file.filename,
                 tenant_id=auth.tenant_id,
-                agent_id=agentId,
+                agent_id=resolved_agent_id,
                 job_id=doc.id,
             )
             # Update document status

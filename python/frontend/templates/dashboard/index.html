@@ -2,6 +2,8 @@
 {% block title %}Dashboard — VoiceFlow AI{% endblock %}
 
 {% block content %}
+{{ agents|json_script:"vf-dashboard-agents" }}
+{{ metrics|json_script:"vf-dashboard-metrics" }}
 <div x-data="dashboardApp()" x-init="init()">
   <!-- Header -->
   <div class="flex items-center justify-between mb-8">
@@ -97,9 +99,14 @@
 
 <script>
 function dashboardApp() {
+  function _jsonFromScript(id) {
+    const el = document.getElementById(id);
+    if (!el || !el.textContent) return id.endsWith('metrics') ? {} : [];
+    try { return JSON.parse(el.textContent); } catch (e) { console.error('dashboard bootstrap JSON', id, e); return id.endsWith('metrics') ? {} : []; }
+  }
   return {
-    agents: {{ agents|safe }},
-    metrics: {{ metrics|safe }},
+    agents: _jsonFromScript('vf-dashboard-agents'),
+    metrics: _jsonFromScript('vf-dashboard-metrics'),
     search: '',
     filter: 'All',
     loading: false,

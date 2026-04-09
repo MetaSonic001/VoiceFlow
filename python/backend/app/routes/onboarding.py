@@ -88,9 +88,14 @@ async def save_company(request: Request, auth: AuthContext = Depends(get_auth), 
     scrape_job_id: Optional[str] = None
     if website_url:
         try:
+            internal_headers = {
+                "x-tenant-id": auth.tenant_id,
+                "x-user-id": auth.user_id,
+            }
             async with httpx.AsyncClient(timeout=30) as client:
                 resp = await client.post(
-                    f"{settings.FASTAPI_URL}/ingest/company",
+                    f"{settings.FASTAPI_URL}/api/ingestion/company",
+                    headers=internal_headers,
                     json={
                         "tenantId": auth.tenant_id,
                         "website_url": website_url,
@@ -100,7 +105,8 @@ async def save_company(request: Request, auth: AuthContext = Depends(get_auth), 
                         "use_case": use_case,
                     },
                 )
-                scrape_job_id = resp.json().get("job_id")
+                if resp.status_code == 200:
+                    scrape_job_id = resp.json().get("jobId") or resp.json().get("job_id")
         except Exception:
             logger.exception("Failed to trigger company scrape")
 
@@ -113,7 +119,7 @@ async def save_company(request: Request, auth: AuthContext = Depends(get_auth), 
 async def scrape_status(job_id: str):
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(f"{settings.FASTAPI_URL}/status/{job_id}")
+            resp = await client.get(f"{settings.FASTAPI_URL}/api/ingestion/status/{job_id}")
             return resp.json()
     except Exception:
         return JSONResponse({"error": "Failed to fetch scrape status"}, status_code=500)

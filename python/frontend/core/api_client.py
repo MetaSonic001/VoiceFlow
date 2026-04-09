@@ -10,18 +10,25 @@ TIMEOUT = 30.0
 
 
 class BackendClient:
-    def __init__(self, tenant_id: str = "", user_id: str = ""):
+    def __init__(self, tenant_id: str = "", user_id: str = "", email: str = "", display_name: str = ""):
         self.base = settings.BACKEND_API_URL.rstrip("/")
         self.tenant_id = tenant_id
         self.user_id = user_id
+        self.email = email or ""
+        self.display_name = display_name or ""
 
     @property
     def _headers(self):
-        return {
+        h = {
             "x-tenant-id": self.tenant_id,
             "x-user-id": self.user_id,
             "Content-Type": "application/json",
         }
+        if self.email:
+            h["x-user-email"] = self.email
+        if self.display_name:
+            h["x-user-name"] = self.display_name
+        return h
 
     def _url(self, path: str) -> str:
         return f"{self.base}/{path.lstrip('/')}"
@@ -321,5 +328,14 @@ class BackendClient:
 def get_client(request) -> BackendClient:
     """Build a BackendClient from the current Django request."""
     tenant_id = getattr(request, "tenant_id", "")
-    user_id = str(request.user.id) if request.user.is_authenticated else ""
-    return BackendClient(tenant_id=tenant_id, user_id=user_id)
+    if request.user.is_authenticated:
+        user_id = str(request.user.id)
+        email = getattr(request.user, "email", "") or ""
+        display_name = (getattr(request.user, "get_full_name", lambda: "")() or "").strip()
+        if not display_name:
+            display_name = (getattr(request.user, "username", "") or "").strip()
+    else:
+        user_id = ""
+        email = ""
+        display_name = ""
+    return BackendClient(tenant_id=tenant_id, user_id=user_id, email=email, display_name=display_name)
