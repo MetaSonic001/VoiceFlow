@@ -22,37 +22,37 @@ PREVIEW_SENTENCE = (
     "in a natural, conversational tone. Let me know how you'd like to get started!"
 )
 
-# Edge TTS voice catalogue
+# Edge TTS voice catalogue — only verified-available voices
 EDGE_VOICES = {
     "": "en-US-AriaNeural",
     "preset-aria": "en-US-AriaNeural",
+    "preset-ava": "en-US-AvaNeural",
     "preset-jenny": "en-US-JennyNeural",
-    "preset-guy": "en-US-GuyNeural",
-    "preset-davis": "en-US-DavisNeural",
-    "preset-sara": "en-US-SaraNeural",
-    "preset-tony": "en-US-TonyNeural",
-    "preset-nancy": "en-US-NancyNeural",
-    "preset-amber": "en-US-AmberNeural",
-    "preset-ana": "en-US-AnaNeural",
-    "preset-andrew": "en-US-AndrewNeural",
-    "preset-brian": "en-US-BrianNeural",
     "preset-emma": "en-US-EmmaNeural",
+    "preset-ana": "en-US-AnaNeural",
+    "preset-michelle": "en-US-MichelleNeural",
+    "preset-guy": "en-US-GuyNeural",
+    "preset-brian": "en-US-BrianNeural",
+    "preset-andrew": "en-US-AndrewNeural",
+    "preset-christopher": "en-US-ChristopherNeural",
+    "preset-eric": "en-US-EricNeural",
+    "preset-roger": "en-US-RogerNeural",
     "preset-steffan": "en-US-SteffanNeural",
 }
 
 VOICE_LIST = [
     {"id": "preset-aria", "name": "Aria", "gender": "Female", "style": "Friendly & warm", "language": "en-US"},
+    {"id": "preset-ava", "name": "Ava", "gender": "Female", "style": "Expressive & natural", "language": "en-US"},
     {"id": "preset-jenny", "name": "Jenny", "gender": "Female", "style": "Professional", "language": "en-US"},
     {"id": "preset-emma", "name": "Emma", "gender": "Female", "style": "Cheerful", "language": "en-US"},
-    {"id": "preset-sara", "name": "Sara", "gender": "Female", "style": "Calm & composed", "language": "en-US"},
-    {"id": "preset-nancy", "name": "Nancy", "gender": "Female", "style": "Conversational", "language": "en-US"},
-    {"id": "preset-amber", "name": "Amber", "gender": "Female", "style": "Casual", "language": "en-US"},
     {"id": "preset-ana", "name": "Ana", "gender": "Female", "style": "Soft & gentle", "language": "en-US"},
+    {"id": "preset-michelle", "name": "Michelle", "gender": "Female", "style": "Clear & confident", "language": "en-US"},
     {"id": "preset-guy", "name": "Guy", "gender": "Male", "style": "News anchor", "language": "en-US"},
-    {"id": "preset-davis", "name": "Davis", "gender": "Male", "style": "Deep & authoritative", "language": "en-US"},
-    {"id": "preset-tony", "name": "Tony", "gender": "Male", "style": "Casual & upbeat", "language": "en-US"},
-    {"id": "preset-andrew", "name": "Andrew", "gender": "Male", "style": "Warm & articulate", "language": "en-US"},
     {"id": "preset-brian", "name": "Brian", "gender": "Male", "style": "Confident narrator", "language": "en-US"},
+    {"id": "preset-andrew", "name": "Andrew", "gender": "Male", "style": "Warm & articulate", "language": "en-US"},
+    {"id": "preset-christopher", "name": "Christopher", "gender": "Male", "style": "Authoritative", "language": "en-US"},
+    {"id": "preset-eric", "name": "Eric", "gender": "Male", "style": "Casual & relaxed", "language": "en-US"},
+    {"id": "preset-roger", "name": "Roger", "gender": "Male", "style": "Deep & smooth", "language": "en-US"},
     {"id": "preset-steffan", "name": "Steffan", "gender": "Male", "style": "Smooth & clear", "language": "en-US"},
 ]
 
