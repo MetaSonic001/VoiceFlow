@@ -319,7 +319,7 @@ async def _semantic_search(
                 "n_results": top_k,
             }
             if agent_id:
-                query_kwargs["where"] = {"agentId": agent_id}
+                query_kwargs["where"] = {"$or": [{"agentId": agent_id}, {"agentId": "knowledge_base"}]}
 
             data = collection.query(**query_kwargs)
 

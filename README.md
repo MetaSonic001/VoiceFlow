@@ -2,7 +2,7 @@
 
 A multi-tenant SaaS platform for building, deploying, and managing AI-powered voice and chat agents. Businesses onboard through a guided wizard, upload their knowledge base, and receive a domain-specific AI agent that answers customer queries over phone (Twilio), browser-based WebRTC calls, or a web chat interface — using Retrieval-Augmented Generation (RAG) over their own documents with hierarchical context injection and policy-based retrieval scoring.
 
-> **Status (April 2026):** The full pipeline is functional end-to-end: 7-step onboarding → document ingestion → per-tenant vector isolation → 5-layer context injection → policy-scored retrieval → dynamic 7-section prompt assembly → Groq LLM generation (per-tenant model selection, conversation history in all code paths) → TTS → multi-channel delivery (Twilio voice, **real server-side audio WebRTC** with Groq Whisper STT + Chatterbox TTS, web chat, embeddable widget, **per-agent REST API for third-party integration**). Analytics use real DB queries. A retraining pipeline captures bad calls and injects learned corrections as few-shot examples. Admin pipeline management with real CRUD. Interactive API docs via Scalar at `/api-docs`. See [Implementation Status](#implementation-status) for the full breakdown.
+> **Status (April 2026):** The full pipeline is functional end-to-end: 7-step onboarding → document ingestion → per-tenant vector isolation → 5-layer context injection → policy-scored retrieval → dynamic 7-section prompt assembly → Groq LLM generation (per-tenant model selection, conversation history in all code paths) → TTS → multi-channel delivery (Twilio voice, **real WebSocket audio** with Groq Whisper STT + Edge TTS, web chat, embeddable widget, **per-agent REST API for third-party integration**). Analytics use real DB queries. A retraining pipeline captures bad calls and injects learned corrections as few-shot examples. Admin pipeline management with real CRUD. Data Explorer dashboard to visualise Postgres, ChromaDB & Redis contents. Interactive API docs via FastAPI at `/docs`. **Stack: Django 6 (HTMX + Alpine.js) frontend + FastAPI backend + Docker services (Postgres, Redis, ChromaDB, MinIO).** See [Implementation Status](#implementation-status) for the full breakdown.
 
 ---
 
@@ -28,10 +28,10 @@ A multi-tenant SaaS platform for building, deploying, and managing AI-powered vo
 
 VoiceFlow lets any business create an AI agent tailored to their domain without writing code:
 
-1. **Sign up** → authenticated via Clerk
+1. **Sign up** → Django authentication (email/password)
 2. **Onboarding wizard** (7 steps) → configure company profile, agent persona, knowledge base, voice settings, deployment channels
 3. **Documents are ingested** → scraped from URLs or uploaded as files → chunked, embedded, stored in a per-tenant vector store in ChromaDB
-4. **Agent is live** → receives questions via web chat, phone call (Twilio), or browser call (WebRTC) → hierarchical context injection (5 layers) → policy-scored retrieval from tenant-isolated store → dynamic 7-section prompt assembly → Groq LLM generation → TTS synthesis → voice or text response
+4. **Agent is live** → receives questions via web chat, phone call (Twilio), or browser call (WebSocket) → hierarchical context injection (5 layers) → policy-scored retrieval from tenant-isolated store → dynamic 7-section prompt assembly → Groq LLM generation → TTS synthesis → voice or text response
 5. **Continuous improvement** → bad calls are flagged → nightly pipeline extracts Q&A pairs → admins review and edit ideal responses → approved examples are injected as few-shot learning in the system prompt
 
 The primary market is Indian SMBs. Every tenant and agent is logically isolated — one tenant cannot query another's documents.
@@ -163,104 +163,91 @@ The primary market is Indian SMBs. Every tenant and agent is logically isolated 
 ```
 VoiceFlow/
 │
-├── voiceflow-ai-platform (1)/     ← ACTIVE: Next.js 15 frontend
-│   ├── app/
-│   │   ├── page.tsx               ← Landing page
-│   │   ├── layout.tsx             ← Root layout with ClerkProvider
-│   │   ├── onboarding/            ← 7-step onboarding wizard
-│   │   ├── dashboard/             ← Agent management dashboard
-│   │   │   ├── analytics/         ← Real Prisma-based analytics
-│   │   │   ├── billing/           ← Billing page (no backend yet)
-│   │   │   ├── audit/             ← Audit log page
-│   │   │   ├── knowledge/         ← Knowledge base management
-│   │   │   ├── calls/             ← Call log viewer
-│   │   │   ├── retraining/        ← Retraining queue admin UI ★ NEW
-│   │   │   ├── widget/            ← Embeddable widget manager ★ NEW
-│   │   │   ├── reports/           ← Reports page
-│   │   │   ├── settings/          ← Twilio / integrations
-│   │   │   └── ...
-│   │   ├── admin/pipelines/       ← Admin pipeline management
-│   │   ├── voice-agent/           ← Standalone voice interface
-│   │   └── api/                   ← Next.js API routes (proxy layer)
-│   │       ├── auth/clerk_sync/   ← Clerk → backend user sync
-│   │       ├── agents/            ← Proxy to Express /api/agents
-│   │       ├── onboarding/        ← Proxy to Express /onboarding
-│   │       └── runner/[...path]/  ← Proxy to Express /api/runner
-│   ├── components/
-│   │   ├── agent-dashboard.tsx
-│   │   ├── chat-interface.tsx
-│   │   ├── voice-agent-interface.tsx
-│   │   ├── onboarding-flow.tsx
-│   │   ├── ClerkSync.tsx
-│   │   ├── onboarding/            ← Per-step wizard components
-│   │   └── dashboard/             ← Dashboard sub-components (sidebar, etc.)
-│   ├── lib/
-│   │   ├── api-client.ts          ← Unified API client class
-│   │   ├── prisma.ts              ← Prisma client (frontend)
-│   │   ├── tenant-utils.ts        ← Tenant context helpers
-│   │   └── constants.ts
-│   └── prisma/schema.prisma       ← Frontend DB schema
-│
-├── new_backend/                   ← ACTIVE: Backend services
-│   ├── docker-compose.yml         ← PostgreSQL, Redis, MinIO, ChromaDB
-│   ├── express-backend/           ← ACTIVE: Main Express API
-│   │   ├── src/
-│   │   │   ├── index.ts           ← Server entry + Socket.IO + scheduler boot
-│   │   │   ├── routes/            ← 19 route files
-│   │   │   │   ├── agents.ts
-│   │   │   │   ├── analytics.ts   ← Real Prisma queries (not mocked)
-│   │   │   │   ├── auth.ts
-│   │   │   │   ├── brands.ts      ← Brand CRUD ★
-│   │   │   │   ├── documents.ts
-│   │   │   │   ├── ingestion.ts
-│   │   │   │   ├── logs.ts        ← Call log CRUD + flagging
-│   │   │   │   ├── onboarding.ts
-│   │   │   │   ├── rag.ts
-│   │   │   │   ├── retraining.ts  ← Retraining queue API ★ NEW
-│   │   │   │   ├── runner.ts      ← Chat + audio endpoints
-│   │   │   │   ├── settings.ts    ← Twilio creds encryption
-│   │   │   │   ├── templates.ts
-│   │   │   │   ├── tts.ts
-│   │   │   │   ├── twilio.ts      ← Twilio provisioning
-│   │   │   │   ├── twilioVoice.ts ← TwiML Gather loop
-│   │   │   │   ├── users.ts
-│   │   │   │   ├── widget.ts      ← Embeddable JS widget ★ NEW
-│   │   │   │   └── admin.ts
-│   │   │   ├── services/          ← 15 service files
-│   │   │   │   ├── contextInjector.ts   ← 5-layer context hierarchy ★
-│   │   │   │   ├── promptAssembly.ts    ← 7-section system prompt ★
-│   │   │   │   ├── ragService.ts        ← RAG + policy scoring ★
-│   │   │   │   ├── retrainingService.ts ← Flagged call processing ★ NEW
-│   │   │   │   ├── retrainingScheduler.ts ← Nightly cron ★ NEW
-│   │   │   │   ├── webrtcService.ts     ← Socket.IO signaling ★ NEW
-│   │   │   │   ├── callAnalysis.ts
-│   │   │   │   ├── credentialsService.ts
-│   │   │   │   ├── ttsService.ts
-│   │   │   │   ├── voiceService.ts
-│   │   │   │   ├── minioService.ts
-│   │   │   │   ├── twilioClientService.ts
-│   │   │   │   ├── twilioMediaService.ts
-│   │   │   │   └── twilioProvisioningService.ts
-│   │   │   └── middleware/
-│   │   │       ├── clerkAuth.ts   ← JWT verify + user sync
-│   │   │       ├── rateLimit.ts   ← Redis-based per-tenant limits
-│   │   │       └── errorHandler.ts
-│   │   └── prisma/schema.prisma   ← Backend DB schema (10 models)
-│   └── ingestion-service/         ← ACTIVE: FastAPI ingestion
-│       └── main.py                ← Scraping + embedding + ChromaDB
-│
-├── tts-service/                   ← ACTIVE: Chatterbox TTS microservice
-│   ├── main.py                    ← FastAPI TTS server (port 8003)
-│   ├── Dockerfile
-│   ├── requirements.txt
-│   └── README.md
+├── python/                        ← ACTIVE: Full-stack Python codebase
+│   ├── Makefile                   ← 30+ targets (start, restart, nuke, etc.)
+│   ├── docker-compose.yml         ← Postgres, Redis, ChromaDB, MinIO
+│   │
+│   ├── backend/                   ← ACTIVE: FastAPI backend (Port 8040)
+│   │   ├── main.py                ← Server entry, router registration, seeding
+│   │   ├── app/
+│   │   │   ├── auth.py            ← Auth context from headers (demo-mode)
+│   │   │   ├── config.py          ← Settings (env vars)
+│   │   │   ├── database.py        ← SQLAlchemy async engine + session
+│   │   │   ├── models.py          ← 12 SQLAlchemy ORM models
+│   │   │   ├── routes/            ← 22 route files
+│   │   │   │   ├── agents.py      ← Agent CRUD + activate/pause
+│   │   │   │   ├── analytics.py   ← Real DB-based analytics
+│   │   │   │   ├── auth.py        ← Login/signup/clerk-sync
+│   │   │   │   ├── brands.py      ← Brand CRUD (voice, topics, policies)
+│   │   │   │   ├── documents.py   ← Document CRUD + upload
+│   │   │   │   ├── ingestion.py   ← Ingestion job start/status
+│   │   │   │   ├── logs.py        ← Call log CRUD + flagging
+│   │   │   │   ├── onboarding.py  ← 16 wizard endpoints
+│   │   │   │   ├── rag.py         ← RAG query + conversation history
+│   │   │   │   ├── retraining.py  ← Retraining queue + process flagged
+│   │   │   │   ├── runner.py      ← Chat + audio endpoints
+│   │   │   │   ├── settings.py    ← Twilio/Groq creds (AES-256-GCM)
+│   │   │   │   ├── templates.py   ← Agent template CRUD
+│   │   │   │   ├── tts.py         ← TTS preset voices, preview, clone
+│   │   │   │   ├── voice.py       ← Twilio TwiML Gather loop
+│   │   │   │   ├── voice_ws.py    ← WebSocket voice (Whisper STT)
+│   │   │   │   ├── widget.py      ← Embeddable JS widget (public)
+│   │   │   │   ├── admin.py       ← Pipeline CRUD + trigger
+│   │   │   │   ├── platform.py    ← Audit, notifications, health
+│   │   │   │   ├── data_explorer.py ← Postgres/ChromaDB/Redis viewer
+│   │   │   │   └── users.py       ← User management
+│   │   │   └── services/          ← Core service modules
+│   │   │       ├── rag_service.py         ← 5-layer context injection +
+│   │   │       │                            policy scoring + 7-section
+│   │   │       │                            prompt assembly + Groq LLM
+│   │   │       ├── ingestion_service.py   ← Docling + PaddleOCR + scraping
+│   │   │       ├── credentials.py         ← AES-256-GCM encryption
+│   │   │       └── scheduler.py           ← APScheduler nightly cron
+│   │   └── requirements.txt
+│   │
+│   └── frontend/                  ← ACTIVE: Django 6.0.4 frontend (Port 8050)
+│       ├── manage.py
+│       ├── core/
+│       │   ├── urls.py            ← All URL routes
+│       │   ├── api_client.py      ← Unified backend API client
+│       │   └── views/
+│       │       ├── dashboard.py   ← Agent list + detail views
+│       │       ├── pages.py       ← All dashboard page views
+│       │       ├── api_proxy.py   ← 25+ proxy endpoints for JS/HTMX
+│       │       ├── onboarding.py  ← 7-step wizard view
+│       │       ├── auth.py        ← Login/register/logout
+│       │       └── chat.py        ← Chat + voice agent views
+│       └── templates/
+│           ├── base_dashboard.html
+│           ├── partials/sidebar.html
+│           ├── onboarding/flow.html   ← 7-step wizard (Alpine.js)
+│           ├── agents/detail.html     ← Agent detail + chat
+│           └── dashboard/             ← 18 dashboard pages
+│               ├── analytics.html     ← Charts + metrics
+│               ├── audit.html         ← Filterable audit log
+│               ├── calls.html         ← Call log viewer
+│               ├── data_explorer.html ← DB visualiser (Postgres/Chroma/Redis)
+│               ├── knowledge.html     ← Knowledge base management
+│               ├── retraining.html    ← Retraining queue admin
+│               ├── settings.html      ← Twilio/Groq/voice config
+│               ├── system.html        ← System health monitor
+│               ├── widget.html        ← Embed code manager
+│               └── ...
 │
 ├── PATENT_CLAIMS_MAPPING.md       ← Patent claim → code trace mapping
 │
-└── tools/db_visualizer/           ← Development utility
+├── not-required/                  ← Legacy code (prior iterations)
+│   ├── backend/                   ← Old Python backend
+│   ├── nestjs-backend/            ← Old NestJS attempt
+│   ├── agent-workflow/            ← Old agent workflow
+│   └── ...
+│
+└── new_backend/                   ← Legacy Express.js backend (superseded)
+    ├── express-backend/           ← Express.js API (superseded by python/backend)
+    └── ingestion-service/         ← Old ingestion service
 ```
 
-> **Note:** The `not-required/` folder (legacy prior iterations) has been deleted. The active codebase is `voiceflow-ai-platform (1)/` and `new_backend/`.
+> **Note:** The active codebase is `python/` — both `python/backend/` (FastAPI) and `python/frontend/` (Django). The `new_backend/` and `not-required/` folders contain prior iterations and are not used.
 
 ---
 
@@ -269,50 +256,49 @@ VoiceFlow/
 ### Frontend
 | Layer | Technology |
 |---|---|
-| Framework | Next.js 15 (App Router), React 19 |
-| Language | TypeScript |
-| Styling | Tailwind CSS v4, shadcn/ui (Radix UI primitives) |
-| Animation | Framer Motion |
-| Charts | Recharts |
-| Auth | Clerk (`@clerk/nextjs`) |
-| Forms | react-hook-form + Zod |
-| Database (frontend) | Prisma + PostgreSQL |
+| Framework | Django 6.0.4 |
+| Language | Python 3.12 |
+| Templating | Django Templates + HTMX + Alpine.js |
+| Styling | Tailwind CSS (via CDN) |
+| Charts | Chart.js |
+| Auth | Django built-in authentication |
+| Interactivity | Alpine.js (reactive state, forms, modals) |
+| Server Communication | HTMX + fetch API (via Django proxy endpoints) |
 
-### Backend (Express)
+### Backend (FastAPI)
 | Layer | Technology |
 |---|---|
-| Runtime | Node.js 18+ |
-| Framework | Express.js |
-| Language | TypeScript |
-| ORM | Prisma |
-| Auth | Clerk SDK (`@clerk/clerk-sdk-node`) |
-| Validation | Joi |
-| Real-time | Socket.IO (WebRTC signaling on `/voice` namespace) |
-| File uploads | Multer |
-| Scheduling | Native `setInterval` (retraining cron) |
+| Runtime | Python 3.12 |
+| Framework | FastAPI |
+| ORM | SQLAlchemy 2.0 (async) |
+| Auth | Header-based tenant context (demo-mode) |
+| Validation | Pydantic (via FastAPI) |
+| Real-time | Native WebSocket (voice channel) |
+| File uploads | FastAPI UploadFile + MinIO |
+| Scheduling | APScheduler (retraining cron) |
+| Rate Limiting | SlowAPI (Redis-backed, per-tenant) |
 
-### Backend (Ingestion)
+### Ingestion Pipeline (in FastAPI backend)
 | Layer | Technology |
 |---|---|
-| Framework | FastAPI (Python) |
+| Document Parsing | Docling (`DocumentConverter`) |
+| OCR | PaddleOCR (scanned PDFs/images) |
+| Scraping | Trafilatura + BeautifulSoup fallback |
 | Embeddings | `sentence-transformers` (`all-MiniLM-L6-v2`) |
-| Scraping | Crawl4AI, Trafilatura, Playwright, Scrapy |
-| OCR | DocTR, Tesseract, pdfminer |
 | Chunking | LangChain `RecursiveCharacterTextSplitter` |
-| Documents | `python-docx`, `python-pptx`, `openpyxl`, Pillow |
 
 ### Infrastructure
 | Component | Technology |
 |---|---|
-| Primary DB | PostgreSQL 15 |
-| Vector Store | ChromaDB |
-| Cache / Queue | Redis 7 |
-| File Storage | MinIO (S3-compatible) |
+| Primary DB | PostgreSQL 15 (Docker, port 8010) |
+| Vector Store | ChromaDB (Docker, port 8030) |
+| Cache / Queue | Redis 7 (Docker, port 8020) |
+| File Storage | MinIO S3-compatible (Docker, port 9020/8070) |
 | LLM | Groq API (`Llama` / `GPT-OSS` family) |
-| TTS | Chatterbox Turbo 350M (self-hosted, MIT license) |
+| TTS | Edge TTS (13 en-US voices) |
 | Telephony | Twilio (TwiML Gather loop, per-tenant credentials) |
-| Credential Encryption | AES-256-GCM via Node.js crypto |
-| Auth Provider | Clerk |
+| Credential Encryption | AES-256-GCM via `cryptography` library |
+| Build / Dev Tooling | PowerShell Makefile with 30+ targets |
 
 ---
 
@@ -566,180 +552,112 @@ On next query, ContextInjector.assemble() loads approved examples:
 ### Prerequisites
 
 - Docker Desktop (for infrastructure services)
-- Node.js 18+
 - Python 3.10+
-- `npm` or `pnpm`
-- Clerk account → API keys ([dashboard.clerk.com](https://dashboard.clerk.com))
+- `make` (via Chocolatey: `choco install make`)
 - Groq API key ([console.groq.com](https://console.groq.com))
 - (Optional) Twilio account for phone calls — each tenant brings their own
 
 ### Step 1 — Start Infrastructure
 
 ```bash
-cd new_backend
-docker-compose up -d
+cd python
+make docker-up
 ```
 
-This starts PostgreSQL (5433), Redis (6379), MinIO (9000/9001), ChromaDB (8002), and the TTS service (8003).
+This starts PostgreSQL (8010), Redis (8020), ChromaDB (8030), and MinIO (9020/8070) via Docker.
 
-> **Note:** The TTS service requires an NVIDIA GPU for CUDA inference. If running CPU-only, set `DEVICE=cpu` in `tts-service/.env` (slower but works).
-
-### Step 2 — Generate Encryption Key
+### Step 2 — Install Dependencies
 
 ```bash
-# Run once — store the output in your .env as CREDENTIALS_ENCRYPTION_KEY
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+cd python
+make install
 ```
 
-> **Warning:** Never change this key after tenants have saved Twilio credentials — changing it makes all stored credentials unreadable.
+This creates a Python virtual environment and installs all backend + frontend requirements.
 
-### Step 3 — Configure Environment Files
-
-Each service has a `.env.example` template. Copy and fill in real values:
+### Step 3 — Run Database Migrations
 
 ```bash
-# Express Backend
-cp new_backend/express-backend/.env.example new_backend/express-backend/.env
-
-# Ingestion Service
-cp new_backend/ingestion-service/.env.example new_backend/ingestion-service/.env
-
-# TTS Service
-cp tts-service/.env.example tts-service/.env
-
-# Frontend
-cp "voiceflow-ai-platform (1)/.env.example" "voiceflow-ai-platform (1)/.env.local"
+make migrate
 ```
 
-Required values to fill in:
-- `CLERK_SECRET_KEY` and `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` from Clerk dashboard
-- `GROQ_API_KEY` from Groq console (optional — platform fallback; tenants can bring their own)
-- `CREDENTIALS_ENCRYPTION_KEY` from Step 2
-- `DATABASE_URL` (default matches docker-compose: `postgresql://vf_admin:vf_secure_2025!@localhost:5433/voiceflow_prod`)
+Creates all PostgreSQL tables and seeds 6 agent templates + demo tenant/user.
 
-### Step 4 — Start Express Backend
+### Step 4 — Start Everything
 
 ```bash
-cd new_backend/express-backend
-npm install
-npx prisma generate
-npx prisma db push      # creates/updates tables
-npm run dev              # starts on port 8000
+make start
 ```
 
-### Step 5 — Start Ingestion Service
-
+Or start individually:
 ```bash
-cd new_backend/ingestion-service
-pip install -r requirements.txt
-playwright install chromium   # required for scraping
-uvicorn main:app --host 0.0.0.0 --port 8001 --reload
+make start-backend    # FastAPI on port 8040
+make start-frontend   # Django on port 8050
 ```
 
-### Step 6 — Start Frontend
-
-```bash
-cd "voiceflow-ai-platform (1)"
-npm install
-npx prisma generate
-npm run dev              # starts on port 3000
-```
-
-### Step 7 — Access the Application
+### Step 5 — Access the Application
 
 | Interface | URL |
 |---|---|
-| Frontend | http://localhost:3000 |
-| Express API | http://localhost:8000 |
-| Express Health | http://localhost:8000/health |
-| FastAPI Ingestion Docs | http://localhost:8001/docs |
-| TTS Service Health | http://localhost:8003/health |
-| MinIO Console | http://localhost:9001 (minioadmin / minioadmin) |
-| ChromaDB | http://localhost:8002 |
+| Django Frontend | http://localhost:8050 |
+| FastAPI Backend | http://localhost:8040 |
+| FastAPI Docs | http://localhost:8040/docs |
+| PostgreSQL | localhost:8010 |
+| Redis | localhost:8020 |
+| ChromaDB | http://localhost:8030 |
+| MinIO Console | http://localhost:8070 (voiceflow / voiceflow123) |
+| MinIO API | localhost:9020 |
+
+### Other Useful Commands
+
+```bash
+make restart-backend    # Restart FastAPI
+make restart-frontend   # Restart Django
+make nuke               # Wipe all data + restart fresh
+make logs-backend       # Tail backend logs
+make logs-frontend      # Tail frontend logs
+```
 
 ### (Optional) Voice Calls via Twilio
 
 1. **Expose your local backend publicly:**
 ```bash
-ngrok http 8000
+ngrok http 8040
 ```
 
-2. **Set the webhook URL in your backend `.env`:**
-```env
-TWILIO_WEBHOOK_BASE_URL=https://your-subdomain.ngrok-free.app
-```
+2. **Each tenant enters their own Twilio credentials** in the Settings → Integrations page or during onboarding Step 6.
 
-3. **Each tenant enters their own Twilio credentials** in the Settings → Integrations page after signing up. The platform uses their credentials to provision numbers on their Twilio account.
-
-4. **On deploy**, the onboarding wizard calls the Twilio API to search for an available local number, purchase it, and configure the voice webhooks automatically. No manual Twilio console setup needed.
+3. **On deploy**, the onboarding wizard provisions a Twilio number and configures webhooks automatically.
 
 ---
 
 ## Environment Variables
 
-### Express Backend (`new_backend/express-backend/.env`)
+### FastAPI Backend (`python/backend/.env`)
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `DATABASE_URL` | **Yes** | — | PostgreSQL connection string |
-| `REDIS_HOST` | **Yes** | `localhost` | Redis host |
-| `REDIS_PORT` | No | `6379` | Redis port |
-| `CLERK_SECRET_KEY` | **Yes** | — | Clerk secret for JWT verification |
-| `GROQ_API_KEY` | No* | — | Platform fallback LLM key. Optional if all tenants provide their own via Settings → Integrations. |
-| `CREDENTIALS_ENCRYPTION_KEY` | No* | — | 64-char hex string for AES-256-GCM encryption of tenant credentials (Twilio & Groq API keys). Required if tenants save credentials via Settings. |
+| `DATABASE_URL` | No | `postgresql+asyncpg://voiceflow:voiceflow123@localhost:8010/voiceflow` | PostgreSQL connection string |
+| `REDIS_HOST` | No | `localhost` | Redis host |
+| `REDIS_PORT` | No | `8020` | Redis port |
+| `GROQ_API_KEY` | No* | — | Platform fallback LLM key. Optional if tenants provide their own via Settings. |
+| `CREDENTIALS_ENCRYPTION_KEY` | No* | — | 64-char hex for AES-256-GCM encryption of Twilio/Groq API keys |
 | `CHROMA_HOST` | No | `localhost` | ChromaDB host |
-| `CHROMA_PORT` | No | `8002` | ChromaDB port |
-| `CHROMA_URL` | No | `http://localhost:8002` | ChromaDB full URL (used by ragService) |
+| `CHROMA_PORT` | No | `8030` | ChromaDB port |
 | `MINIO_ENDPOINT` | No | `localhost` | MinIO host |
-| `MINIO_PORT` | No | `9000` | MinIO port |
-| `MINIO_ACCESS_KEY` | No | `minioadmin` | MinIO access key |
-| `MINIO_SECRET_KEY` | No | `minioadmin` | MinIO secret key |
-| `TWILIO_ACCOUNT_SID` | No | — | Fallback Twilio SID (dev/admin only) |
-| `TWILIO_AUTH_TOKEN` | No | — | Fallback Twilio token (dev/admin only) |
-| `TWILIO_WEBHOOK_BASE_URL` | No | — | Public URL for Twilio webhooks (e.g. ngrok URL) |
-| `TTS_SERVICE_URL` | No | `http://localhost:8003` | Chatterbox TTS service URL |
-| `FASTAPI_URL` | No | `http://localhost:8001` | Ingestion service URL |
-| `PORT` | No | `8000` | Express server port |
-| `NODE_ENV` | No | `development` | Environment mode |
-| `JWT_SECRET` | No | `dev-secret` | JWT signing secret (change in production) |
+| `MINIO_PORT` | No | `9020` | MinIO API port |
+| `MINIO_ACCESS_KEY` | No | `voiceflow` | MinIO access key |
+| `MINIO_SECRET_KEY` | No | `voiceflow123` | MinIO secret key |
+| `TWILIO_ACCOUNT_SID` | No | — | Fallback Twilio SID |
+| `TWILIO_AUTH_TOKEN` | No | — | Fallback Twilio token |
 
-### Ingestion Service (`new_backend/ingestion-service/.env`)
+### Django Frontend (`python/frontend/.env`)
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `REDIS_HOST` | No | `localhost` | Redis host for job tracking |
-| `REDIS_PORT` | No | `6379` | Redis port |
-| `CHROMA_HOST` | No | `localhost` | ChromaDB host |
-| `CHROMA_PORT` | No | `8002` | ChromaDB port |
-| `MINIO_ENDPOINT` | No | `http://localhost:9000` | MinIO endpoint |
-| `MINIO_ACCESS_KEY` | No | — | MinIO access key |
-| `MINIO_SECRET_KEY` | No | — | MinIO secret key |
-| `EMBEDDING_MODEL` | No | `all-MiniLM-L6-v2` | Sentence transformer model |
-| `CHUNK_SIZE` | No | `1000` | Text chunk size |
-| `CHUNK_OVERLAP` | No | `200` | Chunk overlap |
-
-### TTS Service (`tts-service/.env`)
-
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `MINIO_ENDPOINT` | No | `localhost:9000` | MinIO endpoint for TTS cache |
-| `MINIO_ACCESS_KEY` | No | `minioadmin` | MinIO access key |
-| `MINIO_SECRET_KEY` | No | `minioadmin` | MinIO secret key |
-| `MINIO_BUCKET` | No | `voiceflow-tts` | MinIO bucket for TTS audio |
-| `DEVICE` | No | `cuda` | PyTorch device (`cuda` or `cpu`) |
-
-### Frontend (`voiceflow-ai-platform (1)/.env.local`)
-
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | **Yes** | — | Clerk publishable key |
-| `CLERK_SECRET_KEY` | **Yes** | — | Clerk secret key |
-| `DATABASE_URL` | **Yes** | — | PostgreSQL connection string |
-| `NEXT_PUBLIC_API_URL` | No | `http://localhost:8000` | Public backend URL for client-side calls |
-| `BACKEND_URL` | No | `http://localhost:8000` | Server-side backend URL for API proxies |
-| `NEW_BACKEND_URL` | No | `http://localhost:8000` | Alias for backend URL |
-| `BACKEND_API_KEY` | No | — | Server-to-server auth key |
-| `NEXT_PUBLIC_WS_URL` | No | `ws://localhost:8000` | WebSocket URL |
+| `BACKEND_URL` | No | `http://localhost:8040` | FastAPI backend URL |
+| `SECRET_KEY` | No | auto-generated | Django secret key |
+| `DEBUG` | No | `True` | Django debug mode |
 
 ---
 
@@ -747,25 +665,24 @@ TWILIO_WEBHOOK_BASE_URL=https://your-subdomain.ngrok-free.app
 
 | Service | Technology | Port | Role |
 |---|---|---|---|
-| Frontend | Next.js 15 | 3000 | UI, dashboard, onboarding |
-| Express Backend | Node.js | 8000 | Auth, agents, RAG, voice, API |
-| Ingestion Service | FastAPI | 8001 | Scraping, embedding, ChromaDB writes |
-| TTS Service | FastAPI + Chatterbox | 8003 | Self-hosted text-to-speech, voice cloning |
-| PostgreSQL | Docker | 5433 | Primary relational data |
-| Redis | Docker | 6379 | Conversation cache, rate limits, call sessions |
-| MinIO | Docker | 9000/9001 | File storage, TTS cache (S3-compatible) |
-| ChromaDB | Docker | 8002 | Vector embeddings (per-tenant collections) |
+| Django Frontend | Django 6.0.4 + HTMX + Alpine.js | 8050 | UI, dashboard, onboarding |
+| FastAPI Backend | Python FastAPI | 8040 | Auth, agents, RAG, voice, API |
+| PostgreSQL | Docker | 8010 | Primary relational data |
+| Redis | Docker | 8020 | Conversation cache, rate limits, BM25 |
+| ChromaDB | Docker | 8030 | Vector embeddings (per-tenant collections) |
+| MinIO API | Docker | 9020 | File storage (S3-compatible) |
+| MinIO Console | Docker | 8070 | MinIO web admin |
 
 ---
 
 ## API Reference
 
-All backend endpoints require a Clerk JWT token unless noted.
+All backend endpoints use header-based tenant context.
 
-**Authentication header:**
+**Authentication headers:**
 ```
-Authorization: Bearer <clerk_jwt_token>
 x-tenant-id: <tenant_uuid>
+x-user-id: <user_uuid>
 ```
 
 ### Auth
@@ -955,69 +872,69 @@ A complete breakdown of what works versus what needs attention.
 | Onboarding progress (server-side) | GET/POST/DELETE `/onboarding/progress` for resume |
 | Deploy gating | Frontend checks Twilio credential status before allowing deploy |
 | **Retraining pipeline** | Nightly cron extracts flagged calls → admin review queue → approved examples injected as few-shot learning |
-| **WebRTC voice calls (server-side audio)** | Real audio pipeline: MediaRecorder → Groq Whisper STT → RAG → Chatterbox TTS → audio playback. Text fallback for no-mic browsers. |
-| **Embeddable call widget** | Public `<script>` tag serves push-to-talk widget with real audio capture/playback (no Web Speech API dependency) |
+| **WebSocket voice calls** | Real audio pipeline: MediaRecorder → Groq Whisper STT → RAG → Edge TTS → audio playback. Text fallback for no-mic browsers. |
+| **Embeddable call widget** | Public `<script>` tag serves push-to-talk widget with real audio capture/playback |
 | **Retraining admin UI** | `/dashboard/retraining` — filter, edit, approve/reject, manual trigger |
 | **Widget management UI** | `/dashboard/widget` — per-agent embed code with copy-to-clipboard |
-| **Scalar API documentation** | Interactive API explorer at `/api-docs` with OpenAPI 3.0 spec |
-| **Conversation history in LLM (all paths)** | Last 20 turns from Redis/ContextInjector passed into Groq messages array in ALL code paths: /chat, WebRTC, widget REST API, processQuery |
-| **Per-tenant LLM model selection** | `resolveModel()` reads `agent.llmPreferences.model` with allowlist of 4 Groq production models; default `llama-3.3-70b-versatile`. Agent Settings tab in UI lets users pick model, token limit, and context window strategy |
-| **Bring Your Own Groq Key (BYOK)** | Tenants can supply their own Groq Cloud API key via Settings → Integrations. Key is validated against live Groq API, encrypted with AES-256-GCM, and stored per-tenant. All code paths (chat, WebRTC, Twilio, widget) resolve tenant key first, falling back to platform key |
-| **Admin pipeline management** | Real Prisma CRUD: create/read/update/delete pipelines, async trigger with stage execution |
-| **Per-agent REST API** | Public session-based endpoints for third-party website integration (create session → send messages → get transcript → end session) |
-| **SSR-safe ApiClient** | All `localStorage` access guarded with `typeof window !== 'undefined'` — no SSR crashes |
-| **Consolidated env vars** | Server-side uses `BACKEND_URL`, client-side uses `NEXT_PUBLIC_API_URL` — no more fragmented vars |
+| **FastAPI API documentation** | Interactive API explorer at `/docs` with OpenAPI 3.0 spec |
+| **Conversation history in LLM (all paths)** | Last 20 turns from Redis passed into Groq messages array in ALL code paths: /chat, WebSocket, widget, processQuery |
+| **Per-tenant LLM model selection** | `resolve_model()` reads `agent.llmPreferences.model` with Groq production model allowlist |
+| **Bring Your Own Groq Key (BYOK)** | Tenants supply their own Groq API key via Settings. Encrypted with AES-256-GCM. All code paths resolve tenant key first, falling back to platform key |
+| **Admin pipeline management** | Real CRUD: create/read/update/delete pipelines, async trigger with stage execution |
+| **Per-agent REST API** | Public session-based endpoints for third-party integration (create session → send messages → get transcript → end session) |
+| **Data Explorer dashboard** | `/dashboard/data-explorer` — visualise Postgres, ChromaDB & Redis contents in real-time |
+| **Nightly retraining pipeline** | APScheduler cron at 02:00 — auto-extracts Q/A pairs from flagged calls + embeds approved examples into ChromaDB |
+| **Agent template CRUD** | Full create/read/update/delete for agent templates via `/api/templates` |
+| **Integrations page** | Real-time Twilio/Groq credential status from backend API |
+| **Audit log with filtering** | Client-side search + action filter + API refresh |
 
 ### Partially Implemented
 
 | Component | What Exists | What's Missing |
 |---|---|---|
 | Multi-language support | Agent `language` field in onboarding | No automatic language detection or translation pipeline |
-| Voice cloning | `POST /api/tts/clone-voice` endpoint + Chatterbox integration | Quality depends on reference audio; no fine-tuning of cloned voices |
-| True WebRTC peer connections | Server-side STT/TTS over Socket.IO binary transport | Uses Socket.IO binary frames, not RTCPeerConnection — works through all firewalls but adds ~1s latency vs true WebRTC |
+| Voice cloning | `POST /api/tts/clone-voice` endpoint | Quality depends on reference audio; no fine-tuning |
 
 ### Not Yet Implemented (Frontend Exists, No Backend)
 
 | Component | Frontend | Notes |
 |---|---|---|
-| Billing / invoices | `/dashboard/billing` page + API client methods | No Stripe/payment backend; needs subscription logic |
-| Notifications system | `/dashboard/notifications` page + API client methods | No notification backend service or push |
-| Backup / restore | `/dashboard/backup` page + API client methods | No backend backup functionality |
+| Billing / invoices | `/dashboard/billing` page | No Stripe/payment backend; needs subscription logic |
+| Backup / restore | `/dashboard/backup` page | No backend backup functionality |
 
 ### Known Issues
 
 | Issue | Severity | Impact |
 |---|---|---|
-| TypeScript build errors suppressed | Low | `next.config.mjs` has `typescript: { ignoreBuildErrors: true }` |
-| Prisma migration not run for new models | Blocking | `RetrainingExample`, `Pipeline` models and `retrained` field on CallLog exist in schema but require `npx prisma migrate dev` before first use |
+| Demo-mode auth | Low | No production auth — uses header-based tenant context for demos |
 
 ---
 
 ## Data Models
 
-### PostgreSQL — Unified Prisma Schema (`new_backend/express-backend/prisma/schema.prisma`)
+### PostgreSQL — SQLAlchemy ORM (`python/backend/app/models.py`)
 
-11 models:
+12 models:
 
 ```
 Tenant
-  id (cuid), name, domain?, apiKey, settings (JSON — includes encrypted
+  id (uuid), name, domain?, apiKey, settings (JSON — includes encrypted
   Twilio creds, twilioCredentialsVerified flag), policyRules (JSON),
   isActive
   → has many: Users, Agents, Documents, Brands, RetrainingExamples
 
 User
-  id (cuid), email, name?, role, tenantId, brandId?
+  id (uuid), email, name?, role, tenantId, brandId?
   → belongs to: Tenant, Brand
 
 Brand
-  id (cuid), tenantId, name, brandVoice (Text), allowedTopics (JSON),
+  id (uuid), tenantId, name, brandVoice (Text), allowedTopics (JSON),
   restrictedTopics (JSON), policyRules (JSON), createdAt, updatedAt
   → belongs to: Tenant
   → has many: Users, Agents
 
 Agent
-  id (cuid), name, systemPrompt?, voiceType, llmPreferences (JSON),
+  id (uuid), name, systemPrompt?, voiceType, llmPreferences (JSON),
   tokenLimit, contextWindowStrategy, tenantId, userId, brandId?,
   templateId?, phoneNumber?, twilioNumberSid?, chromaCollection?,
   channels (JSON), status
@@ -1036,7 +953,7 @@ AgentConfiguration
   → belongs to: Agent, AgentTemplate
 
 AgentTemplate
-  id (cuid), name (unique), description, category?,
+  id (uuid), name (unique), description, category?,
   baseSystemPrompt, defaultCapabilities (JSON),
   suggestedKnowledgeCategories (JSON), defaultTools (JSON)
 
@@ -1045,29 +962,37 @@ OnboardingProgress
   currentStep, data (JSON)
 
 Document
-  id (cuid), url?, s3Path?, status, title?, content?, metadata (JSON),
+  id (uuid), url?, s3Path?, status, title?, content?, metadata (JSON),
   tenantId, agentId
   → status: pending | processing | completed | failed
 
 CallLog
-  id (cuid), tenantId, agentId, callerPhone?, startedAt,
+  id (uuid), tenantId, agentId, callerPhone?, startedAt,
   endedAt?, durationSeconds?, transcript (Text), analysis (JSON),
   rating? (Int), ratingNotes?, flaggedForRetraining (Boolean),
   retrained (Boolean, default: false), createdAt
   → has many: RetrainingExamples
 
 RetrainingExample
-  id (cuid), tenantId, agentId, callLogId, userQuery (Text),
+  id (uuid), tenantId, agentId, callLogId, userQuery (Text),
   badResponse (Text), idealResponse (Text),
   status (String: pending | approved | rejected),
   approvedAt?, approvedBy?, createdAt, updatedAt
   → belongs to: Tenant, Agent, CallLog
 
 Pipeline
-  id (cuid), tenantId, name, stages (JSON — array of stage objects),
+  id (uuid), tenantId, name, stages (JSON — array of stage objects),
   status (String: idle | running | completed | failed),
   lastRunAt?, createdAt, updatedAt
   → belongs to: Tenant
+
+AuditLog
+  id (uuid), tenantId, userId?, action, resource, resourceId?,
+  details (JSON), ipAddress?, createdAt
+
+Notification
+  id (uuid), tenantId, userId?, type, title, message,
+  isRead (Boolean), link?, createdAt
 ```
 
 ### ChromaDB
@@ -1092,9 +1017,9 @@ conversation:{tenantId}:{agentId}:{sessionId}  → JSON array of messages (TTL: 
 twilio:session:{CallSid}                       → JSON { agentId, tenantId, callSid } (TTL: 1h)
 widget:session:{sessionId}                     → JSON { agentId, tenantId, createdAt } (TTL: 1h)
 widget:conversation:{sessionId}                → JSON array of messages (TTL: 24h)
+bm25:{tenantId}:{agentId}                      → JSON { documents, vocabulary } (BM25 index)
 job:{jobId}                                    → ingestion job status string
 job:{jobId}:progress                           → "0"–"100" percent
-rate_limit:{tenantId}:{endpoint}               → request count (TTL: 15m)
 ```
 
 ---
@@ -1255,13 +1180,13 @@ Incoming Request (Voice or Text)
 The core patent pipeline is now fully implemented. Remaining gaps are quality-of-life improvements, not architectural.
 
 **Completed:**
-- ~~Module 1 — Hierarchical Context Injection Service~~ → `contextInjector.ts` — 5-layer hierarchy (Global → Tenant → Brand → Agent → Session)
-- ~~Module 2 — Dynamic Prompt Assembly~~ → `promptAssembly.ts` — 7-section system prompt with `{{placeholder}}` replacement
-- ~~Module 3 — Policy-Aware Retrieval Scoring~~ → `ragService.ts` — `applyPolicyScoring()` with restrict/require/allow multipliers
-- ~~Module 4 — Schema Unification~~ → All models exist with Brand, policy, escalation fields
-- ~~Module 5 — Phone Number to Tenant Mapping~~ → `Agent.phoneNumber` lookup via `req.body.To`
+- ~~Module 1 — Hierarchical Context Injection Service~~ → `rag_service.py:assemble_context()` — 5-layer hierarchy (Global → Tenant → Brand → Agent → Session)
+- ~~Module 2 — Dynamic Prompt Assembly~~ → `rag_service.py:build_system_prompt()` — 7-section system prompt
+- ~~Module 3 — Policy-Aware Retrieval Scoring~~ → `rag_service.py:apply_policy_scoring()` with restrict/require/allow multipliers
+- ~~Module 4 — Schema Unification~~ → All 12 SQLAlchemy models exist with Brand, policy, escalation fields
+- ~~Module 5 — Phone Number to Tenant Mapping~~ → `Agent.phoneNumber` lookup in `voice.py`
 - ~~Module 6 — Retraining Pipeline~~ → Flagged calls → nightly extraction → admin review → few-shot injection
-- ~~Module 7 — WebRTC Channel~~ → Socket.IO `/voice` namespace + embeddable widget
+- ~~Module 7 — WebSocket Voice Channel~~ → WebSocket at `/api/voice/ws/{agent_id}` + embeddable widget
 
 All patent-claimed modules are now fully implemented. No architectural gaps remain.
 
@@ -1271,20 +1196,20 @@ See `PATENT_CLAIMS_MAPPING.md` for the full claim-to-code trace document.
 
 | Claim | Description | Status |
 |---|---|---|
-| 1 | Receive input → resolve tenant → inject metadata → query isolated store → dynamic prompt → LLM → deliver | **Done** — Full pipeline: ContextInjector → policy-scored retrieval → 7-section prompt → Groq → TTS/text |
-| 2 | Auto-create tenant vector store on first ingestion | **Done** — `get_or_create_collection()` in ingestion service |
+| 1 | Receive input → resolve tenant → inject metadata → query isolated store → dynamic prompt → LLM → deliver | **Done** — Full pipeline: `assemble_context()` → policy-scored retrieval → 7-section prompt → Groq → Edge TTS/text |
+| 2 | Auto-create tenant vector store on first ingestion | **Done** — `get_or_create_collection()` in `ingestion_service.py` |
 | 3 | Tenant metadata includes policies, compliance, persona | **Done** — Tenant.policyRules, Brand.policyRules, AgentConfiguration.policyRules + escalationRules loaded per request |
 | 4 | Per-agent sub-stores within a tenant | **Done** via `agentId` metadata filter in ChromaDB |
-| 5 | Policy-based filtering of retrieved chunks | **Done** — `applyPolicyScoring()` in ragService.ts with restrict/require/allow multipliers |
-| 6 | Conversation state loaded and incorporated into prompt | **Done** — Last 20 turns from Redis passed into Groq messages array in all code paths (Twilio, WebRTC, chat, widget) |
-| 7 | Dynamic LLM model selection per tenant config | **Done** — `resolveModel()` validates `agent.llmPreferences.model` against 4 Groq production models; default `llama-3.3-70b-versatile` |
-| 8 | Policy-weighted similarity scores modifying retrieval | **Done** — same as Claim 5, via `doesPolicyMatch()` + multiplicative weights |
-| 9 | Dynamic prompt assembly (not static template) | **Done** — `buildSystemPrompt()` in promptAssembly.ts, 7 sections with `{{placeholder}}` replacement |
+| 5 | Policy-based filtering of retrieved chunks | **Done** — `apply_policy_scoring()` in `rag_service.py` with restrict/require/allow multipliers |
+| 6 | Conversation state loaded and incorporated into prompt | **Done** — Last 20 turns from Redis passed into Groq messages array in all code paths (Twilio, WebSocket, chat, widget) |
+| 7 | Dynamic LLM model selection per tenant config | **Done** — `resolve_model()` validates `agent.llmPreferences.model` against Groq production models; default `llama-3.3-70b-versatile` |
+| 8 | Policy-weighted similarity scores modifying retrieval | **Done** — same as Claim 5, via `does_policy_match()` + multiplicative weights |
+| 9 | Dynamic prompt assembly (not static template) | **Done** — `build_system_prompt()` in `rag_service.py`, 7 sections with `{{placeholder}}` replacement |
 | 10 | Real-time ingestion without downtime | **Done** — FastAPI background task ingestion |
-| 11 | Tenant isolation at storage AND inference layers | **Done** — Storage: per-tenant ChromaDB collections. Inference: ContextInjector scopes all DB queries to tenantId |
-| 12 | Telephony with tenant-from-phone-number resolution | **Done** — `/incoming` handler looks up Agent by `req.body.To` phone number |
-| 13 | TTS audio response back via telephony | **Done** — Chatterbox Turbo TTS integrated into TwiML Gather loop |
-| 14 | Non-voice channels use same RAG pipeline | **Done** — `/api/runner/chat`, WebRTC `/voice` namespace, embeddable widget all share same pipeline |
+| 11 | Tenant isolation at storage AND inference layers | **Done** — Storage: per-tenant ChromaDB collections. Inference: `assemble_context()` scopes all DB queries to tenantId |
+| 12 | Telephony with tenant-from-phone-number resolution | **Done** — `voice.py` `/incoming` handler looks up Agent by phone number → `agent.tenantId` |
+| 13 | TTS audio response back via telephony | **Done** — Edge TTS integrated into TwiML Gather loop |
+| 14 | Non-voice channels use same RAG pipeline | **Done** — `/api/runner/chat`, WebSocket `/api/voice/ws/{agent_id}`, embeddable widget all share same pipeline |
 | 15 | Shared infra, logically separated per-tenant | **Done** — All services scope to tenantId; no cross-tenant data access possible |
 
 ### Distinguishing Features vs. Prior Art
@@ -1308,9 +1233,9 @@ A forward-looking assessment of what needs to happen to take VoiceFlow from "wor
 
 | Item | Effort | Description |
 |---|---|---|
-| **Run Prisma migration** | 5 min | `npx prisma migrate dev` — RetrainingExample, Pipeline models + `retrained` field on CallLog need actual DB tables |
-| **Remove `ignoreBuildErrors`** | 2-4 hr | Fix all TypeScript errors so `next build` passes without suppressing type checks |
-| **Production JWT_SECRET** | 5 min | Current default is `"dev-secret"` — must be a real random secret in production |
+| **Run DB migrations** | 5 min | `make migrate` — ensure all SQLAlchemy models are reflected in Postgres |
+| **Production SECRET_KEY** | 5 min | Current default is `"dev-secret"` — must be a real random secret in production |
+| **HTTPS termination** | 1 hr | Add reverse proxy (nginx/Caddy) with TLS certificates for production |
 
 ### Should Build for Production
 
@@ -1319,43 +1244,44 @@ A forward-looking assessment of what needs to happen to take VoiceFlow from "wor
 | **Billing / Stripe integration** | 2 wk | Frontend page exists at `/dashboard/billing`; needs Stripe subscriptions, usage metering, invoice generation |
 | **Email notifications** | 1 wk | Frontend page exists at `/dashboard/notifications`; needs backend email service (SendGrid/SES) + in-app notification store |
 | **Backup / restore** | 1 wk | Frontend page exists at `/dashboard/backup`; needs PostgreSQL dump + ChromaDB export logic |
-| **True RTCPeerConnection audio** | 1 wk | Current implementation sends audio via Socket.IO binary; upgrade to RTCPeerConnection with STUN/TURN for lower latency |
-| **Rate limit configuration UI** | 2 days | Rate limiting works but limits are hardcoded; needs admin API to configure per-tenant limits |
+| **True RTCPeerConnection audio** | 1 wk | Current WebSocket sends audio as binary frames; upgrade to RTCPeerConnection with STUN/TURN for lower latency |
+| **Rate limit configuration UI** | 2 days | SlowAPI rate limiting works but limits are hardcoded; needs admin API to configure per-tenant limits |
 | **Multi-language detection** | 3 days | Agent `language` field exists; add client language detection + prompt translation |
 | **Automated testing** | 2 wk | No test suite for backend routes or frontend pages; need unit + integration tests |
 | **CI/CD pipeline** | 3 days | No GitHub Actions / deployment pipeline; need build → test → deploy automation |
-| **Monitoring / alerting** | 3 days | One TODO for external logging service; need structured logging, health checks, uptime monitoring |
+| **Monitoring / alerting** | 3 days | Need structured logging, health checks, uptime monitoring |
 
 ### Infrastructure for Scale
 
 | Item | Description |
 |---|---|
-| Kubernetes / ECS deployment | Currently runs as 4 separate processes; needs container orchestration for HA |
+| Kubernetes / ECS deployment | Currently runs as Docker Compose + Make targets; needs container orchestration for HA |
 | PostgreSQL read replicas | Single instance; needs read replicas for analytics queries at scale |
 | ChromaDB clustering | Single instance; needs sharding strategy for 100+ tenants |
 | Redis Sentinel / Cluster | Single instance; needs HA for conversation state |
 | CDN for TTS audio | MinIO-cached TTS audio should be fronted by CloudFront/CDN |
 | Secrets management | Credentials in `.env` files; need AWS Secrets Manager / Vault |
-| SSL/TLS termination | Needs reverse proxy (nginx/ALB) with TLS certificates |
+| SSL/TLS termination | Needs reverse proxy (nginx/Caddy) with TLS certificates |
 
 ### What Works End-to-End Today
 
-If you start all 4 services (`docker-compose up -d`, Express backend, FastAPI ingestion, frontend):
+If you start all services (`make docker-up && make start`):
 
-1. Sign up via Clerk → tenant + user created automatically
+1. Sign up / log in via Django auth → tenant + user created automatically
 2. Complete 7-step onboarding → configure company, create agent, upload documents, set voice, deploy
-3. Documents are scraped/processed → embedded → stored in `tenant_{id}` ChromaDB collection
+3. Documents are scraped/processed (Docling + PaddleOCR + trafilatura) → embedded → stored in `tenant_{id}` ChromaDB collection
 4. Ask questions via web chat → full 5-layer context injection → policy-scored retrieval → 7-section prompt → Groq LLM → text response
-5. Call via Twilio → same pipeline → Chatterbox TTS → voice response → conversation loops
-6. Call via WebRTC widget → embeddable `<script>` tag → MediaRecorder captures audio → server-side Groq Whisper STT → RAG pipeline → Chatterbox TTS → audio response played back
+5. Call via Twilio → same pipeline → Edge TTS → voice response → conversation loops
+6. Call via WebSocket widget → embeddable `<script>` tag → MediaRecorder captures audio → server-side Groq Whisper STT → RAG pipeline → Edge TTS → audio response played back
 7. **Integrate via REST API** → any third-party website can create sessions, send messages, and get AI responses via 4 public endpoints per agent — no embed script needed
 8. Agent remembers conversation context → last 20 turns from Redis included in every LLM call
 9. Per-tenant model selection → each agent can use a different Groq model from the allowlist
 10. Flag bad calls → nightly extraction → admin reviews/edits ideal responses → approved examples injected as few-shot learning
 11. View real analytics → call counts, durations, success rates, agent comparisons from actual CallLog data
 12. Configure brands → brand voice, topic restrictions, policy rules applied at inference time
-13. Manage pipelines → create, configure stages, trigger execution, monitor status via admin API
+13. Explore data → interactive Data Explorer with knowledge base, call log, and agent data visualisation
 14. Browse interactive API docs → Scalar UI at `/api-docs` with full OpenAPI spec
+15. Filter audit logs → searchable, filterable audit trail with action-type badges and real-time refresh
 
 ---
 

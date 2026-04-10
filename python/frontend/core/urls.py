@@ -80,4 +80,12 @@ urlpatterns = [
     path("api/call-logs/<str:log_id>/flag/", api_proxy.call_log_flag, name="api_call_log_flag"),
     path("api/retraining/<str:example_id>/update/", api_proxy.retraining_update, name="api_retraining_update"),
     path("api/users/<str:user_id>/", api_proxy.user_detail_api, name="api_user_detail"),
+
+    # Data Explorer
+    path("dashboard/data-explorer/", pages.data_explorer, name="data_explorer"),
+    path("api/data-explorer/overview/", api_proxy.data_explorer_overview, name="api_data_explorer_overview"),
+    path("api/data-explorer/postgres/", api_proxy.data_explorer_postgres, name="api_data_explorer_postgres"),
+    path("api/data-explorer/chromadb/", api_proxy.data_explorer_chromadb, name="api_data_explorer_chromadb"),
+    path("api/data-explorer/redis/", api_proxy.data_explorer_redis, name="api_data_explorer_redis"),
+    path("api/audit/", api_proxy.audit_api, name="api_audit"),
 ]

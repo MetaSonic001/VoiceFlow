@@ -502,3 +502,54 @@ def user_detail_api(request, user_id):
         return JsonResponse(client.update_backend_user(user_id, _json_body(request)))
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)
+
+
+# ── Data Explorer ──────────────────────────────────────────────────────
+
+@login_required
+@require_http_methods(["GET"])
+def data_explorer_overview(request):
+    try:
+        return JsonResponse(get_client(request).get_data_overview())
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
+@require_http_methods(["GET"])
+def data_explorer_postgres(request):
+    try:
+        return JsonResponse(get_client(request).get_data_postgres())
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
+@require_http_methods(["GET"])
+def data_explorer_chromadb(request):
+    try:
+        return JsonResponse(get_client(request).get_data_chromadb())
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
+@require_http_methods(["GET"])
+def data_explorer_redis(request):
+    try:
+        return JsonResponse(get_client(request).get_data_redis())
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+# ── Audit ──────────────────────────────────────────────────────────────
+
+@login_required
+@require_http_methods(["GET"])
+def audit_api(request):
+    try:
+        limit = int(request.GET.get("limit", 50))
+        offset = int(request.GET.get("offset", 0))
+        return JsonResponse(get_client(request).get_audit_logs(limit=limit, offset=offset))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)

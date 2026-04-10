@@ -77,14 +77,33 @@
       <!-- Step 5: Voice -->
       <div x-show="step===5" x-transition>
         <h2 class="text-2xl font-bold mb-2">Choose a voice</h2>
-        <p class="text-gray-500 text-sm mb-6">Select a voice for your AI agent or clone a custom one.</p>
-        <div x-data="{presets:[], loading:true}" x-init="fetch('/api/voice/presets/').then(r=>r.json()).then(d=>{presets=d.voices||[];loading=false}).catch(()=>loading=false)">
+        <p class="text-gray-500 text-sm mb-6">Select a voice for your AI agent. Click the play button to hear a sample.</p>
+        <div x-data="{presets:[], loading:true, playingId:null, previewAudio:null}" x-init="fetch('/api/voice/presets/').then(r=>r.json()).then(d=>{presets=d.voices||[];loading=false}).catch(()=>loading=false)">
           <div x-show="loading" class="text-center text-gray-400 py-8">Loading voices…</div>
           <div x-show="!loading" class="grid sm:grid-cols-3 gap-3">
             <template x-for="v in presets" :key="v.id">
-              <div @click="selectedVoice=v.id" :class="selectedVoice===v.id ? 'border-blue-500 ring-2 ring-blue-200' : 'border-gray-200'" class="border rounded-xl p-3 cursor-pointer hover:shadow-sm transition-all text-center">
+              <div @click="
+                selectedVoice=v.id;
+                if (previewAudio) { previewAudio.pause(); previewAudio = null; }
+                if (playingId === v.id) { playingId = null; return; }
+                playingId = v.id;
+                fetch('/api/tts/preview/', {method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken':CSRF}, body:JSON.stringify({voiceId:v.id})})
+                  .then(r=>r.json()).then(d=>{
+                    if(d.audioUrl){
+                      previewAudio = new Audio(d.audioUrl);
+                      previewAudio.onended = ()=>{ playingId=null; previewAudio=null; };
+                      previewAudio.play();
+                    } else { playingId=null; }
+                  }).catch(()=>playingId=null);
+              " :class="selectedVoice===v.id ? 'border-blue-500 ring-2 ring-blue-200' : 'border-gray-200'" class="border rounded-xl p-3 cursor-pointer hover:shadow-sm transition-all text-center">
                 <div class="text-sm font-medium" x-text="v.name"></div>
                 <div class="text-xs text-gray-400" x-text="v.gender || 'Neural'"></div>
+                <div class="text-[10px] text-gray-300 mb-2" x-text="v.style || ''"></div>
+                <div class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium transition-all" :class="playingId===v.id ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-500'">
+                  <svg x-show="playingId!==v.id" class="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                  <svg x-show="playingId===v.id" class="w-3 h-3 animate-pulse" fill="currentColor" viewBox="0 0 24 24"><rect x="4" y="4" width="4" height="16" rx="1"/><rect x="10" y="7" width="4" height="10" rx="1"/><rect x="16" y="2" width="4" height="20" rx="1"/></svg>
+                  <span x-text="playingId===v.id ? 'Playing…' : 'Click to hear'"></span>
+                </div>
               </div>
             </template>
           </div>
@@ -98,7 +117,18 @@
         <p class="text-gray-500 text-sm mb-6">Where will your agent be available?</p>
         <div class="space-y-3">
           <label class="flex items-center gap-3 p-4 border rounded-xl cursor-pointer hover:bg-gray-50"><input type="checkbox" x-model="channels.web" class="rounded border-gray-300 text-blue-600"><div><div class="font-medium text-sm">Web Chat Widget</div><div class="text-xs text-gray-400">Embed on your website</div></div></label>
-          <label class="flex items-center gap-3 p-4 border rounded-xl cursor-pointer hover:bg-gray-50"><input type="checkbox" x-model="channels.phone" class="rounded border-gray-300 text-blue-600"><div><div class="font-medium text-sm">Phone (Twilio)</div><div class="text-xs text-gray-400">Inbound &amp; outbound calls</div></div></label>
+          <div>
+            <label class="flex items-center gap-3 p-4 border rounded-xl cursor-pointer hover:bg-gray-50" :class="channels.phone ? 'border-blue-200 bg-blue-50/30' : ''">
+              <input type="checkbox" x-model="channels.phone" class="rounded border-gray-300 text-blue-600">
+              <div><div class="font-medium text-sm">Phone (Twilio)</div><div class="text-xs text-gray-400">Inbound &amp; outbound calls — bring your own Twilio credentials</div></div>
+            </label>
+            <div x-show="channels.phone" x-transition class="mt-2 ml-7 p-4 bg-gray-50 rounded-xl border border-gray-200 space-y-3">
+              <p class="text-xs text-gray-500 mb-2">Enter your Twilio credentials. You can find these in your <a href="https://console.twilio.com" target="_blank" class="text-blue-600 underline">Twilio Console</a>.</p>
+              <div><label class="block text-xs font-medium text-gray-600 mb-1">Account SID</label><input x-model="twilioConfig.accountSid" type="text" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"></div>
+              <div><label class="block text-xs font-medium text-gray-600 mb-1">Auth Token</label><input x-model="twilioConfig.authToken" type="password" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="Your Twilio Auth Token"></div>
+              <div><label class="block text-xs font-medium text-gray-600 mb-1">Phone Number</label><input x-model="twilioConfig.phoneNumber" type="tel" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="+1234567890"></div>
+            </div>
+          </div>
           <label class="flex items-center gap-3 p-4 border rounded-xl cursor-pointer hover:bg-gray-50"><input type="checkbox" x-model="channels.whatsapp" class="rounded border-gray-300 text-blue-600"><div><div class="font-medium text-sm">WhatsApp</div><div class="text-xs text-gray-400">Messaging via WhatsApp Business</div></div></label>
           <label class="flex items-center gap-3 p-4 border rounded-xl cursor-pointer hover:bg-gray-50"><input type="checkbox" x-model="channels.api" class="rounded border-gray-300 text-blue-600"><div><div class="font-medium text-sm">REST API</div><div class="text-xs text-gray-400">Integrate programmatically</div></div></label>
         </div>
@@ -107,17 +137,48 @@
       <!-- Step 7: Test & Deploy -->
       <div x-show="step===7" x-transition>
         <h2 class="text-2xl font-bold mb-2">Test your agent</h2>
-        <p class="text-gray-500 text-sm mb-6">Try a quick conversation then deploy.</p>
-        <div class="bg-white border rounded-xl p-6 mb-4">
-          <div class="flex flex-col gap-3 min-h-[200px] mb-4" id="testChat">
+        <p class="text-gray-500 text-sm mb-6">Try a quick conversation — type or talk.</p>
+        <div class="bg-white border rounded-xl p-6 mb-4 relative">
+          <!-- Mode toggle -->
+          <div class="flex items-center justify-end mb-3">
+            <button @click="testVoiceMode=!testVoiceMode" :class="testVoiceMode ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-600'" class="p-2 rounded-lg hover:opacity-80 flex items-center gap-1.5 text-xs font-medium" :title="testVoiceMode ? 'Switch to text' : 'Switch to voice'">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>
+              <span x-text="testVoiceMode ? 'Voice mode' : 'Text mode'"></span>
+            </button>
+          </div>
+
+          <!-- Messages -->
+          <div class="flex flex-col gap-3 min-h-[200px] max-h-[300px] overflow-y-auto mb-4" id="testChat" x-ref="testChatContainer">
             <div class="self-start bg-gray-100 rounded-lg px-4 py-2 text-sm max-w-xs" x-text="agentConfig.firstMessage || 'Hello! How can I help?'"></div>
             <template x-for="(msg,i) in testMessages" :key="i">
-              <div :class="msg.role==='user' ? 'self-end bg-blue-600 text-white' : 'self-start bg-gray-100'" class="rounded-lg px-4 py-2 text-sm max-w-xs" x-text="msg.text"></div>
+              <div :class="msg.role==='user' ? 'self-end bg-blue-600 text-white' : 'self-start bg-gray-100'" class="rounded-lg px-4 py-2 text-sm max-w-xs">
+                <span x-text="msg.text"></span>
+                <div x-show="msg.audioUrl" class="mt-1"><audio :src="msg.audioUrl" controls class="h-7 w-full"></audio></div>
+              </div>
             </template>
+            <div x-show="testTyping" class="self-start bg-gray-100 rounded-lg px-4 py-2">
+              <div class="flex gap-1"><span class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"></span><span class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style="animation-delay:.15s"></span><span class="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style="animation-delay:.3s"></span></div>
+            </div>
           </div>
-          <div class="flex gap-2">
-            <input x-model="testInput" @keydown.enter="sendTest()" class="flex-1 border rounded-lg px-3 py-2 text-sm" placeholder="Type a message…">
-            <button @click="sendTest()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm">Send</button>
+
+          <!-- Text input -->
+          <div x-show="!testVoiceMode" class="flex gap-2">
+            <input x-model="testInput" @keydown.enter="sendTest()" class="flex-1 border rounded-lg px-3 py-2 text-sm" placeholder="Type a message…" :disabled="testTyping">
+            <button @click="sendTest()" :disabled="!testInput.trim() || testTyping" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm disabled:opacity-50">Send</button>
+          </div>
+
+          <!-- Voice input -->
+          <div x-show="testVoiceMode" class="flex flex-col items-center py-4">
+            <div :class="testRecording ? 'scale-110 bg-red-100' : testTyping ? 'bg-yellow-50' : 'bg-gray-100'" class="w-24 h-24 rounded-full flex items-center justify-center transition-all duration-300 relative">
+              <div x-show="testRecording" class="absolute inset-0 rounded-full bg-red-200 animate-ping opacity-30"></div>
+              <div x-show="testTyping && !testRecording" class="absolute inset-0 rounded-full bg-yellow-200 animate-pulse opacity-30"></div>
+              <svg class="w-10 h-10" :class="testRecording ? 'text-red-500' : testTyping ? 'text-yellow-500' : 'text-gray-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>
+            </div>
+            <p class="mt-3 text-gray-500 text-sm font-medium" x-text="testRecording ? '🔴 Recording… click to stop' : testTyping ? '⏳ Agent is thinking…' : '🎙️ Click to start talking'"></p>
+            <p class="text-gray-400 text-[10px] mt-1">Continuous conversation — speak, get a reply, speak again</p>
+            <button @click="testRecording ? stopTestRecording() : startTestRecording()" :disabled="testTyping" class="mt-3 px-8 py-3 rounded-full text-white text-sm font-medium disabled:opacity-50 transition-all" :class="testRecording ? 'bg-red-500 hover:bg-red-600 scale-105' : 'bg-blue-600 hover:bg-blue-700'">
+              <span x-text="testRecording ? '⏹ Stop Recording' : '🎤 Start Recording'"></span>
+            </button>
           </div>
         </div>
         <button @click="deployAgent()" :disabled="deploying" class="w-full py-3 bg-green-600 text-white rounded-xl font-semibold hover:bg-green-700 disabled:opacity-50" x-text="deploying ? 'Deploying…' : '🚀 Deploy Agent'"></button>
@@ -145,7 +206,10 @@ function onboardingApp() {
     knowledgeFile: null, knowledgeUrl: '',
     selectedVoice: '',
     channels: {web:true, phone:false, whatsapp:false, api:false},
+    twilioConfig: {accountSid:'', authToken:'', phoneNumber:''},
     testMessages: [], testInput: '',
+    testVoiceMode: false, testRecording: false, testTyping: false,
+    testMediaRecorder: null, testAudioChunks: [],
     createdAgentId: null,
 
     async nextStep() {
@@ -181,9 +245,13 @@ function onboardingApp() {
             await apiFetch(`/api/agents/${this.createdAgentId}/`, {method:'PUT', json:{voiceType: this.selectedVoice}});
           }
         } else if (this.step === 6) {
-          // Save channel selections to the agent
+          // Save channel selections + Twilio credentials to the agent
           if (this.createdAgentId) {
-            await apiFetch(`/api/agents/${this.createdAgentId}/`, {method:'PUT', json:{channels: this.channels}});
+            const payload = {channels: this.channels};
+            if (this.channels.phone && this.twilioConfig.accountSid) {
+              payload.twilioConfig = this.twilioConfig;
+            }
+            await apiFetch(`/api/agents/${this.createdAgentId}/`, {method:'PUT', json: payload});
           }
         }
       } catch(e) { console.error(e); }
@@ -196,14 +264,103 @@ function onboardingApp() {
       const msg = this.testInput.trim();
       this.testInput = '';
       this.testMessages.push({role:'user', text:msg});
+      this.testTyping = true;
+      this.$nextTick(()=>this.scrollTestChat());
       try {
         const d = await apiFetch('/api/chat/', {method:'POST', json:{
           agentId: this.createdAgentId || '', message: msg, sessionId: 'onboarding-test',
         }});
-        this.testMessages.push({role:'agent', text: d.response || d.reply || 'No response'});
+        const reply = d.response || d.reply || 'No response';
+        this.testMessages.push({role:'agent', text: reply});
+        this.speakTestResponse(reply);
       } catch(e) {
         this.testMessages.push({role:'agent', text:'Error: could not reach agent'});
       }
+      this.testTyping = false;
+      this.$nextTick(()=>this.scrollTestChat());
+    },
+
+    async startTestRecording() {
+      if (this.testRecording || this.testTyping) return;
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+        this.testMediaRecorder = new MediaRecorder(stream, {mimeType:'audio/webm'});
+        this.testAudioChunks = [];
+        this.testMediaRecorder.ondataavailable = e => { if(e.data.size>0) this.testAudioChunks.push(e.data); };
+        this.testMediaRecorder.onstop = () => {
+          stream.getTracks().forEach(t=>t.stop());
+          const blob = new Blob(this.testAudioChunks, {type:'audio/webm'});
+          this.sendTestAudio(blob);
+        };
+        this.testMediaRecorder.start();
+        this.testRecording = true;
+      } catch(e) { if(typeof showToast==='function') showToast('Microphone access denied','error'); }
+    },
+
+    stopTestRecording() {
+      if (this.testMediaRecorder && this.testRecording) {
+        this.testMediaRecorder.stop();
+        this.testRecording = false;
+      }
+    },
+
+    async sendTestAudio(blob) {
+      this.testMessages.push({role:'user', text:'🎙️ Voice message'});
+      this.testTyping = true;
+      this.$nextTick(()=>this.scrollTestChat());
+      try {
+        const fd = new FormData();
+        fd.append('audio', blob, 'recording.webm');
+        fd.append('agentId', this.createdAgentId || '');
+        fd.append('sessionId', 'onboarding-test');
+        const r = await fetch('/api/audio/', {
+          method:'POST', body:fd, headers:{'X-CSRFToken': CSRF},
+        });
+        const d = await r.json();
+        const transcript = d.transcript || '';
+        const reply = d.response || d.reply || 'No response';
+        if (transcript) {
+          const lastUser = [...this.testMessages].reverse().find(m=>m.role==='user');
+          if (lastUser) lastUser.text = transcript;
+        }
+        this.testMessages.push({role:'agent', text: reply});
+        this.speakTestResponse(reply);
+      } catch(e) {
+        this.testMessages.push({role:'agent', text:'Error processing audio'});
+      }
+      this.testTyping = false;
+      this.$nextTick(()=>this.scrollTestChat());
+    },
+
+    async speakTestResponse(text) {
+      try {
+        const r = await fetch('/api/tts/', {
+          method:'POST',
+          headers:{'Content-Type':'application/json','X-CSRFToken': CSRF},
+          body:JSON.stringify({text, voiceId: this.selectedVoice || ''}),
+        });
+        if (r.ok) {
+          const data = await r.json();
+          if (data.audioUrl) {
+            const audio = new Audio(data.audioUrl);
+            const lastAgent = [...this.testMessages].reverse().find(m=>m.role==='agent');
+            if (lastAgent) lastAgent.audioUrl = data.audioUrl;
+            await new Promise(resolve => { audio.onended = resolve; audio.onerror = resolve; audio.play(); });
+          } else { this._testBrowserSpeak(text); }
+        } else { this._testBrowserSpeak(text); }
+      } catch(e) { this._testBrowserSpeak(text); }
+    },
+
+    _testBrowserSpeak(text) {
+      if ('speechSynthesis' in window) {
+        const u = new SpeechSynthesisUtterance(text);
+        speechSynthesis.speak(u);
+      }
+    },
+
+    scrollTestChat() {
+      const c = this.$refs.testChatContainer;
+      if (c) c.scrollTop = c.scrollHeight;
     },
 
     async deployAgent() {

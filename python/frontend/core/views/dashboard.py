@@ -45,7 +45,9 @@ def agent_detail(request, agent_id):
             {"id": "llama-3.3-70b-versatile", "name": "Llama 3.3 70B Versatile"},
             {"id": "llama-3.1-8b-instant", "name": "Llama 3.1 8B Instant"},
         ]
+    import json
     return render(request, "agents/detail.html", {
         "agent": agent,
+        "agent_json": json.dumps(agent, default=str),
         "models_list": models_list,
     })

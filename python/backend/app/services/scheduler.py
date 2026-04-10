@@ -1,11 +1,11 @@
 """
 Retraining scheduler — Patent Claim 7.
-Nightly cron job that processes approved retraining examples:
-1. Finds approved RetrainingExample rows
-2. Embeds the ideal Q/A pairs into ChromaDB
-3. Marks them as retrained
-4. Creates notification for the tenant
+Nightly cron job that:
+1. Extracts Q/A pairs from flagged call logs → creates RetrainingExample records
+2. Embeds approved RetrainingExample ideal Q/A pairs into ChromaDB
+3. Marks them as retrained and creates tenant notifications
 """
+import json
 import logging
 from datetime import datetime, timezone
 
@@ -13,11 +13,67 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import select, update
 
 from app.database import AsyncSessionLocal
-from app.models import RetrainingExample, Agent
+from app.models import RetrainingExample, Agent, CallLog
 
 logger = logging.getLogger("voiceflow.scheduler")
 
 scheduler = AsyncIOScheduler()
+
+
+async def extract_flagged_call_logs():
+    """Step 1: Parse flagged call transcripts into pending RetrainingExample rows."""
+    logger.info("[scheduler] Extracting Q/A pairs from flagged call logs")
+    created = 0
+
+    async with AsyncSessionLocal() as db:
+        try:
+            result = await db.execute(
+                select(CallLog).where(
+                    CallLog.flaggedForRetraining.is_(True),
+                    CallLog.retrained.is_(False),
+                )
+            )
+            flagged_logs = result.scalars().all()
+
+            if not flagged_logs:
+                logger.info("[scheduler] No flagged call logs to process")
+                return 0
+
+            for log in flagged_logs:
+                try:
+                    transcript = json.loads(log.transcript) if isinstance(log.transcript, str) else log.transcript
+                    if isinstance(transcript, list):
+                        for i in range(len(transcript)):
+                            turn = transcript[i]
+                            if turn.get("role") == "user" and i + 1 < len(transcript):
+                                next_turn = transcript[i + 1]
+                                if next_turn.get("role") == "assistant":
+                                    user_query = turn.get("content", "").strip()
+                                    bad_response = next_turn.get("content", "").strip()
+                                    if user_query and bad_response:
+                                        example = RetrainingExample(
+                                            tenantId=log.tenantId,
+                                            agentId=log.agentId,
+                                            callLogId=log.id,
+                                            userQuery=user_query,
+                                            badResponse=bad_response,
+                                            idealResponse=bad_response,
+                                            status="pending",
+                                        )
+                                        db.add(example)
+                                        created += 1
+                except Exception:
+                    pass
+                log.retrained = True
+
+            await db.commit()
+            logger.info(f"[scheduler] Extracted {created} Q/A pairs from {len(flagged_logs)} flagged calls")
+
+        except Exception:
+            logger.exception("[scheduler] Flagged call extraction failed")
+            await db.rollback()
+
+    return created
 
 
 async def retrain_approved_examples():
@@ -114,10 +170,18 @@ async def retrain_approved_examples():
             await db.rollback()
 
 
+async def nightly_retraining_pipeline():
+    """Full nightly pipeline: extract flagged calls → embed approved examples."""
+    logger.info("[scheduler] ===== Nightly retraining pipeline started =====")
+    extracted = await extract_flagged_call_logs()
+    await retrain_approved_examples()
+    logger.info(f"[scheduler] ===== Nightly pipeline done: {extracted} Q/A extracted =====")
+
+
 def start_scheduler():
     """Start the APScheduler with nightly retraining cron job."""
     scheduler.add_job(
-        retrain_approved_examples,
+        nightly_retraining_pipeline,
         trigger="cron",
         hour=2,
         minute=0,
@@ -125,7 +189,7 @@ def start_scheduler():
         replace_existing=True,
     )
     scheduler.start()
-    logger.info("[scheduler] APScheduler started — retraining runs nightly at 02:00")
+    logger.info("[scheduler] APScheduler started — retraining pipeline runs nightly at 02:00")
 
 
 def stop_scheduler():

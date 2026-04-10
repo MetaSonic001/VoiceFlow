@@ -1,0 +1,299 @@
+{% extends "base_dashboard.html" %}
+{% block title %}Data Explorer — VoiceFlow AI{% endblock %}
+{% block content %}
+<div x-data="dataExplorer()" x-init="loadOverview()">
+  <!-- Header -->
+  <div class="mb-8 flex items-center justify-between">
+    <div>
+      <h1 class="text-2xl font-bold">Data Explorer</h1>
+      <p class="text-gray-500 text-sm mt-1">Visualise what's stored in Postgres, ChromaDB & Redis</p>
+    </div>
+    <button @click="loadOverview()" class="text-sm text-indigo-600 hover:underline flex items-center gap-1">
+      <svg class="w-4 h-4" :class="loading && 'animate-spin'" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+      Refresh
+    </button>
+  </div>
+
+  <!-- Overview cards -->
+  <div class="grid md:grid-cols-4 gap-4 mb-8">
+    <div class="bg-white rounded-xl border p-5">
+      <div class="flex items-center gap-2 text-sm text-gray-500"><div class="w-2 h-2 rounded-full bg-blue-500"></div>Postgres</div>
+      <div class="mt-2 space-y-1">
+        <template x-for="[k,v] in Object.entries(overview.postgres || {})" :key="k">
+          <div class="flex justify-between text-sm"><span class="text-gray-600 capitalize" x-text="k.replace('_',' ')"></span><span class="font-semibold" x-text="v"></span></div>
+        </template>
+      </div>
+    </div>
+    <div class="bg-white rounded-xl border p-5">
+      <div class="flex items-center gap-2 text-sm text-gray-500"><div class="w-2 h-2 rounded-full bg-green-500"></div>ChromaDB</div>
+      <div class="text-2xl font-bold mt-2" x-text="overview.chromadb?.total_chunks ?? '—'"></div>
+      <div class="text-xs text-gray-400">total chunks</div>
+      <div class="text-sm text-gray-600 mt-1" x-text="(overview.chromadb?.collections ?? 0)+' collections'"></div>
+    </div>
+    <div class="bg-white rounded-xl border p-5">
+      <div class="flex items-center gap-2 text-sm text-gray-500"><div class="w-2 h-2 rounded-full bg-red-500"></div>Redis</div>
+      <div class="text-2xl font-bold mt-2" x-text="overview.redis?.keys ?? '—'"></div>
+      <div class="text-xs text-gray-400">total keys</div>
+      <div class="mt-1 space-y-0.5 text-sm text-gray-600">
+        <div x-text="(overview.redis?.jobs??0)+' jobs'"></div>
+        <div x-text="(overview.redis?.bm25_indexes??0)+' BM25 indexes'"></div>
+        <div x-text="(overview.redis?.conversations??0)+' conversations'"></div>
+      </div>
+    </div>
+    <div class="bg-white rounded-xl border p-5">
+      <div class="flex items-center gap-2 text-sm text-gray-500"><div class="w-2 h-2 rounded-full bg-purple-500"></div>Quick Stats</div>
+      <div class="mt-2 space-y-1 text-sm">
+        <div class="flex justify-between"><span class="text-gray-600">Agents</span><span class="font-semibold" x-text="overview.postgres?.agents ?? 0"></span></div>
+        <div class="flex justify-between"><span class="text-gray-600">Documents</span><span class="font-semibold" x-text="overview.postgres?.documents ?? 0"></span></div>
+        <div class="flex justify-between"><span class="text-gray-600">Call Logs</span><span class="font-semibold" x-text="overview.postgres?.call_logs ?? 0"></span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab navigation -->
+  <div class="flex border-b mb-6">
+    <template x-for="t in ['postgres','chromadb','redis']" :key="t">
+      <button @click="switchTab(t)" class="px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition"
+              :class="tab===t ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+              x-text="t==='postgres'?'PostgreSQL':t==='chromadb'?'ChromaDB':'Redis'"></button>
+    </template>
+  </div>
+
+  <!-- Loading -->
+  <div x-show="tabLoading" class="flex items-center justify-center py-12">
+    <svg class="animate-spin h-8 w-8 text-indigo-500" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+  </div>
+
+  <!-- Postgres Tab -->
+  <div x-show="tab==='postgres' && !tabLoading">
+    <!-- Tenant -->
+    <template x-if="pg.tenant">
+      <div class="bg-white rounded-xl border p-5 mb-6">
+        <h3 class="font-semibold mb-3">Tenant</h3>
+        <div class="grid md:grid-cols-3 gap-4 text-sm">
+          <div><span class="text-gray-500">ID:</span> <span class="font-mono text-xs" x-text="pg.tenant.id"></span></div>
+          <div><span class="text-gray-500">Name:</span> <span class="font-medium" x-text="pg.tenant.name"></span></div>
+          <div><span class="text-gray-500">Domain:</span> <span x-text="pg.tenant.domain || '—'"></span></div>
+          <div><span class="text-gray-500">Active:</span> <span :class="pg.tenant.isActive?'text-green-600':'text-red-600'" x-text="pg.tenant.isActive?'Yes':'No'"></span></div>
+          <div><span class="text-gray-500">Created:</span> <span x-text="pg.tenant.createdAt"></span></div>
+        </div>
+      </div>
+    </template>
+
+    <!-- Agents table -->
+    <div class="bg-white rounded-xl border p-5 mb-6">
+      <h3 class="font-semibold mb-3">Agents (<span x-text="pg.agents?.length ?? 0"></span>)</h3>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm" x-show="pg.agents?.length">
+          <thead><tr class="border-b text-left text-gray-500">
+            <th class="pb-2 pr-4">Name</th><th class="pb-2 pr-4">Status</th><th class="pb-2 pr-4">Voice</th><th class="pb-2 pr-4">Calls</th><th class="pb-2 pr-4">Chats</th><th class="pb-2">Created</th>
+          </tr></thead>
+          <tbody>
+            <template x-for="a in pg.agents || []" :key="a.id">
+              <tr class="border-b border-gray-50 hover:bg-gray-50">
+                <td class="py-2 pr-4 font-medium" x-text="a.name"></td>
+                <td class="py-2 pr-4"><span class="px-2 py-0.5 rounded-full text-xs" :class="a.status==='active'?'bg-green-100 text-green-700':a.status==='paused'?'bg-yellow-100 text-yellow-700':'bg-gray-100 text-gray-600'" x-text="a.status"></span></td>
+                <td class="py-2 pr-4 text-gray-600" x-text="a.voiceType || '—'"></td>
+                <td class="py-2 pr-4" x-text="a.totalCalls"></td>
+                <td class="py-2 pr-4" x-text="a.totalChats"></td>
+                <td class="py-2 text-gray-400 text-xs" x-text="a.createdAt"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+        <p x-show="!pg.agents?.length" class="text-gray-400 text-sm">No agents found</p>
+      </div>
+    </div>
+
+    <!-- Documents table -->
+    <div class="bg-white rounded-xl border p-5 mb-6">
+      <h3 class="font-semibold mb-3">Documents (<span x-text="pg.documents?.length ?? 0"></span>)</h3>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm" x-show="pg.documents?.length">
+          <thead><tr class="border-b text-left text-gray-500">
+            <th class="pb-2 pr-4">Title</th><th class="pb-2 pr-4">Status</th><th class="pb-2 pr-4">URL</th><th class="pb-2 pr-4">Agent</th><th class="pb-2">Created</th>
+          </tr></thead>
+          <tbody>
+            <template x-for="d in pg.documents || []" :key="d.id">
+              <tr class="border-b border-gray-50 hover:bg-gray-50">
+                <td class="py-2 pr-4 font-medium max-w-xs truncate" x-text="d.title || d.s3Path || '—'"></td>
+                <td class="py-2 pr-4"><span class="px-2 py-0.5 rounded-full text-xs" :class="d.status==='processed'?'bg-green-100 text-green-700':'bg-yellow-100 text-yellow-700'" x-text="d.status"></span></td>
+                <td class="py-2 pr-4 text-xs text-blue-600 max-w-xs truncate"><a :href="d.url" target="_blank" x-text="d.url || '—'" class="hover:underline"></a></td>
+                <td class="py-2 pr-4 text-xs font-mono" x-text="(d.agentId||'—').substring(0,8)"></td>
+                <td class="py-2 text-gray-400 text-xs" x-text="d.createdAt"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+        <p x-show="!pg.documents?.length" class="text-gray-400 text-sm">No documents found</p>
+      </div>
+    </div>
+
+    <!-- Users & Call Logs side-by-side -->
+    <div class="grid md:grid-cols-2 gap-6">
+      <div class="bg-white rounded-xl border p-5">
+        <h3 class="font-semibold mb-3">Users (<span x-text="pg.users?.length ?? 0"></span>)</h3>
+        <template x-for="u in pg.users || []" :key="u.id">
+          <div class="flex items-center gap-3 py-2 border-b border-gray-50 last:border-0">
+            <div class="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 text-xs font-bold" x-text="(u.name||u.email||'?')[0].toUpperCase()"></div>
+            <div><div class="text-sm font-medium" x-text="u.name || u.email"></div><div class="text-xs text-gray-400" x-text="u.role"></div></div>
+          </div>
+        </template>
+        <p x-show="!pg.users?.length" class="text-gray-400 text-sm">No users found</p>
+      </div>
+      <div class="bg-white rounded-xl border p-5">
+        <h3 class="font-semibold mb-3">Recent Call Logs (<span x-text="pg.callLogs?.length ?? 0"></span>)</h3>
+        <template x-for="l in pg.callLogs || []" :key="l.id">
+          <div class="py-2 border-b border-gray-50 last:border-0 text-sm">
+            <div class="flex justify-between"><span class="text-gray-600" x-text="l.callerPhone || 'Unknown'"></span><span class="text-xs text-gray-400" x-text="l.createdAt"></span></div>
+            <div class="text-xs text-gray-400 mt-0.5"><span x-text="(l.durationSeconds||0)+'s'"></span> · <span :class="l.flaggedForRetraining?'text-orange-600':'text-gray-400'" x-text="l.flaggedForRetraining?'Flagged':'OK'"></span></div>
+          </div>
+        </template>
+        <p x-show="!pg.callLogs?.length" class="text-gray-400 text-sm">No call logs found</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ChromaDB Tab -->
+  <div x-show="tab==='chromadb' && !tabLoading">
+    <template x-if="chroma.error">
+      <div class="bg-red-50 border border-red-200 rounded-xl p-4 text-red-700 text-sm" x-text="chroma.error"></div>
+    </template>
+    <template x-for="col in chroma.collections || []" :key="col.name">
+      <div class="bg-white rounded-xl border p-5 mb-6">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="font-semibold flex items-center gap-2">
+            <div class="w-2 h-2 rounded-full bg-green-500"></div>
+            <span x-text="col.name"></span>
+          </h3>
+          <span class="text-sm text-gray-500" x-text="col.count+' chunks'"></span>
+        </div>
+        <div class="space-y-3">
+          <template x-for="s in col.samples || []" :key="s.id">
+            <div class="bg-gray-50 rounded-lg p-3 text-sm">
+              <div class="flex items-start justify-between mb-1">
+                <span class="text-xs font-mono text-gray-400" x-text="s.id"></span>
+                <div class="flex flex-wrap gap-1">
+                  <template x-for="[mk,mv] in Object.entries(s.metadata || {})" :key="mk">
+                    <span class="px-1.5 py-0.5 bg-indigo-50 text-indigo-600 rounded text-xs" x-text="mk+': '+mv"></span>
+                  </template>
+                </div>
+              </div>
+              <p class="text-gray-700 whitespace-pre-wrap leading-relaxed" x-text="s.text"></p>
+            </div>
+          </template>
+        </div>
+        <p x-show="!col.samples?.length" class="text-gray-400 text-sm mt-2">No samples available</p>
+      </div>
+    </template>
+    <p x-show="!chroma.collections?.length && !chroma.error" class="text-gray-400 text-center py-8">No ChromaDB collections found</p>
+  </div>
+
+  <!-- Redis Tab -->
+  <div x-show="tab==='redis' && !tabLoading">
+    <template x-if="rd.error">
+      <div class="bg-red-50 border border-red-200 rounded-xl p-4 text-red-700 text-sm" x-text="rd.error"></div>
+    </template>
+
+    <!-- Jobs -->
+    <div class="bg-white rounded-xl border p-5 mb-6">
+      <h3 class="font-semibold mb-3">Jobs (<span x-text="rd.jobs?.length ?? 0"></span>)</h3>
+      <div class="space-y-2" x-show="rd.jobs?.length">
+        <template x-for="j in rd.jobs || []" :key="j.key">
+          <div class="bg-gray-50 rounded-lg p-3 text-sm flex items-center gap-4">
+            <span class="font-mono text-xs text-gray-500 min-w-0 truncate" x-text="j.key"></span>
+            <span class="px-2 py-0.5 rounded-full text-xs whitespace-nowrap"
+                  :class="j.status==='completed'?'bg-green-100 text-green-700':j.status==='processing'?'bg-blue-100 text-blue-700':j.status==='failed'?'bg-red-100 text-red-700':'bg-gray-100 text-gray-600'"
+                  x-text="j.status || 'unknown'"></span>
+            <template x-if="j.progress !== undefined">
+              <div class="flex items-center gap-2 flex-shrink-0">
+                <div class="w-24 h-2 bg-gray-200 rounded-full"><div class="h-2 bg-indigo-500 rounded-full" :style="'width:'+j.progress+'%'"></div></div>
+                <span class="text-xs text-gray-400" x-text="j.progress+'%'"></span>
+              </div>
+            </template>
+            <span class="text-xs text-gray-400 ml-auto whitespace-nowrap" x-text="j.ttl > 0 ? 'TTL: '+j.ttl+'s' : j.ttl === -1 ? 'No expiry' : ''"></span>
+          </div>
+        </template>
+      </div>
+      <p x-show="!rd.jobs?.length" class="text-gray-400 text-sm">No jobs found</p>
+    </div>
+
+    <!-- BM25 Indexes -->
+    <div class="bg-white rounded-xl border p-5 mb-6">
+      <h3 class="font-semibold mb-3">BM25 Indexes (<span x-text="rd.bm25_indexes?.length ?? 0"></span>)</h3>
+      <div class="space-y-2" x-show="rd.bm25_indexes?.length">
+        <template x-for="b in rd.bm25_indexes || []" :key="b.key">
+          <div class="bg-gray-50 rounded-lg p-3 text-sm flex items-center justify-between">
+            <span class="font-mono text-xs text-gray-500" x-text="b.key"></span>
+            <span class="text-sm" x-text="(b.doc_count||0)+' docs'"></span>
+          </div>
+        </template>
+      </div>
+      <p x-show="!rd.bm25_indexes?.length" class="text-gray-400 text-sm">No BM25 indexes found</p>
+    </div>
+
+    <!-- Conversations -->
+    <div class="bg-white rounded-xl border p-5 mb-6">
+      <h3 class="font-semibold mb-3">Conversations (<span x-text="rd.conversations?.length ?? 0"></span>)</h3>
+      <div class="space-y-1" x-show="rd.conversations?.length">
+        <template x-for="c in rd.conversations || []" :key="c.key">
+          <div class="text-sm text-gray-600 font-mono py-1 border-b border-gray-50 last:border-0" x-text="c.key"></div>
+        </template>
+      </div>
+      <p x-show="!rd.conversations?.length" class="text-gray-400 text-sm">No conversations found</p>
+    </div>
+
+    <!-- Other Keys -->
+    <div class="bg-white rounded-xl border p-5" x-show="rd.other_keys?.length">
+      <h3 class="font-semibold mb-3">Other Keys (<span x-text="rd.other_keys?.length ?? 0"></span>)</h3>
+      <div class="space-y-1">
+        <template x-for="o in rd.other_keys || []" :key="o.key">
+          <div class="flex items-center justify-between text-sm py-1 border-b border-gray-50 last:border-0">
+            <span class="font-mono text-xs text-gray-500" x-text="o.key"></span>
+            <span class="text-xs text-gray-400" x-text="o.type"></span>
+          </div>
+        </template>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function dataExplorer() {
+  return {
+    loading: false,
+    tabLoading: false,
+    tab: 'postgres',
+    overview: {},
+    pg: {},
+    chroma: {},
+    rd: {},
+
+    async apiFetch(url) {
+      const r = await fetch(url, {credentials:'same-origin'});
+      if (!r.ok) throw new Error('API error '+r.status);
+      return r.json();
+    },
+
+    async loadOverview() {
+      this.loading = true;
+      try { this.overview = await this.apiFetch('/api/data-explorer/overview/'); }
+      catch(e) { console.error('Overview error', e); }
+      this.loading = false;
+      this.switchTab(this.tab);
+    },
+
+    async switchTab(t) {
+      this.tab = t;
+      this.tabLoading = true;
+      try {
+        if (t === 'postgres') this.pg = await this.apiFetch('/api/data-explorer/postgres/');
+        else if (t === 'chromadb') this.chroma = await this.apiFetch('/api/data-explorer/chromadb/');
+        else if (t === 'redis') this.rd = await this.apiFetch('/api/data-explorer/redis/');
+      } catch(e) { console.error('Tab error', e); }
+      this.tabLoading = false;
+    },
+  };
+}
+</script>
+{% endblock %}

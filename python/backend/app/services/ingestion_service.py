@@ -309,6 +309,14 @@ async def scrape_company_website(base_url: str, max_pages: int = 20) -> list[dic
             import trafilatura
             text = trafilatura.extract(html, include_comments=False, include_tables=True) or ""
 
+            # Fallback: BeautifulSoup for JS-heavy or minimal pages
+            if not text or len(text.strip()) < 50:
+                from bs4 import BeautifulSoup
+                soup = BeautifulSoup(html, "html.parser")
+                for tag in soup(["script", "style", "nav", "footer", "header", "noscript"]):
+                    tag.decompose()
+                text = soup.get_text(separator="\n", strip=True)
+
             if text and len(text.strip()) > 50:
                 results.append({"url": url, "content": text.strip()})
 
@@ -504,12 +512,12 @@ async def ingest_file(
     job_id: str = None,
 ) -> dict:
     """
-    Full file ingestion pipeline:
+    Full file ingestion pipeline — incremental chunk storage.
     1. Save to temp file
     2. Parse with Docling (+ PaddleOCR for scans)
     3. Clean + chunk
-    4. Embed + store in ChromaDB
-    5. Build BM25 index
+    4. Embed + store chunks in batches to ChromaDB
+    5. Rebuild BM25 index
     """
     if job_id:
         _update_job_status(job_id, "processing", 10)
@@ -521,39 +529,42 @@ async def ingest_file(
         tmp_path = tmp.name
 
     try:
-        # Parse document (CPU-bound, run in thread pool)
         loop = asyncio.get_event_loop()
         if job_id:
-            _update_job_status(job_id, "processing", 30, None)
+            _update_job_status(job_id, "processing", 20, None)
 
         text = await loop.run_in_executor(
             _thread_pool, parse_document_with_docling, tmp_path
         )
 
         if not text or len(text.strip()) < 10:
+            if job_id:
+                _update_job_status(job_id, "completed", 100)
             return {"status": "empty", "chunks": 0, "message": "No text extracted from document"}
 
         if job_id:
-            _update_job_status(job_id, "processing", 50)
+            _update_job_status(job_id, "processing", 40)
 
-        # Clean
         text = clean_text(text)
-
-        # Chunk
         chunks = chunk_text(text, source=filename, metadata={
             "filename": filename,
             "content_type": mimetypes.guess_type(filename)[0] or "application/octet-stream",
         })
 
-        if job_id:
-            _update_job_status(job_id, "processing", 70)
-
-        # Store in ChromaDB (CPU-bound embedding)
-        stored = await loop.run_in_executor(
-            _thread_pool,
-            store_in_chromadb,
-            tenant_id, agent_id, chunks, "file_upload",
-        )
+        # Store chunks incrementally in batches of 20
+        total_stored = 0
+        batch = 20
+        for start in range(0, len(chunks), batch):
+            batch_chunks = chunks[start:start + batch]
+            stored = await loop.run_in_executor(
+                _thread_pool,
+                store_in_chromadb,
+                tenant_id, agent_id, batch_chunks, "file_upload",
+            )
+            total_stored += stored
+            if job_id:
+                progress = 40 + int(50 * min(start + batch, len(chunks)) / max(len(chunks), 1))
+                _update_job_status(job_id, "processing", progress)
 
         # Build BM25 index
         await loop.run_in_executor(
@@ -567,7 +578,7 @@ async def ingest_file(
 
         return {
             "status": "completed",
-            "chunks": stored,
+            "chunks": total_stored,
             "characters": len(text),
             "filename": filename,
         }
@@ -618,6 +629,12 @@ async def ingest_urls(
             total_chunks += stored
             processed += 1
 
+            # Rebuild BM25 every 3 URLs so search works incrementally
+            if processed % 3 == 0:
+                await loop.run_in_executor(
+                    _thread_pool, build_bm25_index, tenant_id, agent_id,
+                )
+
         except Exception as e:
             errors.append(f"{url}: {str(e)}")
 
@@ -625,7 +642,7 @@ async def ingest_urls(
             progress = 10 + int(80 * (i + 1) / len(urls))
             _update_job_status(job_id, "processing", progress)
 
-    # Build BM25 index after all URLs processed
+    # Final BM25 rebuild
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(
         _thread_pool,
@@ -652,50 +669,96 @@ async def ingest_company_website(
     max_pages: int = 20,
 ) -> dict:
     """
-    Crawl a company website and ingest all pages.
+    Crawl a company website and ingest pages incrementally.
+    Each page is stored in ChromaDB as soon as it's scraped — no waiting.
+    BM25 index is rebuilt after every 5 pages for near-realtime search.
     """
+    import httpx
+    from urllib.parse import urljoin, urlparse
+    from bs4 import BeautifulSoup
+
     if job_id:
         _update_job_status(job_id, "processing", 5)
 
-    pages = await scrape_company_website(website_url, max_pages=max_pages)
-
-    if not pages:
-        if job_id:
-            _update_job_status(job_id, "completed", 100)
-        return {"status": "completed", "pages": 0, "chunks": 0}
-
+    visited = set()
+    to_visit = [website_url]
+    base_domain = urlparse(website_url).netloc
     total_chunks = 0
-    for i, page in enumerate(pages):
-        text = clean_text(page["content"])
-        chunks = chunk_text(text, source=page["url"], metadata={"url": page["url"]})
+    pages_done = 0
+    loop = asyncio.get_event_loop()
 
-        if chunks:
-            loop = asyncio.get_event_loop()
-            stored = await loop.run_in_executor(
-                _thread_pool,
-                store_in_chromadb,
-                tenant_id, agent_id, chunks, "company_website",
-            )
-            total_chunks += stored
+    while to_visit and len(visited) < max_pages:
+        url = to_visit.pop(0)
+        if url in visited:
+            continue
+        visited.add(url)
+
+        try:
+            async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+                resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0 VoiceFlow Bot"})
+                resp.raise_for_status()
+                html = resp.text
+
+            import trafilatura
+            text = trafilatura.extract(html, include_comments=False, include_tables=True) or ""
+
+            # BeautifulSoup fallback for JS-heavy pages
+            if not text or len(text.strip()) < 50:
+                soup = BeautifulSoup(html, "html.parser")
+                for tag in soup(["script", "style", "nav", "footer", "header", "noscript"]):
+                    tag.decompose()
+                text = soup.get_text(separator="\n", strip=True)
+
+            if text and len(text.strip()) > 50:
+                text = clean_text(text)
+                chunks = chunk_text(text, source=url, metadata={"url": url})
+
+                if chunks:
+                    stored = await loop.run_in_executor(
+                        _thread_pool,
+                        store_in_chromadb,
+                        tenant_id, agent_id, chunks, "company_website",
+                    )
+                    total_chunks += stored
+                    logger.info(f"[ingestion] Stored {stored} chunks from {url}")
+
+                pages_done += 1
+                # Rebuild BM25 every 5 pages so search works incrementally
+                if pages_done % 5 == 0:
+                    await loop.run_in_executor(
+                        _thread_pool, build_bm25_index, tenant_id, agent_id,
+                    )
+
+            # Discover links on same domain
+            soup = BeautifulSoup(html, "html.parser")
+            for a in soup.find_all("a", href=True):
+                link = urljoin(url, a["href"])
+                parsed = urlparse(link)
+                if parsed.netloc == base_domain and link not in visited:
+                    path = parsed.path.lower()
+                    if not any(path.endswith(ext) for ext in (".pdf", ".jpg", ".png", ".zip", ".mp4", ".mp3")):
+                        to_visit.append(link.split("#")[0].split("?")[0])
+
+        except Exception:
+            continue
 
         if job_id:
-            progress = 5 + int(90 * (i + 1) / len(pages))
-            _update_job_status(job_id, "processing", progress)
+            progress = 5 + int(90 * len(visited) / max(max_pages, 1))
+            _update_job_status(job_id, "processing", min(progress, 95))
 
-    # Build BM25 index
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(
-        _thread_pool,
-        build_bm25_index,
-        tenant_id, agent_id,
-    )
+    # Final BM25 rebuild
+    if total_chunks > 0:
+        await loop.run_in_executor(
+            _thread_pool, build_bm25_index, tenant_id, agent_id,
+        )
 
     if job_id:
         _update_job_status(job_id, "completed", 100)
 
+    logger.info(f"[ingestion] Company website done: {pages_done} pages, {total_chunks} chunks from {website_url}")
     return {
         "status": "completed",
-        "pages": len(pages),
+        "pages": pages_done,
         "chunks": total_chunks,
     }
 

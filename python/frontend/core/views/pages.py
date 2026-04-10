@@ -164,14 +164,17 @@ def notifications(request):
 
 @login_required
 def audit(request):
+    import json as _json
     client = get_client(request)
     audit_data = {}
     try:
-        audit_data = client.get_audit_logs(limit=50)
+        audit_data = client.get_audit_logs(limit=200)
     except Exception:
         pass
+    logs = audit_data.get("logs", [])
     return render(request, "dashboard/audit.html", {
-        "logs": audit_data.get("logs", []),
+        "logs": logs,
+        "logs_json": _json.dumps(logs, default=str),
         "total": audit_data.get("total", 0),
     })
 
@@ -232,3 +235,8 @@ def pipelines(request):
     except Exception:
         pass
     return render(request, "dashboard/pipelines.html", {"pipelines": json.dumps(pipeline_list)})
+
+
+@login_required
+def data_explorer(request):
+    return render(request, "dashboard/data_explorer.html")

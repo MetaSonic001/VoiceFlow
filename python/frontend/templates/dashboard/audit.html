@@ -1,27 +1,99 @@
 {% extends "base_dashboard.html" %}{% block title %}Audit Log — VoiceFlow AI{% endblock %}
 {% block content %}
-<div class="mb-8"><h1 class="text-2xl font-bold">Audit Log</h1><p class="text-gray-500 text-sm mt-1">Track all system activities — {{ total }} total entries</p></div>
-<div class="bg-white rounded-xl border overflow-hidden">
-  <table class="w-full text-sm">
-    <thead class="bg-gray-50 border-b"><tr><th class="px-5 py-3 text-left font-medium text-gray-500">Time</th><th class="px-5 py-3 text-left font-medium text-gray-500">User</th><th class="px-5 py-3 text-left font-medium text-gray-500">Action</th><th class="px-5 py-3 text-left font-medium text-gray-500">Resource</th><th class="px-5 py-3 text-left font-medium text-gray-500">IP</th></tr></thead>
-    <tbody class="divide-y">
-      {% for l in logs %}
-      <tr class="hover:bg-gray-50">
-        <td class="px-5 py-3 text-gray-400 whitespace-nowrap">{{ l.createdAt|truncatechars:19 }}</td>
-        <td class="px-5 py-3">{{ l.userId|default:"system" }}</td>
-        <td class="px-5 py-3">
-          {% if "create" in l.action or "save" in l.action %}<span class="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs">{{ l.action }}</span>
-          {% elif "delete" in l.action or "remove" in l.action %}<span class="px-2 py-0.5 bg-red-100 text-red-700 rounded text-xs">{{ l.action }}</span>
-          {% elif "update" in l.action or "edit" in l.action %}<span class="px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded text-xs">{{ l.action }}</span>
-          {% else %}<span class="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">{{ l.action }}</span>{% endif %}
-        </td>
-        <td class="px-5 py-3">{{ l.resource|default:"—" }}</td>
-        <td class="px-5 py-3 text-gray-400 text-xs">{{ l.ipAddress|default:"—" }}</td>
-      </tr>
-      {% empty %}
-      <tr><td colspan="5" class="px-5 py-12 text-center text-gray-400">No audit log entries yet. Actions like creating agents, uploading documents, and changing settings will appear here.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+<div x-data="auditApp()" x-init="init()">
+  <div class="mb-8 flex items-center justify-between">
+    <div><h1 class="text-2xl font-bold">Audit Log</h1><p class="text-gray-500 text-sm mt-1"><span x-text="total"></span> total entries</p></div>
+    <button @click="refresh()" class="text-sm text-indigo-600 hover:underline flex items-center gap-1">
+      <svg class="w-4 h-4" :class="loading && 'animate-spin'" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+      Refresh
+    </button>
+  </div>
+
+  <!-- Filters -->
+  <div class="flex gap-3 mb-4">
+    <input type="text" x-model="filter" @input="applyFilter()" placeholder="Filter by action, user, or resource..." class="flex-1 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+    <select x-model="actionFilter" @change="applyFilter()" class="border rounded-lg px-3 py-2 text-sm">
+      <option value="">All actions</option>
+      <option value="create">Create</option>
+      <option value="update">Update</option>
+      <option value="delete">Delete</option>
+      <option value="login">Login</option>
+    </select>
+  </div>
+
+  <div class="bg-white rounded-xl border overflow-hidden">
+    <table class="w-full text-sm">
+      <thead class="bg-gray-50 border-b"><tr><th class="px-5 py-3 text-left font-medium text-gray-500">Time</th><th class="px-5 py-3 text-left font-medium text-gray-500">User</th><th class="px-5 py-3 text-left font-medium text-gray-500">Action</th><th class="px-5 py-3 text-left font-medium text-gray-500">Resource</th><th class="px-5 py-3 text-left font-medium text-gray-500">IP</th></tr></thead>
+      <tbody class="divide-y">
+        <template x-for="l in filtered" :key="l.id || l.createdAt">
+          <tr class="hover:bg-gray-50">
+            <td class="px-5 py-3 text-gray-400 whitespace-nowrap text-xs" x-text="(l.createdAt||'').substring(0,19)"></td>
+            <td class="px-5 py-3" x-text="l.userId || 'system'"></td>
+            <td class="px-5 py-3">
+              <span class="px-2 py-0.5 rounded text-xs"
+                :class="(l.action||'').includes('create')||((l.action||'').includes('save'))?'bg-green-100 text-green-700':
+                        (l.action||'').includes('delete')||((l.action||'').includes('remove'))?'bg-red-100 text-red-700':
+                        (l.action||'').includes('update')||((l.action||'').includes('edit'))?'bg-yellow-100 text-yellow-700':
+                        'bg-blue-100 text-blue-700'"
+                x-text="l.action"></span>
+            </td>
+            <td class="px-5 py-3" x-text="l.resource || '—'"></td>
+            <td class="px-5 py-3 text-gray-400 text-xs" x-text="l.ipAddress || '—'"></td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+    <div x-show="!loading && filtered.length === 0" class="px-5 py-12 text-center text-gray-400">No audit log entries match your filter.</div>
+  </div>
 </div>
+
+<script>
+function auditApp() {
+  return {
+    logs: [],
+    filtered: [],
+    total: 0,
+    filter: '',
+    actionFilter: '',
+    loading: false,
+
+    init() {
+      // Load server-rendered data
+      const serverLogs = {{ logs_json|safe }};
+      this.logs = serverLogs;
+      this.total = {{ total }};
+      this.applyFilter();
+    },
+
+    async refresh() {
+      this.loading = true;
+      try {
+        const r = await fetch('/api/audit/?limit=200', {credentials:'same-origin'});
+        const data = await r.json();
+        this.logs = data.logs || [];
+        this.total = data.total || this.logs.length;
+        this.applyFilter();
+      } catch(e) { console.error(e); }
+      this.loading = false;
+    },
+
+    applyFilter() {
+      let items = this.logs;
+      if (this.actionFilter) {
+        items = items.filter(l => (l.action||'').toLowerCase().includes(this.actionFilter));
+      }
+      if (this.filter.trim()) {
+        const q = this.filter.toLowerCase();
+        items = items.filter(l =>
+          (l.action||'').toLowerCase().includes(q) ||
+          (l.userId||'').toLowerCase().includes(q) ||
+          (l.resource||'').toLowerCase().includes(q) ||
+          (l.resourceId||'').toLowerCase().includes(q)
+        );
+      }
+      this.filtered = items;
+    },
+  };
+}
+</script>
 {% endblock %}

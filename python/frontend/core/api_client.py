@@ -324,6 +324,19 @@ class BackendClient:
     def get_voice_calls(self, agent_id: str):
         return self._get(f"/api/voice/calls/{agent_id}")
 
+    # ── Data Explorer ──────────────────────────────────────────────────
+    def get_data_overview(self):
+        return self._get("/api/data-explorer/overview")
+
+    def get_data_postgres(self):
+        return self._get("/api/data-explorer/postgres")
+
+    def get_data_chromadb(self):
+        return self._get("/api/data-explorer/chromadb")
+
+    def get_data_redis(self):
+        return self._get("/api/data-explorer/redis")
+
 
 def get_client(request) -> BackendClient:
     """Build a BackendClient from the current Django request."""

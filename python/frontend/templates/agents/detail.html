@@ -1,6 +1,7 @@
 {% extends "base_dashboard.html" %}
 {% block title %}{{ agent.name|default:"Agent" }} — VoiceFlow AI{% endblock %}
 {% block content %}
+{{ agent_json|json_script:"vf-agent-data" }}
 <div x-data="agentDetailApp()" class="space-y-6">
   <!-- Header -->
   <div class="flex items-center justify-between">
@@ -108,7 +109,7 @@
 
 <script>
 function agentDetailApp() {
-  const raw = {{ agent|safe }};
+  const raw = JSON.parse(document.getElementById('vf-agent-data').textContent || '{}');
   // Ensure llmPreferences is always an object with defaults
   if (!raw.llmPreferences || typeof raw.llmPreferences !== 'object') {
     raw.llmPreferences = {model: 'llama-3.3-70b-versatile', temperature: 0.7};
