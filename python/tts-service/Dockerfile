@@ -17,6 +17,6 @@ COPY main.py .
 # Create presets directory (mount or bake in reference WAVs here)
 RUN mkdir -p /app/presets
 
-EXPOSE 8003
+EXPOSE 8060
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8003"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8060"]

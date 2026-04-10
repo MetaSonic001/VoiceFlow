@@ -6,7 +6,7 @@ services:
       - POSTGRES_USER=vf_admin
       - POSTGRES_PASSWORD=vf_secure_2025!
     ports:
-      - "5433:5432"
+      - "8010:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./init-postgres.sql:/docker-entrypoint-initdb.d/init-postgres.sql
@@ -27,8 +27,8 @@ services:
       MINIO_ROOT_PASSWORD: minioadmin
     command: server /data --console-address ":9001"
     ports:
-      - "9002:9000"
-      - "9003:9001"
+      - "9020:9000"
+      - "8070:9001"
     volumes:
       - minio_data:/data
     networks:
@@ -42,7 +42,7 @@ services:
   chroma:
     image: chromadb/chroma:latest
     ports:
-      - "8002:8000"
+      - "8030:8000"
     volumes:
       - chroma_data:/chroma/chroma
     networks:
@@ -54,7 +54,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "8020:6379"
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes
@@ -71,7 +71,7 @@ services:
       context: ./tts-service
       dockerfile: Dockerfile
     ports:
-      - "8003:8003"
+      - "8060:8060"
     environment:
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ACCESS_KEY=minioadmin

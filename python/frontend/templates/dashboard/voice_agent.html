@@ -54,7 +54,7 @@
     <div x-show="voiceTab==='chatterbox'" class="space-y-3">
       <div class="bg-purple-50 rounded-lg p-4 text-sm text-purple-800">
         <p class="font-medium mb-1">Clone Your Voice</p>
-        <p class="text-xs text-purple-600">Upload a 10-60 second audio clip of your voice (or your brand's voice). Chatterbox will clone it so the agent speaks in that voice. Requires the Chatterbox TTS service on port 8003.</p>
+        <p class="text-xs text-purple-600">Upload a 10-60 second audio clip of your voice (or your brand's voice). Chatterbox will clone it so the agent speaks in that voice. Requires the Chatterbox TTS service on port 8060.</p>
       </div>
       <div class="flex items-center gap-3">
         <label class="flex-1">
@@ -257,7 +257,7 @@ function voiceAgentApp() {
           this.cloneError = data.error || 'Clone failed';
         }
       } catch(e) {
-        this.cloneError = 'Chatterbox TTS service is not running. Start it on port 8003 to enable voice cloning.';
+        this.cloneError = 'Chatterbox TTS service is not running. Start it on port 8060 to enable voice cloning.';
       }
       this.cloneUploading = false;
     },
@@ -276,7 +276,7 @@ function voiceAgentApp() {
       if (this.ws) { this.ws.close(); this.ws = null; }
       if (!this.selectedAgentId) return;
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      const backendHost = location.hostname + ':8000';
+      const backendHost = location.hostname + ':8040';
       this.ws = new WebSocket(`${proto}://${backendHost}/api/voice/ws/${this.selectedAgentId}`);
       this.ws.onopen = () => {
         console.log('Voice WS connected');

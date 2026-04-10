@@ -189,7 +189,7 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
 # CORS — same config as Express
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.FRONTEND_URL, "http://localhost:3000", "http://localhost:8090"],
+    allow_origins=[settings.FRONTEND_URL, "http://localhost:8050", "http://127.0.0.1:8050"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["Content-Type", "Authorization", "x-tenant-id", "x-user-id", "x-user-email", "X-API-Key"],

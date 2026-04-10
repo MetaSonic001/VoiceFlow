@@ -254,7 +254,7 @@ async def system_health(auth: AuthContext = Depends(get_auth)):
     try:
         import httpx
         from app.config import settings as _s
-        minio_ep = _s.MINIO_ENDPOINT or "localhost:9002"
+        minio_ep = _s.MINIO_ENDPOINT or "localhost:9020"
         async with httpx.AsyncClient(timeout=3) as client:
             start = time.time()
             resp = await client.get(f"http://{minio_ep}/minio/health/live")

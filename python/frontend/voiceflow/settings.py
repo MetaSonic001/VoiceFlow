@@ -16,7 +16,7 @@ DEBUG = os.getenv("DJANGO_DEBUG", "True").lower() in ("true", "1", "yes")
 ALLOWED_HOSTS = os.getenv("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 
 # -- Backend API URL (the FastAPI backend) --
-BACKEND_API_URL = os.getenv("BACKEND_API_URL", "http://localhost:8000")
+BACKEND_API_URL = os.getenv("BACKEND_API_URL", "http://localhost:8040")
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -71,7 +71,7 @@ DATABASES = {
         "USER": os.getenv("DB_USER", "vf_admin"),
         "PASSWORD": os.getenv("DB_PASSWORD", "vf_secure_2025!"),
         "HOST": os.getenv("DB_HOST", "localhost"),
-        "PORT": os.getenv("DB_PORT", "5433"),
+        "PORT": os.getenv("DB_PORT", "8010"),
     }
 }
 

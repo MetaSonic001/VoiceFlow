@@ -33,14 +33,14 @@ A self-hosted, zero-cost TTS microservice powered by [Chatterbox Turbo](https://
 
 ```bash
 pip install -r requirements.txt
-MINIO_ENDPOINT=localhost:9000 uvicorn main:app --port 8003
+MINIO_ENDPOINT=localhost:9020 uvicorn main:app --port 8060
 ```
 
 ## Docker
 
 ```bash
 docker build -t voiceflow-tts .
-docker run -p 8003:8003 \
+docker run -p 8060:8060 \
   -e MINIO_ENDPOINT=minio:9000 \
   --gpus all \
   voiceflow-tts

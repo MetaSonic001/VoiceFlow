@@ -150,6 +150,6 @@ async def clone_voice(file: UploadFile = File(...)):
             return JSONResponse({"error": "Chatterbox clone failed"}, status_code=resp.status_code)
     except Exception:
         return JSONResponse(
-            {"error": "Voice cloning requires the Chatterbox TTS service (port 8003). It is not currently running."},
+            {"error": "Voice cloning requires the Chatterbox TTS service (port 8060). It is not currently running."},
             status_code=503,
         )

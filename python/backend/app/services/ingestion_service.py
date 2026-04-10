@@ -90,7 +90,7 @@ def _get_chroma() -> Optional[chromadb.HttpClient]:
     if _chroma_client is None:
         try:
             host = os.getenv("CHROMA_HOST", "localhost")
-            port = int(os.getenv("CHROMA_PORT", "8002"))
+            port = int(os.getenv("CHROMA_PORT", "8030"))
             _chroma_client = chromadb.HttpClient(host=host, port=port)
             _chroma_client.heartbeat()
             logger.info(f"[ingestion] ChromaDB connected at {host}:{port}")
@@ -105,7 +105,7 @@ def _get_redis() -> Optional[redis.Redis]:
     if _redis_client is None:
         try:
             host = os.getenv("REDIS_HOST", "localhost")
-            port = int(os.getenv("REDIS_PORT", "6379"))
+            port = int(os.getenv("REDIS_PORT", "8020"))
             _redis_client = redis.Redis(host=host, port=port, decode_responses=True)
             _redis_client.ping()
             logger.info(f"[ingestion] Redis connected at {host}:{port}")

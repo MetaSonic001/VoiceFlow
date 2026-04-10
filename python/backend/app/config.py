@@ -8,7 +8,7 @@ from typing import Optional
 
 class Settings(BaseSettings):
     # Database
-    DATABASE_URL: str = "postgresql+asyncpg://vf_admin:vf_secure_2025!@localhost:5433/voiceflow_prod"
+    DATABASE_URL: str = "postgresql+asyncpg://vf_admin:vf_secure_2025!@localhost:8010/voiceflow_prod"
 
     # Sync URL for non-async operations (alembic, etc.)
     @property
@@ -17,7 +17,7 @@ class Settings(BaseSettings):
 
     # Redis
     REDIS_HOST: str = "localhost"
-    REDIS_PORT: int = 6379
+    REDIS_PORT: int = 8020
 
     # Auth
     JWT_SECRET: str = "dev-secret"
@@ -26,12 +26,12 @@ class Settings(BaseSettings):
     GROQ_API_KEY: Optional[str] = None
 
     # Base URL for this API when handlers call themselves via HTTP (onboarding → ingestion).
-    FASTAPI_URL: str = "http://127.0.0.1:8000"
-    TTS_SERVICE_URL: str = "http://localhost:8003"
-    FRONTEND_URL: str = "http://localhost:3000"
+    FASTAPI_URL: str = "http://127.0.0.1:8040"
+    TTS_SERVICE_URL: str = "http://localhost:8060"
+    FRONTEND_URL: str = "http://localhost:8050"
 
     # Server
-    PORT: int = 8000
+    PORT: int = 8040
     NODE_ENV: str = "development"
 
     # Twilio (optional)
@@ -46,7 +46,7 @@ class Settings(BaseSettings):
 
     # ChromaDB
     CHROMA_HOST: str = "localhost"
-    CHROMA_PORT: int = 8002
+    CHROMA_PORT: int = 8030
 
     # Credential encryption key (64-char hex)
     CREDENTIALS_ENCRYPTION_KEY: Optional[str] = None
