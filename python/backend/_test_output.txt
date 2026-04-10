@@ -1,0 +1,3 @@
+2026-04-10 16:06:44,711 INFO voiceflow.voice_ws: faster-whisper not installed; will use Groq Whisper API for STT
+OK - 130 routes
+['/api/tts/preset-voices', '/api/tts/preview', '/api/tts/synthesise', '/api/tts/clone-voice']

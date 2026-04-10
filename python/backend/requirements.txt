@@ -31,6 +31,11 @@ openpyxl>=3.1
 Pillow>=10.0
 pdfminer.six>=20200101
 
+# ── TTS (Qwen3-TTS + Edge TTS) ───────────────────────────
+edge-tts>=6.1
+qwen-tts>=0.1
+soundfile>=0.12
+
 # ── URL Scraping ─────────────────────────────────────────
 trafilatura>=2.0
 beautifulsoup4>=4.12

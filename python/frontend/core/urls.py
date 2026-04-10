@@ -52,6 +52,7 @@ urlpatterns = [
     path("api/tts/preview/", api_proxy.tts_preview, name="api_tts_preview"),
     path("api/voice/presets/", api_proxy.voice_presets, name="api_voice_presets"),
     path("api/voice/clone/", api_proxy.voice_clone, name="api_voice_clone"),
+    path("api/voice/clone-preview/", api_proxy.voice_clone_preview, name="api_voice_clone_preview"),
     path("api/onboarding/company/", api_proxy.onboarding_company, name="api_onboarding_company"),
     path("api/onboarding/knowledge/", api_proxy.onboarding_knowledge, name="api_onboarding_knowledge"),
     path("api/onboarding/agent-config/", api_proxy.onboarding_agent_config, name="api_onboarding_agent_config"),

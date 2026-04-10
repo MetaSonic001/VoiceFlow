@@ -167,6 +167,17 @@ def voice_clone(request):
         return JsonResponse({"error": str(e)}, status=500)
 
 
+@login_required
+@require_http_methods(["POST"])
+def voice_clone_preview(request):
+    data = _json_body(request)
+    try:
+        result = get_client(request).clone_preview(data.get("cloneId", ""), data.get("text", ""))
+        return JsonResponse(result)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
 # ── Onboarding ─────────────────────────────────────────────────────────
 
 @login_required

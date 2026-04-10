@@ -148,6 +148,9 @@ class BackendClient:
     def clone_voice(self, audio_bytes: bytes, filename: str = "sample.webm"):
         return self._post("/api/tts/clone-voice", files={"audio": (filename, audio_bytes, "audio/webm")})
 
+    def clone_preview(self, clone_id: str, text: str):
+        return self._post("/api/tts/clone-preview", json={"cloneId": clone_id, "text": text})
+
     def synthesize_tts(self, text: str, voice_id: str = ""):
         """Returns JSON dict with audioUrl from TTS service."""
         return self._post("/api/tts/synthesise", json={"text": text, "voiceId": voice_id})

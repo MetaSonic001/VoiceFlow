@@ -43,6 +43,11 @@ dependencies = [
     "trafilatura>=2.0",
     "beautifulsoup4>=4.12",
 
+    # ── TTS (Qwen3-TTS + Edge TTS) ──────────────────────
+    "edge-tts>=6.1",
+    "qwen-tts>=0.1",
+    "soundfile>=0.12",
+
     # ── Object Storage ───────────────────────────────────
     "boto3>=1.35",
 
