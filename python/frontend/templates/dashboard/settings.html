@@ -2,17 +2,17 @@
 {% block title %}Settings — VoiceFlow AI{% endblock %}
 {% block content %}
 <div x-data="settingsApp()" x-init="init()">
-  <div class="mb-8"><h1 class="text-2xl font-bold">Settings</h1><p class="text-gray-500 text-sm mt-1">Manage integrations and configuration</p></div>
+  <div class="mb-8"><h1 class="text-3xl font-bold vf-heading">Settings</h1><p class="text-slate-500 text-sm mt-1">Manage integrations, credentials, and platform configuration.</p></div>
 
   <!-- Tabs -->
-  <div class="flex gap-1 mb-6 bg-gray-100 rounded-lg p-1 w-fit">
+  <div class="flex gap-1 mb-6 bg-slate-100 rounded-xl p-1.5 w-fit border border-slate-200">
     <template x-for="t in ['Twilio','Groq API','Voice','General']">
-      <button @click="tab=t" :class="tab===t?'bg-white shadow text-gray-900':'text-gray-500'" class="px-4 py-2 rounded-md text-sm font-medium transition" x-text="t"></button>
+      <button @click="tab=t" :class="tab===t?'bg-white shadow-sm text-slate-900':'text-slate-500 hover:text-slate-700'" class="px-4 py-2 rounded-lg text-sm font-medium transition" x-text="t"></button>
     </template>
   </div>
 
   <!-- Twilio -->
-  <div x-show="tab==='Twilio'" class="bg-white rounded-xl border p-6 space-y-4">
+  <div x-show="tab==='Twilio'" class="vf-card p-6 space-y-4">
     <h3 class="font-semibold">Twilio Credentials</h3>
     <p class="text-sm text-gray-500">Connect your Twilio account for phone agent capabilities.</p>
     <div class="flex items-center gap-2 mb-4">
@@ -20,60 +20,60 @@
       <span :class="twilioConfigured?'bg-green-100 text-green-700':'bg-red-100 text-red-700'" class="px-2 py-1 rounded-full text-xs font-medium" x-text="twilioConfigured?'Connected':'Not configured'"></span>
     </div>
     <div class="grid md:grid-cols-2 gap-4">
-      <div><label class="text-sm font-medium text-gray-700">Account SID</label><input type="text" x-model="twilio.accountSid" class="w-full mt-1 px-4 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="ACxxxxxxx"></div>
-      <div><label class="text-sm font-medium text-gray-700">Auth Token</label><input type="password" x-model="twilio.authToken" class="w-full mt-1 px-4 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="••••••••"></div>
+      <div><label class="text-sm font-medium text-slate-700">Account SID</label><input type="text" x-model="twilio.accountSid" class="w-full mt-1 px-4 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-cyan-500" placeholder="ACxxxxxxx"></div>
+      <div><label class="text-sm font-medium text-slate-700">Auth Token</label><input type="password" x-model="twilio.authToken" class="w-full mt-1 px-4 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-cyan-500" placeholder="••••••••"></div>
     </div>
     <div class="flex gap-3">
-      <button @click="saveTwilio" class="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg">Save Credentials</button>
+      <button @click="saveTwilio" class="px-4 py-2 bg-cyan-600 text-white text-sm rounded-lg hover:bg-cyan-700 transition">Save Credentials</button>
       <button @click="deleteTwilio" x-show="twilioConfigured" class="px-4 py-2 border border-red-200 text-red-600 text-sm rounded-lg">Remove</button>
     </div>
   </div>
 
   <!-- Groq -->
-  <div x-show="tab==='Groq API'" class="bg-white rounded-xl border p-6 space-y-4">
+  <div x-show="tab==='Groq API'" class="vf-card p-6 space-y-4">
     <h3 class="font-semibold">Groq API Key (BYOK)</h3>
     <p class="text-sm text-gray-500">Bring your own Groq API key for LLM inference.</p>
     <div class="flex items-center gap-2 mb-4">
       <span class="text-sm">Status:</span>
       <span :class="groqConfigured?'bg-green-100 text-green-700':'bg-yellow-100 text-yellow-700'" class="px-2 py-1 rounded-full text-xs font-medium" x-text="groqConfigured?'Connected':'Using default'"></span>
     </div>
-    <input type="password" x-model="groqKey" class="w-full px-4 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="gsk_xxxxxxx">
+    <input type="password" x-model="groqKey" class="w-full px-4 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-cyan-500" placeholder="gsk_xxxxxxx">
     <div class="flex gap-3">
-      <button @click="saveGroq" class="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg">Save Key</button>
+      <button @click="saveGroq" class="px-4 py-2 bg-cyan-600 text-white text-sm rounded-lg hover:bg-cyan-700 transition">Save Key</button>
       <button @click="deleteGroq" x-show="groqConfigured" class="px-4 py-2 border border-red-200 text-red-600 text-sm rounded-lg">Remove</button>
     </div>
   </div>
 
   <!-- Voice -->
-  <div x-show="tab==='Voice'" class="bg-white rounded-xl border p-6 space-y-4">
+  <div x-show="tab==='Voice'" class="vf-card p-6 space-y-4">
     <h3 class="font-semibold">Voice Configuration</h3>
     <p class="text-sm text-gray-500">Configure TTS voice for your agents.</p>
     <div>
-      <label class="text-sm font-medium text-gray-700">Voice Preset</label>
-      <select x-model="voiceId" class="w-full mt-1 px-4 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500">
+      <label class="text-sm font-medium text-slate-700">Voice Preset</label>
+      <select x-model="voiceId" class="w-full mt-1 px-4 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-cyan-500">
         <option value="">Default</option>
         <template x-for="v in voicePresets"><option :value="v.id" x-text="v.name"></option></template>
       </select>
     </div>
     <div>
-      <label class="text-sm font-medium text-gray-700">Or clone a voice</label>
-      <input type="file" accept="audio/*" @change="cloneFile=$event.target.files[0]" class="w-full mt-1 border rounded-lg p-2 text-sm">
+      <label class="text-sm font-medium text-slate-700">Or clone a voice</label>
+      <input type="file" accept="audio/*" @change="cloneFile=$event.target.files[0]" class="w-full mt-1 border border-slate-200 rounded-lg p-2 text-sm">
     </div>
     <div class="flex gap-3">
-      <button @click="saveVoice" class="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg">Save Voice</button>
+      <button @click="saveVoice" class="px-4 py-2 bg-cyan-600 text-white text-sm rounded-lg hover:bg-cyan-700 transition">Save Voice</button>
       <button @click="cloneVoice" x-show="cloneFile" class="px-4 py-2 bg-purple-600 text-white text-sm rounded-lg">Clone Voice</button>
     </div>
   </div>
 
   <!-- General -->
-  <div x-show="tab==='General'" class="bg-white rounded-xl border p-6 space-y-4">
+  <div x-show="tab==='General'" class="vf-card p-6 space-y-4">
     <h3 class="font-semibold">General Settings</h3>
     <div class="space-y-3">
       <label class="flex items-center gap-3"><input type="checkbox" class="rounded border-gray-300" x-model="generalSettings.emailNotifications"> <span class="text-sm">Email notifications</span></label>
       <label class="flex items-center gap-3"><input type="checkbox" class="rounded border-gray-300" x-model="generalSettings.maintenanceMode"> <span class="text-sm">Maintenance mode</span></label>
       <label class="flex items-center gap-3"><input type="checkbox" class="rounded border-gray-300" x-model="generalSettings.debugLogging"> <span class="text-sm">Debug logging</span></label>
     </div>
-    <button @click="saveGeneral()" :disabled="savingGeneral" class="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg disabled:opacity-50" x-text="savingGeneral ? 'Saving…' : 'Save Settings'"></button>
+    <button @click="saveGeneral()" :disabled="savingGeneral" class="px-4 py-2 bg-cyan-600 text-white text-sm rounded-lg disabled:opacity-50 hover:bg-cyan-700 transition" x-text="savingGeneral ? 'Saving…' : 'Save Settings'"></button>
   </div>
 </div>
 <script>
@@ -105,7 +105,10 @@ function settingsApp() {
     },
     async cloneVoice() {
       const fd = new FormData(); fd.append('audio', this.cloneFile);
-      try { const r = await fetch('/api/voice/clone/', {method:'POST', headers:{'X-CSRFToken':CSRF}, body:fd}).then(r=>r.json()); showToast('Voice cloned: '+r.voiceId); } catch(e) { showToast('Clone failed','error'); }
+      try {
+        const r = await fetch('/api/voice/clone/', {method:'POST', headers:{'X-CSRFToken':CSRF}, body:fd}).then(r=>r.json());
+        showToast('Voice cloned: clone-' + (r.cloneId || 'unknown'));
+      } catch(e) { showToast('Clone failed','error'); }
     },
     generalSettings: {
       emailNotifications: {{ settings_data.emailNotifications|default:"true"|lower }},

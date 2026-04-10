@@ -1,1 +1,0 @@
-"""DB visualizer package"""
