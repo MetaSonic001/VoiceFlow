@@ -140,7 +140,7 @@ The primary market is Indian SMBs. Every tenant and agent is logically isolated 
 │   │  file store   │  │  External APIs                           │  │
 │   │  TTS cache    │  │  • Groq LLM (llama-3.3-70b-versatile)   │  │
 │   │  (S3-compat)  │  │  • Groq Whisper (STT)                   │  │
-│   └──────────────┘  │  • Edge TTS (13 en-US voices)            │  │
+│   └──────────────┘  │  • Qwen3-TTS + Edge TTS fallback         │  │
 │                      │  • Twilio (per-tenant telephony)         │  │
 │                      └──────────────────────────────────────────┘  │
 └────────────────────────────────────────────────────────────────────┘
@@ -154,7 +154,7 @@ The primary market is Indian SMBs. Every tenant and agent is logically isolated 
 VoiceFlow/
 │
 ├── python/                        ← ACTIVE: Full-stack Python codebase
-│   ├── Makefile                   ← 30+ targets (start, restart, nuke, etc.)
+│   ├── Makefile                   ← developer commands (start, reset, test, demo)
 │   ├── docker-compose.yml         ← Postgres, Redis, ChromaDB, MinIO
 │   │
 │   ├── backend/                   ← ACTIVE: FastAPI backend (Port 8040)
@@ -226,18 +226,12 @@ VoiceFlow/
 │
 ├── PATENT_CLAIMS_MAPPING.md       ← Patent claim → code trace mapping
 │
-├── not-required/                  ← Legacy code (prior iterations)
-│   ├── backend/                   ← Old Python backend
-│   ├── nestjs-backend/            ← Old NestJS attempt
-│   ├── agent-workflow/            ← Old agent workflow
-│   └── ...
-│
-└── new_backend/                   ← Legacy Express.js backend (superseded)
-    ├── express-backend/           ← Express.js API (superseded by python/backend)
-    └── ingestion-service/         ← Old ingestion service
+├── test_all_endpoints.py          ← API regression test script
+├── test_rag_pipeline.py           ← RAG E2E test script
+└── pyproject.toml                 ← Project dependency declaration
 ```
 
-> **Note:** The active codebase is `python/` — both `python/backend/` (FastAPI) and `python/frontend/` (Django). The `new_backend/` and `not-required/` folders contain prior iterations and are not used.
+> **Note:** The active runtime codebase is `python/` — `python/backend/` (FastAPI) and `python/frontend/` (Django).
 
 ---
 
@@ -285,10 +279,10 @@ VoiceFlow/
 | Cache / Queue | Redis 7 (Docker, port 8020) |
 | File Storage | MinIO S3-compatible (Docker, port 9020/8070) |
 | LLM | Groq API (`Llama` / `GPT-OSS` family) |
-| TTS | Edge TTS (13 en-US voices) |
+| TTS | Qwen3-TTS (local GPU, premium + cloning) + Edge TTS (cloud fallback) |
 | Telephony | Twilio (TwiML Gather loop, per-tenant credentials) |
 | Credential Encryption | AES-256-GCM via `cryptography` library |
-| Build / Dev Tooling | PowerShell Makefile with 30+ targets |
+| Build / Dev Tooling | PowerShell Makefile with startup, reset, and test targets |
 
 ---
 
@@ -312,7 +306,7 @@ Django frontend redirects to /onboarding or /dashboard
   Step 1: Company Profile    → POST /onboarding/company     → auto-scrapes website
   Step 2: Agent Creation     → POST /onboarding/agent       → creates Agent row
   Step 3: Knowledge Upload   → POST /onboarding/knowledge   → triggers ingestion
-  Step 4: Voice & Personality→ POST /onboarding/voice       → Edge TTS preview (13 voices)
+  Step 4: Voice & Personality→ POST /onboarding/voice       → Qwen3 + Edge voice preview
   Step 5: Channel Setup      → POST /onboarding/channels    → Twilio BYOK / WebSocket
   Step 6: Testing Sandbox    → UI tests chat/voice in real-time
   Step 7: Go Live / Deploy   → POST /onboarding/deploy      → assigns phone number
@@ -736,13 +730,14 @@ x-user-id: <user_uuid>
 | GET | `/api/settings/twilio` | Get credential status (never returns auth token) |
 | DELETE | `/api/settings/twilio` | Remove Twilio credentials |
 
-### TTS (Text-to-Speech — Edge TTS)
+### TTS (Text-to-Speech — Qwen3 + Edge)
 | Method | Endpoint | Description |
 |---|---|---|
-| GET | `/api/tts/preset-voices` | List 13 Edge TTS en-US voices with preview sentence |
+| GET | `/api/tts/preset-voices` | List Qwen3 premium voices + Edge fallback voices |
 | POST | `/api/tts/preview` | Generate voice preview audio for a given voiceId |
 | POST | `/api/tts/synthesise` | Generate speech audio for text + voiceId |
-| POST | `/api/tts/clone-voice` | Upload reference audio for voice cloning (experimental) |
+| POST | `/api/tts/clone-voice` | Upload reference audio and generate 3 clone confirmation samples |
+| POST | `/api/tts/clone-preview` | Generate cloned voice audio for custom text |
 
 ### Analytics (real SQLAlchemy queries)
 | Method | Endpoint | Description |
@@ -852,14 +847,14 @@ A complete breakdown of what works versus what needs attention.
 | Real Twilio number provisioning | Search → purchase → webhook config → store in Agent record |
 | Twilio webhook validation | Per-tenant auth token decryption for signature verification |
 | Agent template system | 6 seeded templates (General, Sales, Healthcare, Legal, Restaurant, Real Estate) |
-| Voice selector UI | 13 Edge TTS en-US voices with real-time preview |
-| TTS | Edge TTS (edge-tts library), 13 en-US voices, MinIO audio caching |
+| Voice selector UI | Qwen3 + Edge voices with real-time preview and cloned voice selection |
+| TTS | Qwen3-TTS (local GPU) + Edge TTS fallback, with voice cloning and custom clone preview |
 | Call logging | CallLog records with duration, transcript, caller phone, rating, flagging |
 | **Analytics dashboard** | Real SQLAlchemy queries — overview, realtime, metrics-chart, agent-comparison |
 | Onboarding progress (server-side) | GET/POST/DELETE `/onboarding/progress` for resume |
 | Deploy gating | Frontend checks Twilio credential status before allowing deploy |
 | **Retraining pipeline** | Nightly cron extracts flagged calls → admin review queue → approved examples injected as few-shot learning |
-| **WebSocket voice calls** | Real audio pipeline: MediaRecorder → Groq Whisper STT → RAG → Edge TTS → audio playback. Text fallback for no-mic browsers. |
+| **WebSocket voice calls** | Real audio pipeline: MediaRecorder → Groq Whisper STT → RAG → Qwen3/Clone/Edge TTS → audio playback. Text fallback for no-mic browsers. |
 | **Embeddable call widget** | Public `<script>` tag serves push-to-talk widget with real audio capture/playback |
 | **Retraining admin UI** | `/dashboard/retraining` — filter, edit, approve/reject, manual trigger |
 | **Widget management UI** | `/dashboard/widget` — per-agent embed code with copy-to-clipboard |

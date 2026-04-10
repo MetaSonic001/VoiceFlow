@@ -32,7 +32,7 @@ Inbound call (Twilio) / WebSocket → Tenant resolution → assemble_context() (
 | 7. Policy scoring | `rag_service.py` | `apply_policy_scoring(docs, rules)` | restrict=×0.05, require=×2.0, allow=×1.0 |
 | 8. Prompt assembly | `rag_service.py` | `build_system_prompt(ctx)` | 7-section prompt: safety → tenant → brand → agent → few-shot → escalation → policy |
 | 9. LLM generation | `rag_service.py` | `generate_response(system_prompt, context, query, conversation_history, token_limit, model)` | Groq API (`llama-3.3-70b-versatile` default; per-tenant model via agent config) |
-| 10. TTS synthesis | `voice.py` + Edge TTS | Edge TTS `edge-tts` library with 13 en-US voices | Generates audio, serves via MinIO or inline TwiML `<Say>` |
+| 10. TTS synthesis | `tts.py` + `voice.py` + `voice_ws.py` | Qwen3-TTS (local GPU) primary + Edge TTS fallback; cloned voice prompts supported | Generates audio for Twilio and WebSocket channels |
 | 11. Response delivery | `voice.py` | TwiML `<Say>` + `<Gather>` loop | Continues conversation |
 | 12. Call ended | `voice.py` | `POST /status/{agent_id}` | Persists CallLog + async `analyze_call()` background task |
 
@@ -230,7 +230,7 @@ All channels share the same RAG pipeline: `assemble_context()` → `query_docume
 1. Company setup (with auto-scraping)
 2. Agent template selection
 3. Knowledge upload (files + URLs)
-4. Voice personality configuration (Edge TTS preview with 13 voices)
+4. Voice personality configuration (Qwen3 + Edge preview with cloned voice option)
 5. Channel setup (Twilio BYOK / WebSocket)
 6. Agent configuration (name, role, behaviour)
 7. Deployment + go-live
@@ -244,7 +244,7 @@ All channels share the same RAG pipeline: `assemble_context()` → `query_docume
 **WebSocket:** `python/backend/app/routes/voice_ws.py` — FastAPI WebSocket at `/api/voice/ws/{agent_id}`
 **Widget:** `python/backend/app/routes/widget.py` — Embeddable `<script>` tag
 **Server STT:** Groq Whisper (`whisper-large-v3-turbo`) — client sends audio via WebSocket binary frame, server transcribes (`_transcribe_groq()`)
-**Server TTS:** Edge TTS via `edge-tts` library — server generates speech, returns audio as binary WebSocket frame
+**Server TTS:** Qwen3-TTS (including cloned voice prompts) and Edge TTS fallback — server generates speech, returns audio over WebSocket
 **Pipeline:** Same `assemble_context()` → RAG → Policy → Prompt → LLM as Twilio calls (conversation history included in all paths)
 
 ---
@@ -255,7 +255,7 @@ All channels share the same RAG pipeline: `assemble_context()` → `query_docume
 |-------|-----|-------------|
 | Fine-tuning | Only in-context learning (few-shot) is implemented | Full model fine-tuning via LoRA/QLoRA not implemented (by design — too slow/expensive for MVP) |
 | Multi-language | Agent `language` field exists in onboarding | No automatic language detection or translation pipeline |
-| Custom TTS voices | Edge TTS provides 13 en-US voices | Voice cloning not yet implemented; current selection covers standard use cases |
+| Custom TTS voices | Qwen3 custom voices + Edge fallback voices | Voice cloning implemented with 3-sample confirmation + custom sentence preview |
 
 ---
 

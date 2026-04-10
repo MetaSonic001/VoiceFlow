@@ -66,31 +66,6 @@ services:
       timeout: 3s
       retries: 3
 
-  tts-service:
-    build:
-      context: ./tts-service
-      dockerfile: Dockerfile
-    ports:
-      - "8060:8060"
-    environment:
-      - MINIO_ENDPOINT=minio:9000
-      - MINIO_ACCESS_KEY=minioadmin
-      - MINIO_SECRET_KEY=minioadmin
-      - MINIO_BUCKET=voiceflow-tts
-      - DEVICE=cuda
-    depends_on:
-      minio:
-        condition: service_healthy
-    networks:
-      - voiceflow-network
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-
 volumes:
   postgres_data:
   minio_data:

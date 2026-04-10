@@ -1,6 +1,6 @@
 """
 Environment / settings loaded once from .env or env vars.
-Mirrors new_backend/express-backend/src/config/env.ts
+Used by FastAPI backend routes and services.
 """
 from pydantic_settings import BaseSettings
 from typing import Optional

@@ -44,9 +44,6 @@ async def _ensure_tenant_and_user(
     tid, uid = auth.tenant_id, auth.user_id
     if not tid or not uid:
         return
-    if tid == DEMO_TENANT and uid == DEMO_USER:
-        return
-
     org_name = (display_name or "").strip() or (email.split("@", 1)[0] if email and "@" in email else "Organization")
     org_name = org_name[:255] or "Organization"
 

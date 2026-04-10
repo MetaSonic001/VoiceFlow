@@ -50,7 +50,7 @@ help: ## Show this help
 	@Write-Host '    make migrate           Run Django makemigrations + migrate'
 	@Write-Host '    make makemigrations    Run Django makemigrations only'
 	@Write-Host '    make superuser         Create Django admin superuser'
-	@Write-Host '    make seed              Seed demo data'
+	@Write-Host '    make seed              Seed default agent templates'
 	@Write-Host ''
 	@Write-Host '  DATABASE' -ForegroundColor Yellow
 	@Write-Host '    make db-shell          Open psql shell'
@@ -67,6 +67,7 @@ help: ## Show this help
 	@Write-Host '    make logs              Tail Docker logs'
 	@Write-Host '    make clean             Remove __pycache__ and .pyc files'
 	@Write-Host '    make reset             Stop everything + clean'
+	@Write-Host '    make demo-reset        Clear app data for a fresh demo (keeps images/venv)'
 	@Write-Host '    make nuke              Stop everything + wipe all data + rebuild fresh'
 	@Write-Host ''
 
@@ -111,11 +112,6 @@ all: docker wait backend-bg frontend-bg ## Start everything
 docker: ## Start Docker services (Postgres, MinIO, ChromaDB, Redis)
 	docker compose up -d postgres minio chroma redis
 	@Write-Host 'Docker services started.' -ForegroundColor Green
-
-.PHONY: docker-all
-docker-all: ## Start all Docker services including TTS (needs GPU)
-	docker compose up -d
-	@Write-Host 'All Docker services started (including TTS).' -ForegroundColor Green
 
 .PHONY: wait
 wait:
@@ -192,9 +188,9 @@ superuser: ## Create Django admin superuser
 	cd frontend; & '$(PYTHON)' manage.py createsuperuser
 
 .PHONY: seed
-seed: ## Seed demo data via backend startup
-	@Write-Host 'Seeding demo data...' -ForegroundColor Yellow
-	@try { Push-Location backend; & '$(PYTHON)' -c "from app.database import init_db; import asyncio; asyncio.run(init_db())"; Pop-Location } catch { Write-Host '  Seed will run automatically on first backend start.' -ForegroundColor Gray }
+seed: ## Seed default agent templates
+	@Write-Host 'Seeding default templates...' -ForegroundColor Yellow
+	@Push-Location backend; & '$(PYTHON)' -c "from main import seed_defaults; import asyncio; asyncio.run(seed_defaults())"; Pop-Location
 
 .PHONY: setup
 setup: install docker wait migrate ## Setup without venv creation
@@ -261,6 +257,27 @@ clean: ## Remove __pycache__ and .pyc files
 .PHONY: reset
 reset: stop clean ## Stop everything + clean
 
+.PHONY: demo-reset
+demo-reset: ## Clear app data for a clean demo without full nuke
+	@Write-Host 'Preparing clean demo state...' -ForegroundColor Yellow
+	@Write-Host 'Stopping backend/frontend processes...' -ForegroundColor Yellow
+	@Get-Process -Name 'python' -ErrorAction SilentlyContinue | Where-Object { $$_.Path -like '*VoiceFlow*' -and ($$_.CommandLine -match 'uvicorn|runserver') } | Stop-Process -Force -ErrorAction SilentlyContinue
+	@Write-Host 'Ensuring Docker data services are running...' -ForegroundColor Yellow
+	@docker compose up -d postgres redis chroma minio
+	@Write-Host 'Flushing PostgreSQL data (preserves schema + migrations)...' -ForegroundColor Yellow
+	@Push-Location frontend; & '$(PYTHON)' manage.py flush --no-input; Pop-Location
+	@Write-Host 'Flushing Redis...' -ForegroundColor Yellow
+	@docker compose exec -T redis redis-cli FLUSHALL > $$null
+	@Write-Host 'Clearing ChromaDB persisted vectors...' -ForegroundColor Yellow
+	@docker compose exec -T chroma sh -c "rm -rf /chroma/chroma/*"
+	@Write-Host 'Clearing MinIO object data...' -ForegroundColor Yellow
+	@docker compose exec -T minio sh -c "rm -rf /data/*"
+	@Write-Host 'Re-seeding default templates...' -ForegroundColor Yellow
+	@Push-Location backend; & '$(PYTHON)' -c "from main import seed_defaults; import asyncio; asyncio.run(seed_defaults())"; Pop-Location
+	@Write-Host ''
+	@Write-Host '=== DEMO RESET COMPLETE ===' -ForegroundColor Green
+	@Write-Host 'Data cleared. Start app with: make all' -ForegroundColor Cyan
+
 .PHONY: nuke
 nuke: ## Stop everything + wipe ALL data (Postgres, Redis, ChromaDB, MinIO) + rebuild fresh
 	@Write-Host 'NUKING everything — stopping services...' -ForegroundColor Red
@@ -274,7 +291,7 @@ nuke: ## Stop everything + wipe ALL data (Postgres, Redis, ChromaDB, MinIO) + re
 	@Write-Host 'Starting fresh Docker services...' -ForegroundColor Yellow
 	@docker compose up -d
 	@Write-Host 'Waiting for Postgres to be ready...' -ForegroundColor Yellow
-	@$$attempt=0; while ($$attempt -lt 15) { try { docker compose exec -T postgres pg_isready -U voiceflow 2>$$null; if ($$LASTEXITCODE -eq 0) { break }; } catch {}; Start-Sleep -Seconds 2; $$attempt++ }
+	@$$attempt=0; while ($$attempt -lt 15) { try { docker compose exec -T postgres pg_isready -U vf_admin -d voiceflow_prod 2>$$null; if ($$LASTEXITCODE -eq 0) { break }; } catch {}; Start-Sleep -Seconds 2; $$attempt++ }
 	@Write-Host 'Running migrations...' -ForegroundColor Yellow
 	@& "$$((Get-Item ..).FullName)\.venv\Scripts\python.exe" frontend/manage.py migrate --no-input 2>$$null
 	@Write-Host '' -ForegroundColor Green

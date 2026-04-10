@@ -1,7 +1,7 @@
 # ═══════════════════════════════════════════════════════════════
 # VoiceFlow Python — Combined Requirements
 # Backend (FastAPI) + Frontend (Django)
-# TTS service has its own requirements (runs in Docker)
+# Includes local Qwen3-TTS + Edge TTS support
 # ═══════════════════════════════════════════════════════════════
 
 # ── FastAPI Backend ───────────────────────────────────────────
@@ -17,6 +17,8 @@ PyJWT==2.10.1
 python-jose[cryptography]==3.3.0
 aiofiles>=24.0
 edge-tts>=6.1
+qwen-tts>=0.1
+soundfile>=0.12
 
 # ── Document Ingestion Pipeline ──────────────────────────────
 docling>=2.0

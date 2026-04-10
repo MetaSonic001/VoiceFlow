@@ -25,38 +25,11 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 
 start_time = time.time()
 
-DEMO_TENANT_ID = "demo-tenant"
-DEMO_USER_ID = "demo-user"
-DEMO_EMAIL = "demo@voiceflow.local"
 
-
-async def seed_demo():
-    """Create demo tenant and user if they don't exist."""
+async def seed_defaults():
+    """Seed default agent templates if missing (non-user data)."""
     async with AsyncSessionLocal() as db:
         try:
-            result = await db.execute(select(Tenant).where(Tenant.id == DEMO_TENANT_ID))
-            if not result.scalar_one_or_none():
-                db.add(Tenant(
-                    id=DEMO_TENANT_ID,
-                    name="Demo Organization",
-                    domain="demo.voiceflow.local",
-                    apiKey=f"sk-demo-{int(time.time())}",
-                    isActive=True,
-                ))
-                await db.flush()
-                logger.info("[seed] Created demo tenant")
-
-            result = await db.execute(select(User).where(User.id == DEMO_USER_ID))
-            if not result.scalar_one_or_none():
-                db.add(User(
-                    id=DEMO_USER_ID,
-                    email=DEMO_EMAIL,
-                    name="Demo User",
-                    tenantId=DEMO_TENANT_ID,
-                ))
-                await db.flush()
-                logger.info("[seed] Created demo user")
-
             # Seed agent templates if empty
             tmpl_result = await db.execute(select(AgentTemplate).limit(1))
             if not tmpl_result.scalar_one_or_none():
@@ -123,7 +96,7 @@ async def seed_demo():
 
             await db.commit()
         except Exception as e:
-            logger.warning(f"[seed] Demo seed failed (non-fatal): {e}")
+            logger.warning(f"[seed] Default template seed failed (non-fatal): {e}")
             await db.rollback()
 
 
@@ -150,7 +123,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"[db] Table creation failed (non-fatal): {e}")
 
-    await seed_demo()
+    await seed_defaults()
     logger.info(f"Python backend ready on port {settings.PORT}")
 
     # Start retraining scheduler (Claim 7)
