@@ -8,11 +8,11 @@
   <!-- Header -->
   <div class="flex items-center justify-between mb-8">
     <div>
-      <h1 class="text-2xl font-bold">AI Agents</h1>
-      <p class="text-gray-500 text-sm mt-1">Manage and monitor your voice agents</p>
+      <h1 class="text-3xl font-bold vf-heading">AI Agents</h1>
+      <p class="text-slate-500 text-sm mt-1">Manage, monitor, and scale your AI voice workforce.</p>
     </div>
     <div class="flex gap-3">
-      <a href="{% url 'onboarding' %}" class="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-purple-600 text-white text-sm font-medium rounded-lg hover:shadow-lg transition-all">
+      <a href="{% url 'onboarding' %}" class="px-5 py-2.5 bg-gradient-to-r from-teal-600 to-cyan-600 text-white text-sm font-medium rounded-lg hover:shadow-lg hover:shadow-cyan-700/20 transition-all">
         + Create Agent
       </a>
     </div>
@@ -20,43 +20,43 @@
 
   <!-- Metrics row -->
   <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
-    <div class="bg-white rounded-xl border border-gray-200 p-4">
+    <div class="vf-card p-4">
       <div class="text-2xl font-bold text-blue-600" x-text="agents.length">0</div>
       <div class="text-xs text-gray-500 mt-1">Total Agents</div>
     </div>
-    <div class="bg-white rounded-xl border border-gray-200 p-4">
+    <div class="vf-card p-4">
       <div class="text-2xl font-bold text-green-600" x-text="agents.filter(a=>a.status==='active').length">0</div>
       <div class="text-xs text-gray-500 mt-1">Active Agents</div>
     </div>
-    <div class="bg-white rounded-xl border border-gray-200 p-4">
+    <div class="vf-card p-4">
       <div class="text-2xl font-bold text-purple-600" x-text="metrics.totalInteractions || '—'">—</div>
       <div class="text-xs text-gray-500 mt-1">Total Interactions</div>
     </div>
-    <div class="bg-white rounded-xl border border-gray-200 p-4">
+    <div class="vf-card p-4">
       <div class="text-2xl font-bold text-orange-600" x-text="metrics.successRate ? metrics.successRate+'%' : '—'">—</div>
       <div class="text-xs text-gray-500 mt-1">Success Rate</div>
     </div>
-    <div class="bg-white rounded-xl border border-gray-200 p-4">
+    <div class="vf-card p-4">
       <div class="text-2xl font-bold text-cyan-600" x-text="metrics.avgResponseTime || '—'">—</div>
       <div class="text-xs text-gray-500 mt-1">Avg Response</div>
     </div>
-    <div class="bg-white rounded-xl border border-gray-200 p-4">
+    <div class="vf-card p-4">
       <div class="text-2xl font-bold text-pink-600" x-text="metrics.satisfaction ? metrics.satisfaction+'%' : '—'">—</div>
       <div class="text-xs text-gray-500 mt-1">Satisfaction</div>
     </div>
   </div>
 
   <!-- Search & Filter -->
-  <div class="flex flex-wrap gap-3 mb-6">
-    <input type="text" x-model="search" placeholder="Search agents..." class="px-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none w-64">
+  <div class="flex flex-wrap gap-3 mb-6 items-center">
+    <input type="text" x-model="search" placeholder="Search agents..." class="px-4 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-cyan-500 focus:border-transparent outline-none w-72 bg-white">
     <template x-for="f in ['All','active','paused','draft']">
-      <button @click="filter=f" :class="filter===f ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 border border-gray-200'" class="px-4 py-2 rounded-lg text-sm font-medium transition" x-text="f==='All'?'All':f.charAt(0).toUpperCase()+f.slice(1)"></button>
+      <button @click="filter=f" :class="filter===f ? 'bg-cyan-600 text-white shadow-sm' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'" class="px-4 py-2 rounded-lg text-sm font-medium transition" x-text="f==='All'?'All':f.charAt(0).toUpperCase()+f.slice(1)"></button>
     </template>
   </div>
 
   <!-- Empty state -->
   <template x-if="filteredAgents.length === 0 && !loading">
-    <div class="text-center py-16 bg-white rounded-2xl border border-gray-200">
+    <div class="text-center py-16 vf-card">
       <div class="w-16 h-16 rounded-full bg-blue-50 flex items-center justify-center mx-auto mb-4">
         <svg class="w-8 h-8 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
       </div>
@@ -69,7 +69,7 @@
   <!-- Agent grid -->
   <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
     <template x-for="agent in filteredAgents" :key="agent.id">
-      <div class="bg-white rounded-xl border border-gray-200 hover:shadow-lg hover:border-blue-200 transition-all cursor-pointer group" @click="window.location='/dashboard/agents/'+agent.id+'/'">
+      <div class="vf-card hover:shadow-lg hover:border-cyan-200 transition-all cursor-pointer group" @click="window.location='/dashboard/agents/'+agent.id+'/'">
         <div class="p-5">
           <div class="flex items-start justify-between mb-3">
             <div>
@@ -87,8 +87,8 @@
             <span x-text="(agent.successRate||0)+'% success'"></span>
           </div>
           <div class="flex gap-2 mt-4 pt-4 border-t border-gray-100">
-            <a :href="'/dashboard/agents/'+agent.id+'/chat/'" @click.stop class="flex-1 text-center py-2 bg-blue-50 text-blue-600 text-sm font-medium rounded-lg hover:bg-blue-100 transition">Chat</a>
-            <button @click.stop="toggleAgent(agent)" class="px-3 py-2 border border-gray-200 rounded-lg text-sm hover:bg-gray-50 transition" x-text="agent.status==='active'?'Pause':'Activate'"></button>
+            <a :href="'/dashboard/agents/'+agent.id+'/chat/'" @click.stop class="flex-1 text-center py-2 bg-cyan-50 text-cyan-700 text-sm font-medium rounded-lg hover:bg-cyan-100 transition">Chat</a>
+            <button @click.stop="toggleAgent(agent)" class="px-3 py-2 border border-slate-200 rounded-lg text-sm hover:bg-slate-50 transition" x-text="agent.status==='active'?'Pause':'Activate'"></button>
             <button @click.stop="deleteAgent(agent)" class="px-3 py-2 border border-red-200 text-red-600 rounded-lg text-sm hover:bg-red-50 transition">Delete</button>
           </div>
         </div>

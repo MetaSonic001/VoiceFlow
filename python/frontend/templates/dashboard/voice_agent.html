@@ -41,7 +41,7 @@
         </div>
       </div>
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-        <template x-for="v in voices.filter(v=>v.engine==='qwen3')" :key="v.id">
+        <template x-for="v in voices.filter(v=>v.engine==='qwen3' || v.engine==='clone')" :key="v.id">
           <div @click="selectVoice(v.id)" :class="selectedVoiceId===v.id ? 'ring-2 ring-emerald-500 bg-emerald-50' : 'bg-gray-50 hover:bg-gray-100'" class="flex items-center justify-between p-3 rounded-lg cursor-pointer transition group">
             <div class="flex items-center gap-3 min-w-0">
               <div :class="v.gender==='Female' ? 'bg-pink-100 text-pink-600' : 'bg-blue-100 text-blue-600'" class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0" x-text="v.name[0]"></div>
@@ -57,9 +57,9 @@
           </div>
         </template>
       </div>
-      <div x-show="selectedVoiceId && selectedVoiceId.startsWith('qwen-')" class="flex items-center gap-2 mt-2 pt-3 border-t">
+      <div x-show="selectedVoiceId && (selectedVoiceId.startsWith('qwen-') || selectedVoiceId.startsWith('clone-'))" class="flex items-center gap-2 mt-2 pt-3 border-t">
         <span class="text-xs text-gray-500">Selected:</span>
-        <span class="text-xs font-semibold text-emerald-700" x-text="voices.find(v=>v.id===selectedVoiceId)?.name || ''"></span>
+        <span class="text-xs font-semibold text-emerald-700" x-text="voices.find(v=>v.id===selectedVoiceId)?.name || 'My Cloned Voice'"></span>
         <button @click="previewVoice(selectedVoiceId)" :disabled="previewingId" class="ml-auto text-xs text-emerald-600 hover:underline">Preview selected</button>
       </div>
     </div>
@@ -68,7 +68,7 @@
     <div x-show="voiceTab==='edge'" class="space-y-2">
       <div class="bg-blue-50 rounded-lg p-3 text-xs text-blue-700">Cloud-based Edge TTS — zero GPU, instant response. Great fallback voices.</div>
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-        <template x-for="v in voices.filter(v=>v.engine!=='qwen3')" :key="v.id">
+        <template x-for="v in voices.filter(v=>v.engine==='edge')" :key="v.id">
           <div @click="selectVoice(v.id)" :class="selectedVoiceId===v.id ? 'ring-2 ring-blue-500 bg-blue-50' : 'bg-gray-50 hover:bg-gray-100'" class="flex items-center justify-between p-3 rounded-lg cursor-pointer transition group">
             <div class="flex items-center gap-3 min-w-0">
               <div :class="v.gender==='Female' ? 'bg-pink-100 text-pink-600' : 'bg-blue-100 text-blue-600'" class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0" x-text="v.name[0]"></div>
@@ -84,7 +84,7 @@
           </div>
         </template>
       </div>
-      <div x-show="selectedVoiceId && !selectedVoiceId.startsWith('qwen-')" class="flex items-center gap-2 mt-2 pt-3 border-t">
+      <div x-show="selectedVoiceId && !selectedVoiceId.startsWith('qwen-') && !selectedVoiceId.startsWith('clone-')" class="flex items-center gap-2 mt-2 pt-3 border-t">
         <span class="text-xs text-gray-500">Selected:</span>
         <span class="text-xs font-semibold text-blue-700" x-text="voices.find(v=>v.id===selectedVoiceId)?.name || ''"></span>
         <button @click="previewVoice(selectedVoiceId)" :disabled="previewingId" class="ml-auto text-xs text-blue-600 hover:underline">Preview selected</button>
@@ -351,6 +351,7 @@ function voiceAgentApp() {
       if (!this.cloneFile) return;
       this.cloneError = '';
       this.cloneStep = 'processing';
+      this.cloneUploading = true;
       try {
         const form = new FormData();
         form.append('audio', this.cloneFile);
@@ -371,6 +372,8 @@ function voiceAgentApp() {
       } catch(e) {
         this.cloneError = 'Voice cloning failed. Ensure the GPU is available and Qwen3-TTS model is loaded.';
         this.cloneStep = 'upload';
+      } finally {
+        this.cloneUploading = false;
       }
     },
 
@@ -412,6 +415,16 @@ function voiceAgentApp() {
 
     confirmClone() {
       this.selectedVoiceId = 'clone-' + this.cloneId;
+      if (!this.voices.find(v => v.id === this.selectedVoiceId)) {
+        this.voices.unshift({
+          id: this.selectedVoiceId,
+          name: 'My Cloned Voice',
+          gender: 'Custom',
+          style: 'Based on your sample',
+          language: 'en-US',
+          engine: 'clone',
+        });
+      }
       this.voiceTab = 'qwen3';
       if (this.ws && this.ws.readyState === 1) {
         this.ws.send(JSON.stringify({type:'config', voiceId: this.selectedVoiceId}));

@@ -6,10 +6,10 @@
 <header class="fixed top-0 inset-x-0 z-50 glass border-b border-gray-200/50" x-data="{ mobileOpen: false }">
   <div class="max-w-7xl mx-auto flex items-center justify-between h-16 px-6">
     <a href="/" class="flex items-center gap-2">
-      <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
+      <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-teal-500 to-cyan-600 flex items-center justify-center">
         <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4M12 4a3 3 0 00-3 3v4a3 3 0 006 0V7a3 3 0 00-3-3z"/></svg>
       </div>
-      <span class="text-xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">VoiceFlow</span>
+      <span class="text-xl font-bold vf-heading bg-gradient-to-r from-teal-600 to-cyan-700 bg-clip-text text-transparent">VoiceFlow</span>
     </a>
     <nav class="hidden md:flex items-center gap-8">
       <a href="#features" class="text-sm text-gray-600 hover:text-gray-900 transition">Features</a>
@@ -21,17 +21,17 @@
       <a href="{% url 'dashboard' %}" class="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900">Dashboard</a>
       {% else %}
       <a href="{% url 'login' %}" class="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900">Sign In</a>
-      <a href="{% url 'register' %}" class="px-5 py-2.5 text-sm font-medium text-white bg-gradient-to-r from-blue-600 to-purple-600 rounded-full hover:shadow-lg hover:shadow-blue-500/25 transition-all">Get Started Free</a>
+      <a href="{% url 'register' %}" class="px-5 py-2.5 text-sm font-medium text-white bg-gradient-to-r from-teal-600 to-cyan-600 rounded-full hover:shadow-lg hover:shadow-cyan-700/25 transition-all">Get Started Free</a>
       {% endif %}
     </div>
   </div>
 </header>
 
 <!-- Hero -->
-<section class="relative min-h-screen flex items-center overflow-hidden bg-gradient-to-br from-slate-900 via-blue-900 to-indigo-900 pt-16">
+<section class="relative min-h-screen flex items-center overflow-hidden bg-gradient-to-br from-slate-950 via-teal-950 to-cyan-950 pt-16">
   <div class="absolute inset-0 opacity-20">
-    <div class="absolute top-20 left-10 w-72 h-72 bg-blue-500 rounded-full blur-[120px]"></div>
-    <div class="absolute bottom-20 right-10 w-96 h-96 bg-purple-500 rounded-full blur-[120px]"></div>
+    <div class="absolute top-20 left-10 w-72 h-72 bg-teal-500 rounded-full blur-[120px]"></div>
+    <div class="absolute bottom-20 right-10 w-96 h-96 bg-cyan-500 rounded-full blur-[120px]"></div>
   </div>
   <div class="relative max-w-7xl mx-auto px-6 py-20 grid lg:grid-cols-2 gap-12 items-center">
     <div>
@@ -39,9 +39,9 @@
         <span class="w-2 h-2 rounded-full bg-green-400 animate-pulse"></span>
         AI-Powered Voice Agents
       </div>
-      <h1 class="text-4xl lg:text-6xl font-extrabold text-white leading-tight mb-6">
+      <h1 class="text-4xl lg:text-6xl font-extrabold vf-heading text-white leading-tight mb-6">
         Automate
-        <span class="bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent"
+        <span class="bg-gradient-to-r from-teal-300 to-cyan-300 bg-clip-text text-transparent"
               x-data="{ words: ['customer support','sales calls','appointment booking','lead qualification','technical support'], idx: 0 }"
               x-init="setInterval(() => idx = (idx+1) % words.length, 3000)"
               x-text="words[idx]">customer support</span>
@@ -62,7 +62,7 @@
     <div class="hidden lg:block">
       <div class="bg-white/10 backdrop-blur-xl rounded-2xl border border-white/20 p-6 shadow-2xl">
         <div class="flex items-center gap-3 mb-4">
-          <div class="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white font-bold text-sm">AI</div>
+          <div class="w-10 h-10 rounded-full bg-gradient-to-br from-teal-400 to-cyan-500 flex items-center justify-center text-white font-bold text-sm">AI</div>
           <div><div class="text-white font-semibold">Customer Support Agent</div><div class="text-blue-200/60 text-xs flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-green-400"></span> Active — 0.3s response</div></div>
         </div>
         <div class="space-y-3">
@@ -83,7 +83,7 @@
 <section id="features" class="py-24 bg-white">
   <div class="max-w-7xl mx-auto px-6">
     <div class="text-center mb-16">
-      <h2 class="text-3xl lg:text-4xl font-bold mb-4">Everything you need to build AI voice agents</h2>
+      <h2 class="text-3xl lg:text-4xl font-bold vf-heading mb-4">Everything you need to build AI voice agents</h2>
       <p class="text-gray-500 max-w-2xl mx-auto">From intelligent voice interactions to advanced analytics, VoiceFlow gives you the complete toolkit.</p>
     </div>
     <div class="grid md:grid-cols-3 gap-8">
@@ -109,7 +109,7 @@
 <section id="embed" class="py-24 bg-gray-900 text-white">
   <div class="max-w-7xl mx-auto px-6">
     <div class="text-center mb-16">
-      <h2 class="text-3xl lg:text-4xl font-bold mb-4">Add AI voice to your website in one line</h2>
+      <h2 class="text-3xl lg:text-4xl font-bold vf-heading mb-4">Add AI voice to your website in one line</h2>
       <p class="text-gray-400 max-w-2xl mx-auto">Embed a powerful AI agent on any website with a simple script tag. Works everywhere — WordPress, Shopify, React, or plain HTML.</p>
     </div>
     <div class="grid lg:grid-cols-2 gap-12 items-center">
@@ -142,7 +142,7 @@
 <section id="pricing" class="py-24 bg-gray-50">
   <div class="max-w-7xl mx-auto px-6">
     <div class="text-center mb-16">
-      <h2 class="text-3xl lg:text-4xl font-bold mb-4">Simple, transparent pricing</h2>
+      <h2 class="text-3xl lg:text-4xl font-bold vf-heading mb-4">Simple, transparent pricing</h2>
       <p class="text-gray-500">Start free, scale as you grow.</p>
     </div>
     <div class="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">

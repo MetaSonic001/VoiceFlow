@@ -1,25 +1,25 @@
 {% extends "base_dashboard.html" %}{% block title %}Integrations — VoiceFlow AI{% endblock %}
 {% block content %}
-<div class="mb-8"><h1 class="text-2xl font-bold">Integrations</h1><p class="text-gray-500 text-sm mt-1">Connect third-party services</p></div>
+<div class="mb-8"><h1 class="text-3xl font-bold vf-heading">Integrations</h1><p class="text-slate-500 text-sm mt-1">Connect third-party services and automate your workflow stack.</p></div>
 <div class="grid md:grid-cols-3 gap-6">
   {% for item in integrations %}
-  <div class="bg-white rounded-xl border p-5 flex flex-col {% if item.coming_soon %}opacity-75{% endif %}">
+  <div class="vf-card p-5 flex flex-col {% if item.coming_soon %}opacity-80{% endif %}">
     <div class="flex items-center gap-3 mb-3">
-      <div class="w-10 h-10 rounded-lg bg-{{ item.color|default:'gray' }}-100 flex items-center justify-center text-{{ item.color|default:'gray' }}-600 font-bold text-lg">{{ item.name|make_list|first }}</div>
+      <div class="w-10 h-10 rounded-lg bg-{{ item.color|default:'gray' }}-100 flex items-center justify-center text-{{ item.color|default:'gray' }}-600 font-bold text-lg ring-1 ring-black/5">{{ item.name|make_list|first }}</div>
       <span class="font-semibold">{{ item.name }}</span>
       {% if item.coming_soon %}<span class="ml-auto px-2 py-0.5 bg-amber-100 text-amber-700 text-xs font-semibold rounded-full">Coming Soon</span>{% endif %}
     </div>
-    <p class="text-sm text-gray-500 flex-1">{{ item.description|default:"Connect and configure." }}</p>
+    <p class="text-sm text-slate-500 flex-1">{{ item.description|default:"Connect and configure." }}</p>
     <div class="mt-4">
       {% if item.coming_soon %}
-        <span class="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-400">Not available yet</span>
+        <span class="text-xs px-2 py-1 rounded-full bg-slate-100 text-slate-500">Not available yet</span>
       {% else %}
         <span class="text-xs px-2 py-1 rounded-full {% if item.status == 'connected' %}bg-green-100 text-green-700{% else %}bg-gray-100 text-gray-500{% endif %}">{{ item.status|default:"Not connected" }}</span>
       {% endif %}
     </div>
   </div>
   {% empty %}
-  <div class="col-span-3 text-center py-8 text-gray-400 bg-white rounded-xl border">No integrations available.</div>
+  <div class="col-span-3 text-center py-8 text-slate-400 vf-card">No integrations available.</div>
   {% endfor %}
 </div>
 {% endblock %}
