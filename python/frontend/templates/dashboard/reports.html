@@ -50,10 +50,35 @@ function reportsApp() {
       this.generating = false;
     },
 
-    downloadReport(r) {
-      // Build a simple CSV export of the report data
-      const lines = ['Report: ' + r.name, 'Type: ' + (r.type||'Summary'), 'Generated: ' + (r.created_at||r.createdAt||'N/A'), '', 'Status: Complete'];
-      const blob = new Blob([lines.join('\n')], {type:'text/csv'});
+    async downloadReport(r) {
+      // Fetch real data based on report type and build CSV
+      const type = (r.type || r.name || '').toLowerCase();
+      let csvRows = [];
+      try {
+        if (type.includes('call')) {
+          const data = await apiFetch('/api/call-logs/');
+          const logs = data.logs || data.callLogs || [];
+          csvRows.push(['ID','Agent','Caller','Duration','Rating','Status','Created At']);
+          logs.forEach(l => csvRows.push([l.id||'', l.agentName||l.agentId||'', l.callerNumber||l.caller||'', l.duration||'', l.rating||'', l.status||'', l.createdAt||l.created_at||'']));
+        } else if (type.includes('agent')) {
+          const data = await apiFetch('/api/agents/');
+          const agents = data.agents || [];
+          csvRows.push(['ID','Name','Status','Model','Calls','Avg Rating','Created At']);
+          agents.forEach(a => csvRows.push([a.id||'', a.name||'', a.status||'', a.model||'', a.callCount||a._count?.calls||0, a.avgRating||'', a.createdAt||a.created_at||'']));
+        } else {
+          const data = await apiFetch('/api/analytics/overview/');
+          csvRows.push(['Metric','Value']);
+          Object.entries(data).forEach(([k,v]) => {
+            if (typeof v !== 'object') csvRows.push([k, v]);
+          });
+          if (data.metrics) Object.entries(data.metrics).forEach(([k,v]) => csvRows.push([k, v]));
+        }
+      } catch(e) {
+        csvRows = [['Error'], ['Could not fetch data: ' + e.message]];
+      }
+      if (csvRows.length <= 1) csvRows.push(['No data available']);
+      const csv = csvRows.map(row => row.map(c => '"' + String(c).replace(/"/g,'""') + '"').join(',')).join('\n');
+      const blob = new Blob([csv], {type:'text/csv'});
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;

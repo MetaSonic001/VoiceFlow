@@ -73,7 +73,7 @@
       <label class="flex items-center gap-3"><input type="checkbox" class="rounded border-gray-300" x-model="generalSettings.maintenanceMode"> <span class="text-sm">Maintenance mode</span></label>
       <label class="flex items-center gap-3"><input type="checkbox" class="rounded border-gray-300" x-model="generalSettings.debugLogging"> <span class="text-sm">Debug logging</span></label>
     </div>
-    <button @click="saveGeneral()" class="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg">Save Settings</button>
+    <button @click="saveGeneral()" :disabled="savingGeneral" class="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg disabled:opacity-50" x-text="savingGeneral ? 'Saving…' : 'Save Settings'"></button>
   </div>
 </div>
 <script>
@@ -107,9 +107,16 @@ function settingsApp() {
       const fd = new FormData(); fd.append('audio', this.cloneFile);
       try { const r = await fetch('/api/voice/clone/', {method:'POST', headers:{'X-CSRFToken':CSRF}, body:fd}).then(r=>r.json()); showToast('Voice cloned: '+r.voiceId); } catch(e) { showToast('Clone failed','error'); }
     },
-    generalSettings: {emailNotifications: true, maintenanceMode: false, debugLogging: false},
+    generalSettings: {
+      emailNotifications: {{ settings_data.emailNotifications|default:"true"|lower }},
+      maintenanceMode: {{ settings_data.maintenanceMode|default:"false"|lower }},
+      debugLogging: {{ settings_data.debugLogging|default:"false"|lower }},
+    },
+    savingGeneral: false,
     async saveGeneral() {
+      this.savingGeneral = true;
       try { await apiFetch('/api/settings/', {method:'PUT', json:this.generalSettings}); showToast('Settings saved'); } catch(e) { showToast('Failed','error'); }
+      this.savingGeneral = false;
     }
   }
 }

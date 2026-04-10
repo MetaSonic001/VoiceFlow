@@ -145,7 +145,9 @@ def widget(request):
 
 @login_required
 def api_docs(request):
-    return render(request, "dashboard/api_docs.html")
+    from django.conf import settings as django_settings
+    backend_url = django_settings.BACKEND_API_URL.rstrip("/")
+    return render(request, "dashboard/api_docs.html", {"swagger_url": f"{backend_url}/docs"})
 
 
 @login_required
@@ -218,9 +220,9 @@ def integrations(request):
         {"name": "Groq", "description": "LLM inference for agent conversations.", "color": "blue",
          "status": "connected" if groq_connected else "Not connected"},
         {"name": "Slack", "description": "Team notifications and alerts.", "color": "purple",
-         "status": "Not connected"},
+         "status": "Not connected", "coming_soon": True},
         {"name": "WhatsApp", "description": "WhatsApp Business messaging channel.", "color": "green",
-         "status": "connected" if twilio_connected else "Not connected"},
+         "status": "Not connected", "coming_soon": True},
     ]
     return render(request, "dashboard/integrations.html", {"integrations": integrations_list})
 
@@ -240,3 +242,16 @@ def pipelines(request):
 @login_required
 def data_explorer(request):
     return render(request, "dashboard/data_explorer.html")
+
+
+@login_required
+def brands(request):
+    import json
+    client = get_client(request)
+    brands_list = []
+    try:
+        result = client.get_brands()
+        brands_list = result if isinstance(result, list) else result.get("brands", [])
+    except Exception:
+        pass
+    return render(request, "dashboard/brands.html", {"brands": json.dumps(brands_list)})

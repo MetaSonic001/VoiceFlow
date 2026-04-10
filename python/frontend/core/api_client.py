@@ -337,6 +337,22 @@ class BackendClient:
     def get_data_redis(self):
         return self._get("/api/data-explorer/redis")
 
+    # ── Brands ─────────────────────────────────────────────────────────
+    def get_brands(self):
+        return self._get("/api/brands/")
+
+    def get_brand(self, brand_id: str):
+        return self._get(f"/api/brands/{brand_id}")
+
+    def create_brand(self, data: dict):
+        return self._post("/api/brands/", json=data)
+
+    def update_brand(self, brand_id: str, data: dict):
+        return self._put(f"/api/brands/{brand_id}", json=data)
+
+    def delete_brand(self, brand_id: str):
+        return self._delete(f"/api/brands/{brand_id}")
+
 
 def get_client(request) -> BackendClient:
     """Build a BackendClient from the current Django request."""

@@ -38,6 +38,7 @@ urlpatterns = [
     path("dashboard/reports/", pages.reports, name="reports"),
     path("dashboard/integrations/", pages.integrations, name="integrations"),
     path("dashboard/pipelines/", pages.pipelines, name="pipelines"),
+    path("dashboard/brands/", pages.brands, name="brands"),
 
     # API proxy endpoints (for HTMX / JS calls from the browser)
     path("api/agents/", api_proxy.agents_list, name="api_agents"),
@@ -88,4 +89,6 @@ urlpatterns = [
     path("api/data-explorer/chromadb/", api_proxy.data_explorer_chromadb, name="api_data_explorer_chromadb"),
     path("api/data-explorer/redis/", api_proxy.data_explorer_redis, name="api_data_explorer_redis"),
     path("api/audit/", api_proxy.audit_api, name="api_audit"),
+    path("api/brands/", api_proxy.brands_api, name="api_brands"),
+    path("api/brands/<str:brand_id>/", api_proxy.brand_detail_api, name="api_brand_detail"),
 ]

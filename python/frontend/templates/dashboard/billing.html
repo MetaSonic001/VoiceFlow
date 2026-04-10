@@ -24,12 +24,46 @@
 </div>
 
 <div class="bg-white rounded-xl border p-6">
-  <h3 class="font-semibold mb-4">Coming Soon</h3>
-  <div class="grid md:grid-cols-2 gap-4 text-sm text-gray-500">
-    <div class="flex items-center gap-2"><svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> Subscription plans</div>
-    <div class="flex items-center gap-2"><svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> Usage-based billing</div>
-    <div class="flex items-center gap-2"><svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> Invoice management</div>
-    <div class="flex items-center gap-2"><svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> Payment methods</div>
+  <h3 class="font-semibold mb-4">Plan Comparison</h3>
+  <div class="grid md:grid-cols-3 gap-6">
+    <!-- Free Beta -->
+    <div class="border-2 border-blue-500 rounded-xl p-6 relative">
+      <span class="absolute -top-3 left-4 px-2 py-0.5 bg-blue-600 text-white text-xs font-bold rounded-full">Current Plan</span>
+      <h4 class="text-lg font-bold mt-2">Free Beta</h4>
+      <div class="text-3xl font-bold mt-2">$0<span class="text-sm text-gray-400 font-normal">/mo</span></div>
+      <ul class="mt-4 space-y-2 text-sm text-gray-600">
+        <li class="flex items-center gap-2"><svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Up to 5 agents</li>
+        <li class="flex items-center gap-2"><svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> 100 conversations/mo</li>
+        <li class="flex items-center gap-2"><svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> 50 MB document storage</li>
+        <li class="flex items-center gap-2"><svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Community support</li>
+      </ul>
+    </div>
+    <!-- Pro -->
+    <div class="border rounded-xl p-6 opacity-80">
+      <h4 class="text-lg font-bold">Pro</h4>
+      <div class="text-3xl font-bold mt-2">$49<span class="text-sm text-gray-400 font-normal">/mo</span></div>
+      <ul class="mt-4 space-y-2 text-sm text-gray-600">
+        <li class="flex items-center gap-2"><svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Unlimited agents</li>
+        <li class="flex items-center gap-2"><svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> 5,000 conversations/mo</li>
+        <li class="flex items-center gap-2"><svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> 5 GB document storage</li>
+        <li class="flex items-center gap-2"><svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Priority support</li>
+        <li class="flex items-center gap-2"><svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Custom brand voices</li>
+      </ul>
+      <button disabled class="w-full mt-6 px-4 py-2 border border-gray-300 text-gray-400 text-sm rounded-lg cursor-not-allowed">Coming Soon</button>
+    </div>
+    <!-- Enterprise -->
+    <div class="border rounded-xl p-6 opacity-80">
+      <h4 class="text-lg font-bold">Enterprise</h4>
+      <div class="text-3xl font-bold mt-2">Custom</div>
+      <ul class="mt-4 space-y-2 text-sm text-gray-600">
+        <li class="flex items-center gap-2"><svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Everything in Pro</li>
+        <li class="flex items-center gap-2"><svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Unlimited conversations</li>
+        <li class="flex items-center gap-2"><svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Unlimited storage</li>
+        <li class="flex items-center gap-2"><svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Dedicated support</li>
+        <li class="flex items-center gap-2"><svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> SLA &amp; on-prem deploy</li>
+      </ul>
+      <button disabled class="w-full mt-6 px-4 py-2 border border-gray-300 text-gray-400 text-sm rounded-lg cursor-not-allowed">Contact Sales</button>
+    </div>
   </div>
 </div>
 {% endblock %}

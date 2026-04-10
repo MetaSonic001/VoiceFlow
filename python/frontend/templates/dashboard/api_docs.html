@@ -2,102 +2,18 @@
 {% block title %}API Documentation — VoiceFlow AI{% endblock %}
 {% block content %}
 <div class="mb-8">
-  <h1 class="text-2xl font-bold">API Documentation</h1>
-  <p class="text-gray-500 text-sm mt-1">Interactive API reference — all endpoints available on your FastAPI backend</p>
-</div>
-<div x-data="apiDocsApp()" class="space-y-4">
-  <template x-for="cat in categories" :key="cat.name">
-    <div class="bg-white rounded-xl border">
-      <button @click="open=open===cat.name?null:cat.name" class="w-full flex items-center justify-between p-5 text-left">
-        <span class="font-semibold" x-text="cat.name"></span>
-        <svg :class="open===cat.name?'rotate-180':''" class="w-5 h-5 text-gray-400 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
-      </button>
-      <div x-show="open===cat.name" x-cloak class="border-t px-5 pb-5 text-sm text-gray-600">
-        <template x-for="ep in cat.endpoints" :key="ep.method+ep.path">
-          <div class="py-3 border-b last:border-b-0">
-            <div class="flex items-center gap-2">
-              <span class="px-2 py-0.5 rounded text-xs font-mono" :class="{'bg-blue-100 text-blue-700':ep.method==='GET','bg-green-100 text-green-700':ep.method==='POST','bg-yellow-100 text-yellow-700':ep.method==='PUT','bg-red-100 text-red-700':ep.method==='DELETE','bg-purple-100 text-purple-700':ep.method==='WS'}" x-text="ep.method"></span>
-              <code x-text="ep.path"></code>
-            </div>
-            <p class="text-gray-400 mt-1" x-text="ep.desc"></p>
-          </div>
-        </template>
-      </div>
+  <div class="flex items-center justify-between">
+    <div>
+      <h1 class="text-2xl font-bold">API Documentation</h1>
+      <p class="text-gray-500 text-sm mt-1">Interactive API reference powered by FastAPI's auto-generated OpenAPI docs</p>
     </div>
-  </template>
+    <a href="{{ swagger_url }}" target="_blank" rel="noopener" class="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+      Open in New Tab
+    </a>
+  </div>
 </div>
-<script>
-function apiDocsApp(){return{open:null,categories:[
-  {name:'Agents',endpoints:[
-    {method:'GET',path:'/api/agents/',desc:'List all agents for the tenant'},
-    {method:'POST',path:'/api/agents/',desc:'Create a new agent'},
-    {method:'GET',path:'/api/agents/{id}',desc:'Get agent details'},
-    {method:'PUT',path:'/api/agents/{id}',desc:'Update an agent'},
-    {method:'DELETE',path:'/api/agents/{id}',desc:'Delete an agent'},
-    {method:'POST',path:'/api/agents/{id}/activate',desc:'Activate an agent'},
-    {method:'POST',path:'/api/agents/{id}/pause',desc:'Pause an agent'},
-  ]},
-  {name:'Runner (Chat & Audio)',endpoints:[
-    {method:'POST',path:'/api/runner/chat',desc:'Send a message to an agent (RAG pipeline)'},
-    {method:'POST',path:'/api/runner/audio',desc:'Upload audio for STT → RAG → response'},
-    {method:'GET',path:'/api/runner/agent/{agentId}',desc:'Get agent info for runner'},
-  ]},
-  {name:'Documents & Knowledge',endpoints:[
-    {method:'GET',path:'/api/documents/',desc:'List uploaded documents'},
-    {method:'POST',path:'/api/documents/upload',desc:'Upload a document (PDF, DOCX, TXT, images)'},
-    {method:'DELETE',path:'/api/documents/{id}',desc:'Delete a document'},
-    {method:'POST',path:'/api/ingestion/start',desc:'Trigger URL ingestion'},
-  ]},
-  {name:'Call Logs',endpoints:[
-    {method:'GET',path:'/api/logs/',desc:'List call/chat logs'},
-    {method:'GET',path:'/api/logs/{id}',desc:'Get a specific log'},
-    {method:'PATCH',path:'/api/logs/{id}/rating',desc:'Rate a log interaction'},
-    {method:'POST',path:'/api/logs/{id}/flag',desc:'Flag a log for retraining'},
-  ]},
-  {name:'Analytics',endpoints:[
-    {method:'GET',path:'/analytics/overview',desc:'Dashboard overview metrics'},
-    {method:'GET',path:'/analytics/usage',desc:'Billing/usage statistics'},
-  ]},
-  {name:'Retraining',endpoints:[
-    {method:'GET',path:'/api/retraining/',desc:'List retraining examples'},
-    {method:'GET',path:'/api/retraining/stats',desc:'Retraining statistics'},
-    {method:'PATCH',path:'/api/retraining/{id}',desc:'Approve/reject a retraining example'},
-    {method:'POST',path:'/api/retraining/process',desc:'Trigger retraining pipeline'},
-  ]},
-  {name:'Settings & Credentials',endpoints:[
-    {method:'GET',path:'/api/settings/',desc:'Get tenant settings'},
-    {method:'PUT',path:'/api/settings/',desc:'Update tenant settings'},
-    {method:'POST',path:'/api/settings/twilio',desc:'Save Twilio credentials (encrypted)'},
-    {method:'GET',path:'/api/settings/twilio',desc:'Check Twilio credential status'},
-    {method:'DELETE',path:'/api/settings/twilio',desc:'Remove Twilio credentials'},
-    {method:'POST',path:'/api/settings/groq',desc:'Save Groq API key (encrypted)'},
-    {method:'GET',path:'/api/settings/groq',desc:'Check Groq key status'},
-    {method:'GET',path:'/api/settings/groq/models',desc:'List available Groq models'},
-  ]},
-  {name:'Users',endpoints:[
-    {method:'GET',path:'/api/users/',desc:'List tenant users'},
-    {method:'POST',path:'/api/users/',desc:'Create a user'},
-    {method:'PUT',path:'/api/users/{id}',desc:'Update a user'},
-    {method:'DELETE',path:'/api/users/{id}',desc:'Delete a user'},
-  ]},
-  {name:'Voice & TTS',endpoints:[
-    {method:'POST',path:'/api/tts/synthesise',desc:'Text-to-speech synthesis'},
-    {method:'GET',path:'/api/tts/preset-voices',desc:'List preset voices'},
-    {method:'POST',path:'/api/tts/clone-voice',desc:'Clone a voice from audio'},
-    {method:'WS',path:'/api/voice/ws/{sessionId}',desc:'WebSocket voice streaming'},
-  ]},
-  {name:'Widget',endpoints:[
-    {method:'GET',path:'/api/widget/{agentId}/config',desc:'Get widget configuration'},
-    {method:'POST',path:'/api/widget/{agentId}/sessions',desc:'Create a widget session'},
-    {method:'POST',path:'/api/widget/{agentId}/sessions/{sessionId}/message',desc:'Send a widget message'},
-  ]},
-  {name:'System',endpoints:[
-    {method:'GET',path:'/api/system/health',desc:'System health (CPU, memory, disk, services)'},
-    {method:'GET',path:'/api/audit',desc:'Audit log entries'},
-    {method:'GET',path:'/api/notifications',desc:'Tenant notifications'},
-    {method:'POST',path:'/api/notifications/read-all',desc:'Mark all notifications read'},
-    {method:'GET',path:'/health',desc:'Basic health check'},
-  ]},
-]}}
-</script>
+<div class="bg-white rounded-xl border overflow-hidden" style="height:calc(100vh - 200px)">
+  <iframe src="{{ swagger_url }}" class="w-full h-full border-0" title="FastAPI Swagger UI"></iframe>
+</div>
 {% endblock %}

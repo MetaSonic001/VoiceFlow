@@ -553,3 +553,34 @@ def audit_api(request):
         return JsonResponse(get_client(request).get_audit_logs(limit=limit, offset=offset))
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
+
+
+# ── Brands ─────────────────────────────────────────────────────────────
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def brands_api(request):
+    client = get_client(request)
+    try:
+        if request.method == "POST":
+            result = client.create_brand(_json_body(request))
+            return JsonResponse(result, status=201)
+        brands = client.get_brands()
+        return JsonResponse({"brands": brands} if isinstance(brands, list) else brands)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
+@require_http_methods(["GET", "PUT", "DELETE"])
+def brand_detail_api(request, brand_id):
+    client = get_client(request)
+    try:
+        if request.method == "PUT":
+            return JsonResponse(client.update_brand(brand_id, _json_body(request)))
+        if request.method == "DELETE":
+            client.delete_brand(brand_id)
+            return JsonResponse({"ok": True})
+        return JsonResponse(client.get_brand(brand_id))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
