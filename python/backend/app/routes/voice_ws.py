@@ -122,7 +122,7 @@ async def voice_websocket(websocket: WebSocket, agent_id: str):
     audio_buffer = bytearray()
     # Voice config — client can send {"type":"config","voiceId":"preset-davis"}
     selected_voice = "en-US-AriaNeural"
-    selected_engine = "edge"  # "edge" or "qwen3"
+    selected_engine = "edge"  # "edge" | "qwen3" | "clone"
 
     try:
         while True:
@@ -137,8 +137,11 @@ async def voice_websocket(websocket: WebSocket, agent_id: str):
             if msg_type == "config":
                 # Client sends voice preference
                 vid = msg.get("voiceId", "")
-                from app.routes.tts import resolve_edge_voice, is_qwen_voice
-                if is_qwen_voice(vid):
+                from app.routes.tts import resolve_edge_voice, is_qwen_voice, is_clone_voice
+                if is_clone_voice(vid):
+                    selected_voice = vid
+                    selected_engine = "clone"
+                elif is_qwen_voice(vid):
                     selected_voice = vid          # Qwen voice IDs passed through as-is
                     selected_engine = "qwen3"
                 else:
@@ -196,7 +199,15 @@ async def voice_websocket(websocket: WebSocket, agent_id: str):
 
                 # 2b. Generate TTS audio and send over WebSocket
                 try:
-                    if selected_engine == "qwen3":
+                    if selected_engine == "clone":
+                        from app.routes.tts import _synthesise_clone
+                        result = await _synthesise_clone(response_text, selected_voice)
+                        audio_data_uri = result.get("audioUrl") if isinstance(result, dict) else None
+                        if audio_data_uri:
+                            await websocket.send_json({"type": "audio", "data": audio_data_uri})
+                        else:
+                            raise RuntimeError("Clone TTS returned no audio")
+                    elif selected_engine == "qwen3":
                         from app.routes.tts import _synthesise_qwen
                         result = await _synthesise_qwen(response_text, selected_voice)
                         # _synthesise_qwen returns dict with audioUrl or JSONResponse on error

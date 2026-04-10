@@ -150,6 +150,10 @@ def is_qwen_voice(voice_id: str) -> bool:
     return voice_id.startswith("qwen-")
 
 
+def is_clone_voice(voice_id: str) -> bool:
+    return voice_id.startswith("clone-")
+
+
 # ── Routes ─────────────────────────────────────────────────────────────
 
 @router.get("/preset-voices")
@@ -163,6 +167,10 @@ async def preview_voice(body: dict):
     """Generate a preview clip of a voice using a standard sample sentence."""
     voice_id = body.get("voiceId", "preset-aria")
     text = body.get("text", PREVIEW_SENTENCE)
+
+    # Cloned voices
+    if is_clone_voice(voice_id):
+        return await _synthesise_clone(text, voice_id)
 
     # Qwen3-TTS voices
     if is_qwen_voice(voice_id):
@@ -219,6 +227,35 @@ async def _synthesise_qwen(text: str, voice_id: str, instruct: str = "") -> dict
         return JSONResponse({"error": f"Qwen3-TTS failed: {e}"}, status_code=500)
 
 
+async def _synthesise_clone(text: str, voice_id: str) -> dict:
+    """Synthesise using a previously cached clone prompt (clone-<id>)."""
+    clone_id = voice_id.replace("clone-", "", 1)
+    prompt = _clone_prompts.get(clone_id)
+    if prompt is None:
+        return JSONResponse({"error": "Clone not found. Please re-upload your audio."}, status_code=404)
+
+    model = await _get_qwen_base_model()
+    if model is None:
+        return JSONResponse({"error": "Qwen3-TTS Base model not available"}, status_code=503)
+
+    try:
+        loop = asyncio.get_event_loop()
+        wavs, sr = await loop.run_in_executor(None, lambda: model.generate_voice_clone(
+            text=text,
+            language="English",
+            voice_clone_prompt=prompt,
+        ))
+        return {
+            "audioUrl": f"data:audio/wav;base64,{_wav_to_b64(wavs[0], sr)}",
+            "voiceId": voice_id,
+            "engine": "qwen3-clone",
+            "charCount": len(text),
+        }
+    except Exception as e:
+        logger.exception("Cloned voice synthesis failed")
+        return JSONResponse({"error": f"Clone synthesis failed: {e}"}, status_code=500)
+
+
 @router.post("/synthesise")
 async def synthesise(body: dict):
     text = body.get("text")
@@ -227,6 +264,13 @@ async def synthesise(body: dict):
 
     voice_id = body.get("voiceId", "")
     instruct = body.get("instruct", "")
+
+    # Cloned voices
+    if is_clone_voice(voice_id):
+        clone_result = await _synthesise_clone(text, voice_id)
+        if not isinstance(clone_result, JSONResponse):
+            return clone_result
+        logger.info("Clone synthesis failed, falling back to other engines")
 
     # Qwen3-TTS voices
     if is_qwen_voice(voice_id):
