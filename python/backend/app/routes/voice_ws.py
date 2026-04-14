@@ -1,6 +1,6 @@
 """
 /api/voice/ws — Patent Claim 15: WebSocket voice pipeline.
-Browser sends audio chunks over WebSocket → STT (Whisper) → RAG pipeline → TTS (Edge TTS / Qwen3-TTS) → audio back.
+Browser sends audio chunks over WebSocket -> STT (Whisper) -> RAG pipeline -> TTS (Edge TTS / Chatterbox) -> audio back.
 Falls back to Groq Whisper API if local faster-whisper isn't available.
 """
 import asyncio
@@ -122,7 +122,7 @@ async def voice_websocket(websocket: WebSocket, agent_id: str):
     audio_buffer = bytearray()
     # Voice config — client can send {"type":"config","voiceId":"preset-davis"}
     selected_voice = "en-US-AriaNeural"
-    selected_engine = "edge"  # "edge" | "qwen3" | "clone"
+    selected_engine = "edge"  # "edge" | "chatterbox" | "clone"
 
     try:
         while True:
@@ -137,13 +137,13 @@ async def voice_websocket(websocket: WebSocket, agent_id: str):
             if msg_type == "config":
                 # Client sends voice preference
                 vid = msg.get("voiceId", "")
-                from app.routes.tts import resolve_edge_voice, is_qwen_voice, is_clone_voice
+                from app.routes.tts import resolve_edge_voice, is_chatterbox_voice, is_clone_voice
                 if is_clone_voice(vid):
                     selected_voice = vid
                     selected_engine = "clone"
-                elif is_qwen_voice(vid):
-                    selected_voice = vid          # Qwen voice IDs passed through as-is
-                    selected_engine = "qwen3"
+                elif is_chatterbox_voice(vid):
+                    selected_voice = vid
+                    selected_engine = "chatterbox"
                 else:
                     selected_voice = resolve_edge_voice(vid)
                     selected_engine = "edge"
@@ -207,26 +207,34 @@ async def voice_websocket(websocket: WebSocket, agent_id: str):
                             await websocket.send_json({"type": "audio", "data": audio_data_uri})
                         else:
                             raise RuntimeError("Clone TTS returned no audio")
-                    elif selected_engine == "qwen3":
-                        from app.routes.tts import _synthesise_qwen
-                        result = await _synthesise_qwen(response_text, selected_voice)
-                        # _synthesise_qwen returns dict with audioUrl or JSONResponse on error
+                    elif selected_engine == "chatterbox":
+                        from app.routes.tts import _synthesise_chatterbox
+                        result = await _synthesise_chatterbox(response_text, selected_voice)
                         audio_data_uri = result.get("audioUrl") if isinstance(result, dict) else None
                         if audio_data_uri:
                             await websocket.send_json({"type": "audio", "data": audio_data_uri})
                         else:
-                            raise RuntimeError("Qwen3-TTS returned no audio")
+                            raise RuntimeError("Chatterbox returned no audio")
                     else:
-                        communicate = edge_tts.Communicate(response_text, selected_voice)
-                        audio_buf = io.BytesIO()
-                        async for chunk in communicate.stream():
-                            if chunk["type"] == "audio":
-                                audio_buf.write(chunk["data"])
-                        audio_b64 = base64.b64encode(audio_buf.getvalue()).decode()
-                        await websocket.send_json({
-                            "type": "audio",
-                            "data": f"data:audio/mp3;base64,{audio_b64}",
-                        })
+                        try:
+                            communicate = edge_tts.Communicate(response_text, selected_voice)
+                            audio_buf = io.BytesIO()
+                            async for chunk in communicate.stream():
+                                if chunk["type"] == "audio":
+                                    audio_buf.write(chunk["data"])
+                            audio_b64 = base64.b64encode(audio_buf.getvalue()).decode()
+                            await websocket.send_json({
+                                "type": "audio",
+                                "data": f"data:audio/mp3;base64,{audio_b64}",
+                            })
+                        except Exception:
+                            from app.routes.tts import _synthesise_chatterbox
+                            result = await _synthesise_chatterbox(response_text, "chatterbox-default")
+                            audio_data_uri = result.get("audioUrl") if isinstance(result, dict) else None
+                            if audio_data_uri:
+                                await websocket.send_json({"type": "audio", "data": audio_data_uri})
+                            else:
+                                raise RuntimeError("Edge and Chatterbox fallback both failed")
                 except Exception:
                     logger.warning("TTS failed in WebSocket, client will use browser speech")
 

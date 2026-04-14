@@ -1,7 +1,7 @@
 # ═══════════════════════════════════════════════════════════════
 # VoiceFlow Python — Combined Requirements
 # Backend (FastAPI) + Frontend (Django)
-# Includes local Qwen3-TTS + Edge TTS support
+# Includes Edge TTS + local Chatterbox support
 # ═══════════════════════════════════════════════════════════════
 
 # ── FastAPI Backend ───────────────────────────────────────────
@@ -17,9 +17,12 @@ PyJWT==2.10.1
 python-jose[cryptography]==3.3.0
 aiofiles>=24.0
 edge-tts>=6.1
-qwen-tts>=0.1
+chatterbox-tts>=0.1.2
 soundfile>=0.12
-
+# NOTE: PyTorch (torch, torchvision, torchaudio) is installed separately
+# with CUDA 12.1 wheels for better GPU support:
+#   make install-pytorch
+#   OR: uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 # ── Document Ingestion Pipeline ──────────────────────────────
 docling>=2.0
 paddleocr>=3.0
@@ -62,5 +65,6 @@ psutil>=6.0
 
 # ── Shared ────────────────────────────────────────────────────
 httpx>=0.28
+requests>=2.31
 psycopg2-binary>=2.9
 python-dotenv>=1.0

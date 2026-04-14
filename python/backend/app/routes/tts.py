@@ -1,18 +1,24 @@
 """
-/api/tts routes — Dual TTS engine:
-  • Qwen3-TTS 0.6B (local GPU) — premium custom voices + voice cloning
-  • Edge TTS (Microsoft cloud) — 13 preset en-US voices, zero-GPU fallback
+/api/tts routes - Edge-first synthesis with Chatterbox local fallback.
+
+Engines:
+  - Edge TTS (primary): fast cloud synthesis for preset voices
+  - Chatterbox TTS (fallback): local synthesis and voice cloning
 """
+
 import asyncio
 import base64
 import io
 import logging
+import os
 import tempfile
-import wave
+import uuid
+from collections import OrderedDict
 
 import edge_tts
+import numpy as np
 import soundfile as sf
-from fastapi import APIRouter, UploadFile, File
+from fastapi import APIRouter, File, UploadFile
 from fastapi.responses import JSONResponse
 
 router = APIRouter()
@@ -24,7 +30,6 @@ PREVIEW_SENTENCE = (
     "in a natural, conversational tone. Let me know how you'd like to get started!"
 )
 
-# ── Edge TTS voice catalogue ──────────────────────────────────────────
 EDGE_VOICES = {
     "": "en-US-AriaNeural",
     "preset-aria": "en-US-AriaNeural",
@@ -40,16 +45,6 @@ EDGE_VOICES = {
     "preset-eric": "en-US-EricNeural",
     "preset-roger": "en-US-RogerNeural",
     "preset-steffan": "en-US-SteffanNeural",
-}
-
-# ── Qwen3-TTS speaker catalogue (0.6B-CustomVoice) ────────────────────
-QWEN_SPEAKERS = {
-    "qwen-vivian": {"speaker": "Vivian", "language": "Chinese", "gender": "Female", "style": "Bright & edgy"},
-    "qwen-serena": {"speaker": "Serena", "language": "Chinese", "gender": "Female", "style": "Warm & gentle"},
-    "qwen-ryan": {"speaker": "Ryan", "language": "English", "gender": "Male", "style": "Dynamic & rhythmic"},
-    "qwen-aiden": {"speaker": "Aiden", "language": "English", "gender": "Male", "style": "Sunny & clear"},
-    "qwen-anna": {"speaker": "Ono_Anna", "language": "Japanese", "gender": "Female", "style": "Playful & nimble"},
-    "qwen-sohee": {"speaker": "Sohee", "language": "Korean", "gender": "Female", "style": "Warm & emotional"},
 }
 
 EDGE_VOICE_LIST = [
@@ -68,116 +63,140 @@ EDGE_VOICE_LIST = [
     {"id": "preset-steffan", "name": "Steffan", "gender": "Male", "style": "Smooth & clear", "language": "en-US", "engine": "edge"},
 ]
 
-QWEN_VOICE_LIST = [
-    {"id": "qwen-ryan", "name": "Ryan (Qwen3)", "gender": "Male", "style": "Dynamic & rhythmic", "language": "en-US", "engine": "qwen3"},
-    {"id": "qwen-aiden", "name": "Aiden (Qwen3)", "gender": "Male", "style": "Sunny & clear", "language": "en-US", "engine": "qwen3"},
-    {"id": "qwen-vivian", "name": "Vivian (Qwen3)", "gender": "Female", "style": "Bright & edgy", "language": "zh-CN", "engine": "qwen3"},
-    {"id": "qwen-serena", "name": "Serena (Qwen3)", "gender": "Female", "style": "Warm & gentle", "language": "zh-CN", "engine": "qwen3"},
-    {"id": "qwen-anna", "name": "Anna (Qwen3)", "gender": "Female", "style": "Playful & nimble", "language": "ja-JP", "engine": "qwen3"},
-    {"id": "qwen-sohee", "name": "Sohee (Qwen3)", "gender": "Female", "style": "Warm & emotional", "language": "ko-KR", "engine": "qwen3"},
+CHATTERBOX_VOICE_LIST = [
+    {
+        "id": "chatterbox-default",
+        "name": "Chatterbox Local",
+        "gender": "Neutral",
+        "style": "Natural local synthesis",
+        "language": "en-US",
+        "engine": "chatterbox",
+    }
+]
+
+_chatterbox_model = None
+_chatterbox_available = False
+_chatterbox_lock = asyncio.Lock()
+
+_clone_prompts: OrderedDict[str, str] = OrderedDict()
+_max_clone_prompts = 20
+
+CLONE_CONFIRMATION_SENTENCES = [
+    "Hello! This is your cloned voice. How does it sound to you?",
+    "I can help answer questions, guide customers, and provide support - all in your voice.",
+    "The quick brown fox jumps over the lazy dog. Every letter of the alphabet, clear as day.",
 ]
 
 
-# ── Lazy-load Qwen3-TTS model (keeps VRAM free until first use) ───────
-_qwen_model = None
-_qwen_available = False
-_qwen_lock = asyncio.Lock()
+def _detect_chatterbox_device() -> str:
+    try:
+        import torch
+    except Exception:
+        return "cpu"
+
+    if torch.cuda.is_available():
+        return "cuda"
+
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return "mps"
+
+    return "cpu"
 
 
-async def _get_qwen_model():
-    """Lazy-load the Qwen3-TTS 0.6B-CustomVoice model on first call."""
-    global _qwen_model, _qwen_available
-    async with _qwen_lock:
-        if _qwen_model is not None:
-            return _qwen_model
+async def _get_chatterbox_model():
+    global _chatterbox_model, _chatterbox_available
+
+    async with _chatterbox_lock:
+        if _chatterbox_model is not None:
+            return _chatterbox_model
+
         try:
-            import torch
-            from qwen_tts import Qwen3TTSModel
-            logger.info("Loading Qwen3-TTS 0.6B-CustomVoice on GPU…")
-            _qwen_model = Qwen3TTSModel.from_pretrained(
-                "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
-                device_map="cuda:0",
-                dtype=torch.bfloat16,
-            )
-            _qwen_available = True
-            logger.info("Qwen3-TTS loaded successfully")
-            return _qwen_model
-        except Exception as e:
-            logger.warning(f"Qwen3-TTS failed to load: {e}")
-            _qwen_available = False
+            from chatterbox.tts import ChatterboxTTS
+
+            device = _detect_chatterbox_device()
+            logger.info("Loading Chatterbox-TTS on %s", device)
+
+            def _load():
+                return ChatterboxTTS.from_pretrained(device=device)
+
+            _chatterbox_model = await asyncio.to_thread(_load)
+            _chatterbox_available = True
+            logger.info("Chatterbox-TTS loaded successfully")
+            return _chatterbox_model
+        except Exception as exc:
+            logger.warning("Chatterbox-TTS failed to load: %s", exc)
+            _chatterbox_available = False
             return None
 
 
-# ── Lazy-load Qwen3-TTS Base model for voice cloning ──────────────────
-_qwen_base_model = None
-_qwen_base_lock = asyncio.Lock()
-
-
-async def _get_qwen_base_model():
-    """Lazy-load the Qwen3-TTS 0.6B-Base model for voice cloning."""
-    global _qwen_base_model
-    async with _qwen_base_lock:
-        if _qwen_base_model is not None:
-            return _qwen_base_model
-        try:
-            import torch
-            from qwen_tts import Qwen3TTSModel
-            logger.info("Loading Qwen3-TTS 0.6B-Base for voice cloning…")
-            _qwen_base_model = Qwen3TTSModel.from_pretrained(
-                "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
-                device_map="cuda:0",
-                dtype=torch.bfloat16,
-            )
-            logger.info("Qwen3-TTS Base loaded for voice cloning")
-            return _qwen_base_model
-        except Exception as e:
-            logger.warning(f"Qwen3-TTS Base failed to load: {e}")
-            return None
-
-
-def _wav_to_b64(wav_array, sample_rate: int) -> str:
-    """Convert numpy audio array to base64 WAV string."""
+def _wav_to_b64(wav_array: np.ndarray, sample_rate: int) -> str:
     buf = io.BytesIO()
     sf.write(buf, wav_array, sample_rate, format="WAV")
     return base64.b64encode(buf.getvalue()).decode()
+
+
+def _normalize_wav_array(wav_obj) -> np.ndarray:
+    if hasattr(wav_obj, "detach"):
+        wav_array = wav_obj.detach().cpu().numpy()
+    else:
+        wav_array = np.asarray(wav_obj)
+
+    wav_array = np.squeeze(wav_array)
+    if wav_array.ndim != 1:
+        wav_array = wav_array.reshape(-1)
+
+    return wav_array.astype(np.float32, copy=False)
 
 
 def resolve_edge_voice(voice_id: str) -> str:
     return EDGE_VOICES.get(voice_id, "en-US-AriaNeural")
 
 
-def is_qwen_voice(voice_id: str) -> bool:
-    return voice_id.startswith("qwen-")
+def is_chatterbox_voice(voice_id: str) -> bool:
+    return voice_id.startswith("chatterbox-")
 
 
 def is_clone_voice(voice_id: str) -> bool:
     return voice_id.startswith("clone-")
 
 
-# ── Routes ─────────────────────────────────────────────────────────────
-
-@router.get("/preset-voices")
-async def preset_voices():
-    voices = QWEN_VOICE_LIST + EDGE_VOICE_LIST
-    return {"voices": voices, "previewSentence": PREVIEW_SENTENCE, "qwenAvailable": _qwen_available or _qwen_model is None}
+def _clone_id_from_voice_id(voice_id: str) -> str:
+    return voice_id.replace("clone-", "", 1)
 
 
-@router.post("/preview")
-async def preview_voice(body: dict):
-    """Generate a preview clip of a voice using a standard sample sentence."""
-    voice_id = body.get("voiceId", "preset-aria")
-    text = body.get("text", PREVIEW_SENTENCE)
+def _get_clone_prompt_path(clone_id: str) -> str | None:
+    path = _clone_prompts.get(clone_id)
+    if path and os.path.exists(path):
+        return path
+    return None
 
-    # Cloned voices
-    if is_clone_voice(voice_id):
-        return await _synthesise_clone(text, voice_id)
 
-    # Qwen3-TTS voices
-    if is_qwen_voice(voice_id):
-        return await _synthesise_qwen(text, voice_id)
+def _store_clone_prompt(clone_id: str, prompt_path: str) -> None:
+    _clone_prompts[clone_id] = prompt_path
+    _clone_prompts.move_to_end(clone_id)
 
-    # Edge TTS voices
+    while len(_clone_prompts) > _max_clone_prompts:
+        old_clone_id, old_path = _clone_prompts.popitem(last=False)
+        try:
+            if os.path.exists(old_path):
+                os.unlink(old_path)
+            logger.info("Evicted old cloned prompt: %s", old_clone_id)
+        except Exception:
+            logger.warning("Failed cleaning old cloned prompt file: %s", old_clone_id)
+
+
+def _drop_clone_prompt(clone_id: str) -> None:
+    old_path = _clone_prompts.pop(clone_id, None)
+    if old_path and os.path.exists(old_path):
+        try:
+            os.unlink(old_path)
+        except Exception:
+            logger.warning("Failed deleting cloned prompt file for %s", clone_id)
+
+
+async def _synthesise_edge(text: str, voice_id: str) -> dict | JSONResponse:
     edge_voice = resolve_edge_voice(voice_id)
+
     try:
         communicate = edge_tts.Communicate(text, edge_voice)
         audio_bytes = io.BytesIO()
@@ -190,70 +209,89 @@ async def preview_voice(body: dict):
             "audioUrl": f"data:audio/mp3;base64,{audio_b64}",
             "voice": edge_voice,
             "voiceId": voice_id,
+            "engine": "edge",
+            "charCount": len(text),
         }
-    except Exception as e:
-        logger.exception("Edge TTS preview failed")
-        return JSONResponse({"error": f"Preview failed: {e}"}, status_code=500)
+    except Exception as exc:
+        logger.exception("Edge TTS synthesis failed")
+        return JSONResponse({"error": f"Edge TTS failed: {exc}"}, status_code=503)
 
 
-async def _synthesise_qwen(text: str, voice_id: str, instruct: str = "") -> dict:
-    """Synthesise using Qwen3-TTS CustomVoice model."""
-    model = await _get_qwen_model()
+async def _synthesise_chatterbox(
+    text: str,
+    voice_id: str = "",
+    audio_prompt_path: str | None = None,
+) -> dict | JSONResponse:
+    model = await _get_chatterbox_model()
     if model is None:
-        return JSONResponse({"error": "Qwen3-TTS model not available"}, status_code=503)
+        return JSONResponse({"error": "Chatterbox model not available"}, status_code=503)
 
-    speaker_info = QWEN_SPEAKERS.get(voice_id)
-    if not speaker_info:
-        return JSONResponse({"error": f"Unknown Qwen voice: {voice_id}"}, status_code=400)
+    prompt_path = audio_prompt_path
+    if prompt_path is None and is_clone_voice(voice_id):
+        clone_id = _clone_id_from_voice_id(voice_id)
+        prompt_path = _get_clone_prompt_path(clone_id)
+        if not prompt_path:
+            return JSONResponse({"error": "Clone not found. Please re-upload your audio."}, status_code=404)
 
     try:
-        loop = asyncio.get_event_loop()
-        wavs, sr = await loop.run_in_executor(None, lambda: model.generate_custom_voice(
-            text=text,
-            language=speaker_info["language"],
-            speaker=speaker_info["speaker"],
-            instruct=instruct or "",
-        ))
-        audio_b64 = _wav_to_b64(wavs[0], sr)
+        def _generate():
+            kwargs = {"text": text}
+            if prompt_path:
+                kwargs["audio_prompt_path"] = prompt_path
+            wav = model.generate(**kwargs)
+            wav_array = _normalize_wav_array(wav)
+            return wav_array, int(model.sr)
+
+        wav_array, sample_rate = await asyncio.to_thread(_generate)
+        audio_b64 = _wav_to_b64(wav_array, sample_rate)
+
+        engine = "chatterbox-clone" if prompt_path else "chatterbox"
         return {
             "audioUrl": f"data:audio/wav;base64,{audio_b64}",
-            "voice": speaker_info["speaker"],
             "voiceId": voice_id,
-            "engine": "qwen3",
+            "engine": engine,
             "charCount": len(text),
         }
-    except Exception as e:
-        logger.exception("Qwen3-TTS synthesis failed")
-        return JSONResponse({"error": f"Qwen3-TTS failed: {e}"}, status_code=500)
+    except Exception as exc:
+        logger.exception("Chatterbox synthesis failed")
+        return JSONResponse({"error": f"Chatterbox synthesis failed: {exc}"}, status_code=500)
 
 
-async def _synthesise_clone(text: str, voice_id: str) -> dict:
-    """Synthesise using a previously cached clone prompt (clone-<id>)."""
-    clone_id = voice_id.replace("clone-", "", 1)
-    prompt = _clone_prompts.get(clone_id)
-    if prompt is None:
-        return JSONResponse({"error": "Clone not found. Please re-upload your audio."}, status_code=404)
+async def _synthesise_clone(text: str, voice_id: str) -> dict | JSONResponse:
+    return await _synthesise_chatterbox(text=text, voice_id=voice_id)
 
-    model = await _get_qwen_base_model()
-    if model is None:
-        return JSONResponse({"error": "Qwen3-TTS Base model not available"}, status_code=503)
 
-    try:
-        loop = asyncio.get_event_loop()
-        wavs, sr = await loop.run_in_executor(None, lambda: model.generate_voice_clone(
-            text=text,
-            language="English",
-            voice_clone_prompt=prompt,
-        ))
-        return {
-            "audioUrl": f"data:audio/wav;base64,{_wav_to_b64(wavs[0], sr)}",
-            "voiceId": voice_id,
-            "engine": "qwen3-clone",
-            "charCount": len(text),
-        }
-    except Exception as e:
-        logger.exception("Cloned voice synthesis failed")
-        return JSONResponse({"error": f"Clone synthesis failed: {e}"}, status_code=500)
+@router.get("/preset-voices")
+async def preset_voices():
+    voices = EDGE_VOICE_LIST + CHATTERBOX_VOICE_LIST
+    return {
+        "voices": voices,
+        "previewSentence": PREVIEW_SENTENCE,
+        "chatterboxAvailable": _chatterbox_available or _chatterbox_model is None,
+    }
+
+
+@router.post("/preview")
+async def preview_voice(body: dict):
+    voice_id = body.get("voiceId", "preset-aria")
+    text = body.get("text", PREVIEW_SENTENCE)
+
+    if is_clone_voice(voice_id):
+        return await _synthesise_clone(text, voice_id)
+
+    if is_chatterbox_voice(voice_id):
+        return await _synthesise_chatterbox(text, voice_id)
+
+    edge_result = await _synthesise_edge(text, voice_id)
+    if not isinstance(edge_result, JSONResponse):
+        return edge_result
+
+    logger.info("Edge preview failed, falling back to Chatterbox")
+    chatterbox_result = await _synthesise_chatterbox(text, "chatterbox-default")
+    if not isinstance(chatterbox_result, JSONResponse):
+        return chatterbox_result
+
+    return edge_result
 
 
 @router.post("/synthesise")
@@ -263,139 +301,94 @@ async def synthesise(body: dict):
         return JSONResponse({"error": "text is required"}, status_code=400)
 
     voice_id = body.get("voiceId", "")
-    instruct = body.get("instruct", "")
 
-    # Cloned voices
     if is_clone_voice(voice_id):
         clone_result = await _synthesise_clone(text, voice_id)
         if not isinstance(clone_result, JSONResponse):
             return clone_result
-        logger.info("Clone synthesis failed, falling back to other engines")
+        logger.info("Clone synthesis failed, attempting fallback engines")
 
-    # Qwen3-TTS voices
-    if is_qwen_voice(voice_id):
-        result = await _synthesise_qwen(text, voice_id, instruct)
-        if not isinstance(result, JSONResponse):
-            return result
-        # Qwen failed — fall through to Edge TTS
-        logger.info("Qwen3-TTS failed, falling back to Edge TTS")
+    if is_chatterbox_voice(voice_id):
+        chatterbox_result = await _synthesise_chatterbox(text, voice_id)
+        if not isinstance(chatterbox_result, JSONResponse):
+            return chatterbox_result
+        logger.info("Chatterbox direct voice failed, attempting Edge fallback")
 
-    # Edge TTS (default / fallback)
-    edge_voice = resolve_edge_voice(voice_id)
-    try:
-        communicate = edge_tts.Communicate(text, edge_voice)
-        audio_bytes = io.BytesIO()
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio":
-                audio_bytes.write(chunk["data"])
+    edge_result = await _synthesise_edge(text, voice_id)
+    if not isinstance(edge_result, JSONResponse):
+        return edge_result
 
-        audio_b64 = base64.b64encode(audio_bytes.getvalue()).decode()
-        return {
-            "audioUrl": f"data:audio/mp3;base64,{audio_b64}",
-            "voice": edge_voice,
-            "engine": "edge",
-            "charCount": len(text),
-        }
-    except Exception as e:
-        logger.exception("Edge TTS synthesis failed")
-        return JSONResponse({"error": f"TTS synthesis failed: {e}"}, status_code=500)
+    logger.info("Edge synthesis failed, falling back to Chatterbox")
+    chatterbox_result = await _synthesise_chatterbox(text, "chatterbox-default")
+    if not isinstance(chatterbox_result, JSONResponse):
+        return chatterbox_result
 
-
-# ── Clone prompt cache (server-side, keyed by UUID) ────────────────────
-import uuid as _uuid
-
-_clone_prompts: dict[str, object] = {}
-
-CLONE_CONFIRMATION_SENTENCES = [
-    "Hello! This is your cloned voice. How does it sound to you?",
-    "I can help answer questions, guide customers, and provide support — all in your voice.",
-    "The quick brown fox jumps over the lazy dog. Every letter of the alphabet, clear as day.",
-]
+    return edge_result
 
 
 @router.post("/clone-voice")
-async def clone_voice(file: UploadFile = File(...)):
-    """Clone a voice from an audio sample. Returns 3 confirmation clips + a cloneId for further testing."""
-    content = await file.read()
+async def clone_voice(
+    file: UploadFile | None = File(default=None),
+    audio: UploadFile | None = File(default=None),
+):
+    """
+    Clone a voice from an uploaded audio sample.
+    Accepts either multipart field name "file" or "audio".
+    """
+    uploaded = file or audio
+    if uploaded is None:
+        return JSONResponse({"error": "No audio file provided"}, status_code=400)
+
+    content = await uploaded.read()
     if len(content) > 20 * 1024 * 1024:
         return JSONResponse({"error": "Audio file is too large (max 20MB)"}, status_code=400)
 
-    model = await _get_qwen_base_model()
-    if model is None:
-        return JSONResponse(
-            {"error": "Voice cloning requires Qwen3-TTS Base model, which failed to load. Check GPU availability."},
-            status_code=503,
-        )
+    suffix = "." + (uploaded.filename or "audio.wav").rsplit(".", 1)[-1]
+    clone_id = str(uuid.uuid4())[:12]
+    temp_path = ""
 
     try:
-        import os
-        suffix = "." + (file.filename or "audio.wav").rsplit(".", 1)[-1]
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             tmp.write(content)
-            tmp_path = tmp.name
+            temp_path = tmp.name
 
-        loop = asyncio.get_event_loop()
+        _store_clone_prompt(clone_id, temp_path)
 
-        # Build reusable clone prompt from the reference audio
-        prompt = await loop.run_in_executor(None, lambda: model.create_voice_clone_prompt(
-            ref_audio=tmp_path,
-            ref_text="",
-            x_vector_only_mode=True,
-        ))
-        os.unlink(tmp_path)
-
-        # Generate 3 confirmation clips
         samples = []
+        clone_voice_id = f"clone-{clone_id}"
         for sentence in CLONE_CONFIRMATION_SENTENCES:
-            wavs, sr = await loop.run_in_executor(None, lambda s=sentence: model.generate_voice_clone(
-                text=s, language="English", voice_clone_prompt=prompt,
-            ))
-            samples.append({
-                "text": sentence,
-                "audioUrl": f"data:audio/wav;base64,{_wav_to_b64(wavs[0], sr)}",
-            })
-
-        # Store prompt for subsequent preview requests
-        clone_id = str(_uuid.uuid4())[:12]
-        _clone_prompts[clone_id] = prompt
+            result = await _synthesise_clone(sentence, clone_voice_id)
+            if isinstance(result, JSONResponse):
+                _drop_clone_prompt(clone_id)
+                return result
+            samples.append({"text": sentence, "audioUrl": result["audioUrl"]})
 
         return {
             "cloneId": clone_id,
             "samples": samples,
-            "message": "Voice cloned successfully via Qwen3-TTS",
-            "engine": "qwen3",
+            "message": "Voice cloned successfully via Chatterbox",
+            "engine": "chatterbox",
         }
-    except Exception as e:
-        logger.exception("Qwen3-TTS voice cloning failed")
-        return JSONResponse({"error": f"Voice cloning failed: {e}"}, status_code=500)
+    except Exception as exc:
+        logger.exception("Chatterbox voice cloning failed")
+        _drop_clone_prompt(clone_id)
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+            except Exception:
+                pass
+        return JSONResponse({"error": f"Voice cloning failed: {exc}"}, status_code=500)
 
 
 @router.post("/clone-preview")
 async def clone_preview(body: dict):
-    """Generate audio from a custom sentence using a previously cloned voice."""
     clone_id = body.get("cloneId", "")
     text = body.get("text", "")
+
     if not text:
         return JSONResponse({"error": "text is required"}, status_code=400)
 
-    prompt = _clone_prompts.get(clone_id)
-    if prompt is None:
-        return JSONResponse({"error": "Clone not found. Please re-upload your audio."}, status_code=404)
+    if not clone_id:
+        return JSONResponse({"error": "cloneId is required"}, status_code=400)
 
-    model = await _get_qwen_base_model()
-    if model is None:
-        return JSONResponse({"error": "Qwen3-TTS Base model not available"}, status_code=503)
-
-    try:
-        loop = asyncio.get_event_loop()
-        wavs, sr = await loop.run_in_executor(None, lambda: model.generate_voice_clone(
-            text=text, language="English", voice_clone_prompt=prompt,
-        ))
-        return {
-            "audioUrl": f"data:audio/wav;base64,{_wav_to_b64(wavs[0], sr)}",
-            "engine": "qwen3",
-            "charCount": len(text),
-        }
-    except Exception as e:
-        logger.exception("Clone preview failed")
-        return JSONResponse({"error": f"Clone preview failed: {e}"}, status_code=500)
+    return await _synthesise_clone(text, f"clone-{clone_id}")

@@ -534,6 +534,12 @@ On next query, assemble_context() loads approved examples:
 - Docker Desktop (for infrastructure services)
 - Python 3.10+
 - `make` (via Chocolatey: `choco install make`)
+- **CUDA PyTorch** — Required for Qwen3-TTS local inference
+  - Install: `cd python && make install-pytorch` (automatically downloads CUDA 12.1 wheels)
+  - Or manual: `uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121`
+- **SoX (Sound eXchange)** — Required for Qwen3-TTS audio processing
+  - Download from: [http://sox.sourceforge.net/](http://sox.sourceforge.net/)
+  - Or via Chocolatey: `choco install sox`
 - Groq API key ([console.groq.com](https://console.groq.com))
 - (Optional) Twilio account for phone calls — each tenant brings their own
 

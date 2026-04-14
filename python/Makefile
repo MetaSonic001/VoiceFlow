@@ -9,8 +9,11 @@
 #
 # ═══════════════════════════════════════════════════════════════════
 
-SHELL := pwsh.exe
+SHELL := powershell.exe
 .SHELLFLAGS := -NoProfile -Command
+
+# PowerShell executable for Start-Process calls
+SHELL_EXE := powershell.exe
 
 VENV   := $(CURDIR)/../.venv
 PYTHON := $(VENV)/Scripts/python.exe
@@ -124,7 +127,7 @@ backend: ## Start FastAPI backend (foreground, port 8040)
 
 .PHONY: backend-bg
 backend-bg: ## Start FastAPI backend (background window)
-	@Start-Process pwsh -ArgumentList '-NoExit', '-Command', "& '$(VENV)/Scripts/Activate.ps1'; Set-Location '$(CURDIR)/backend'; & '$(PYTHON)' -m uvicorn main:app --host 127.0.0.1 --port 8040 --reload"
+	@Start-Process $(SHELL_EXE) -ArgumentList '-NoExit', '-Command', "& '$(VENV)/Scripts/Activate.ps1'; Set-Location '$(CURDIR)/backend'; & '$(PYTHON)' -m uvicorn main:app --host 127.0.0.1 --port 8040 --reload"
 	@Write-Host 'Backend started in new window (port 8040)' -ForegroundColor Green
 
 .PHONY: frontend
@@ -133,7 +136,7 @@ frontend: ## Start Django frontend (foreground, port 8050)
 
 .PHONY: frontend-bg
 frontend-bg: ## Start Django frontend (background window)
-	@Start-Process pwsh -ArgumentList '-NoExit', '-Command', "& '$(VENV)/Scripts/Activate.ps1'; Set-Location '$(CURDIR)/frontend'; & '$(PYTHON)' manage.py runserver 8050"
+	@Start-Process $(SHELL_EXE) -ArgumentList '-NoExit', '-Command', "& '$(VENV)/Scripts/Activate.ps1'; Set-Location '$(CURDIR)/frontend'; & '$(PYTHON)' manage.py runserver 8050"
 	@Write-Host 'Frontend started in new window (port 8050)' -ForegroundColor Green
 
 # ─── STOP / RESTART ───────────────────────────────────────────────
@@ -171,8 +174,17 @@ restart-frontend: stop-frontend frontend-bg ## Restart frontend
 # ─── SETUP ────────────────────────────────────────────────────────
 
 .PHONY: install
-install: ## Install all Python dependencies via uv
+install: install-deps install-pytorch ## Install all Python dependencies + PyTorch
+
+.PHONY: install-deps
+install-deps: ## Install Python dependencies from requirements.txt via uv
 	@if (Test-Path '$(UV)') { & '$(UV)' pip install -r requirements.txt } else { & '$(PYTHON)' -m pip install --upgrade pip uv; & '$(VENV)/Scripts/uv.exe' pip install -r requirements.txt }
+
+.PHONY: install-pytorch
+install-pytorch: ## Install PyTorch with CUDA 12.1 wheels
+	@Write-Host 'Installing PyTorch with CUDA 12.1 support...' -ForegroundColor Yellow
+	@& '$(UV)' pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+	@Write-Host 'PyTorch installed successfully with CUDA 12.1.' -ForegroundColor Green
 
 .PHONY: migrate
 migrate: ## Run Django makemigrations + migrate
