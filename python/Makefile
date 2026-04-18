@@ -49,6 +49,7 @@ help: ## Show this help
 	@Write-Host '  SETUP' -ForegroundColor Yellow
 	@Write-Host '    make venv              Create Python virtual environment'
 	@Write-Host '    make install           Install all Python dependencies'
+	@Write-Host '    make lock              Generate/update uv.lock from pyproject.toml'
 	@Write-Host '    make env               Create .env from .env.example'
 	@Write-Host '    make migrate           Run Django makemigrations + migrate'
 	@Write-Host '    make makemigrations    Run Django makemigrations only'
@@ -174,17 +175,15 @@ restart-frontend: stop-frontend frontend-bg ## Restart frontend
 # ─── SETUP ────────────────────────────────────────────────────────
 
 .PHONY: install
-install: install-deps install-pytorch ## Install all Python dependencies + PyTorch
+install: install-deps ## Install all Python dependencies from pyproject.toml
 
 .PHONY: install-deps
-install-deps: ## Install Python dependencies from requirements.txt via uv
-	@if (Test-Path '$(UV)') { & '$(UV)' pip install -r requirements.txt } else { & '$(PYTHON)' -m pip install --upgrade pip uv; & '$(VENV)/Scripts/uv.exe' pip install -r requirements.txt }
+install-deps: ## Sync Python dependencies from pyproject.toml via uv
+	@if (Test-Path '$(UV)') { & '$(UV)' sync } else { & '$(PYTHON)' -m pip install --upgrade pip uv; & '$(VENV)/Scripts/uv.exe' sync }
 
-.PHONY: install-pytorch
-install-pytorch: ## Install PyTorch with CUDA 12.1 wheels
-	@Write-Host 'Installing PyTorch with CUDA 12.1 support...' -ForegroundColor Yellow
-	@& '$(UV)' pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-	@Write-Host 'PyTorch installed successfully with CUDA 12.1.' -ForegroundColor Green
+.PHONY: lock
+lock: ## Resolve and write uv.lock from pyproject.toml
+	@if (Test-Path '$(UV)') { & '$(UV)' lock } else { & '$(PYTHON)' -m pip install --upgrade pip uv; & '$(VENV)/Scripts/uv.exe' lock }
 
 .PHONY: migrate
 migrate: ## Run Django makemigrations + migrate
