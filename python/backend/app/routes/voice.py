@@ -33,11 +33,11 @@ def _get_twilio_creds(tenant_settings: dict) -> tuple[str | None, str | None]:
 
 # ── Inbound call webhook (Twilio posts here) ────────────────────────────────
 
-@router.post("/inbound/{agent_id}")
+@router.post("/gather-inbound/{agent_id}")
 async def voice_inbound(agent_id: str, request: Request, db: AsyncSession = Depends(get_db)):
     """
-    Twilio calls this URL when a call comes in.
-    Returns TwiML that greets the caller and gathers speech input.
+    Twilio Gather-loop: greet and collect speech input.
+    Called directly when telephony_provider == 'twilio-gather'.
     """
     from twilio.twiml.voice_response import VoiceResponse, Gather
 
@@ -245,9 +245,9 @@ Transcript:
 
 # ── Voice status callback ───────────────────────────────────────────────────
 
-@router.post("/status/{agent_id}")
+@router.post("/gather-status/{agent_id}")
 async def voice_status(agent_id: str, request: Request):
-    """Twilio status callback — logs call status changes."""
+    """Twilio status callback (Gather-loop path) — logs call status changes."""
     form = await request.form()
     call_status = form.get("CallStatus", "unknown")
     call_sid = form.get("CallSid", "")

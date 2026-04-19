@@ -124,6 +124,15 @@ async def lifespan(app: FastAPI):
         logger.warning(f"[db] Table creation failed (non-fatal): {e}")
 
     await seed_defaults()
+
+    # Initialise STT service (downloads Vosk model on first run, loads faster-whisper)
+    try:
+        from app.services.stt_service import stt_service
+        await stt_service.initialize()
+        logger.info("[stt] STT service initialised")
+    except Exception as e:
+        logger.warning(f"[stt] STT init failed (non-fatal): {e}")
+
     logger.info(f"Python backend ready on port {settings.PORT}")
 
     # Start retraining scheduler (Claim 7)
@@ -189,6 +198,7 @@ from app.routes import auth, onboarding, agents, documents, templates, runner
 from app.routes import analytics, logs, brands, settings as settings_routes
 from app.routes import ingestion, users, retraining, admin, tts, rag
 from app.routes import widget, voice, voice_ws, platform, data_explorer
+from app.routes import voice_twilio_stream, voice_inbound_router
 
 # WITHOUT /api prefix (matches Express)
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])
@@ -213,6 +223,8 @@ app.include_router(tts.router, prefix="/api/tts", tags=["TTS"])
 app.include_router(widget.router, prefix="/api/widget", tags=["Widget"])
 app.include_router(voice.router, prefix="/api/voice", tags=["Voice"])
 app.include_router(voice_ws.router, prefix="/api/voice", tags=["VoiceWS"])
+app.include_router(voice_twilio_stream.router, prefix="/api/voice", tags=["VoiceTwilioStream"])
+app.include_router(voice_inbound_router.router, prefix="/api/voice", tags=["VoiceInboundRouter"])
 app.include_router(platform.router, prefix="/api", tags=["Platform"])
 app.include_router(data_explorer.router, prefix="/api/data-explorer", tags=["DataExplorer"])
 

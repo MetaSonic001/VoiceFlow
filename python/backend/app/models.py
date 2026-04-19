@@ -113,6 +113,9 @@ class Agent(Base):
     avgResponseTime: Mapped[Optional[str]] = mapped_column("avgResponseTime", String, nullable=True)
     chromaCollection: Mapped[Optional[str]] = mapped_column("chromaCollection", String, nullable=True)
     configPath: Mapped[Optional[str]] = mapped_column("configPath", String, nullable=True)
+    telephony_provider: Mapped[Optional[str]] = mapped_column(
+        "telephonyProvider", String, nullable=True, default="twilio-gather"
+    )
     createdAt: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
     updatedAt: Mapped[datetime] = mapped_column("updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
