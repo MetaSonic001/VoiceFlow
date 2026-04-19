@@ -837,22 +837,22 @@ class LLMClient:
         provider: "groq" | "openai" | "gemini" | "ollama"
         """
         provider = (provider or "groq").lower()
+        stream_fn = self._resolve_provider(provider)
+        async for token in stream_fn(messages, model, api_key):
+            yield token
+
+    def _resolve_provider(self, provider: str):
+        """Return the streaming coroutine method for the given provider."""
         if provider == "groq":
-            async for token in self._stream_groq(messages, model, api_key):
-                yield token
-        elif provider == "openai":
-            async for token in self._stream_openai(messages, model, api_key):
-                yield token
-        elif provider == "gemini":
-            async for token in self._stream_gemini(messages, model, api_key):
-                yield token
-        elif provider == "ollama":
-            async for token in self._stream_ollama(messages, model, api_key):
-                yield token
-        else:
-            logger.warning("[llm_client] unknown provider '%s', falling back to groq", provider)
-            async for token in self._stream_groq(messages, model, api_key):
-                yield token
+            return self._stream_groq
+        if provider == "openai":
+            return self._stream_openai
+        if provider == "gemini":
+            return self._stream_gemini
+        if provider == "ollama":
+            return self._stream_ollama
+        logger.warning("[llm_client] unknown provider '%s', falling back to groq", provider)
+        return self._stream_groq
 
     # ── Groq (SSE via httpx) ──────────────────────────────────────────────────
 
