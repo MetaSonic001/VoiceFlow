@@ -57,9 +57,9 @@ class TTSRouter:
             if current:
                 yield await self.synthesize(current, engine=engine, voice_id=voice_id)
 
-    async def synthesize_mulaw(self, text: str, engine: str, voice_id: str) -> bytes:
+    async def synthesize_mulaw(self, text: str, engine: str, voice_id: str, speed: float = 1.0) -> bytes:
         """Return μ-law 8kHz mono bytes for Twilio using pydub conversion."""
-        audio_bytes = await self.synthesize(text=text, engine=engine, voice_id=voice_id)
+        audio_bytes = await self.synthesize(text=text, engine=engine, voice_id=voice_id, speed=speed)
         return self._wav_to_mulaw_8khz_mono(audio_bytes)
 
     async def _synthesize_kokoro(self, text: str, voice_id: str, speed: float) -> bytes:
@@ -72,8 +72,11 @@ class TTSRouter:
         }
         url = f"{settings.KOKORO_TTS_URL.rstrip('/')}/v1/audio/speech"
 
-        async with httpx.AsyncClient(timeout=45) as client:
-            resp = await client.post(url, json=payload)
+        try:
+            async with httpx.AsyncClient(timeout=45) as client:
+                resp = await client.post(url, json=payload)
+        except httpx.HTTPError as exc:
+            raise RuntimeError(f"Kokoro synthesis transport error: {exc}") from exc
 
         if resp.status_code != 200:
             raise RuntimeError(f"Kokoro synthesis failed ({resp.status_code}): {resp.text[:400]}")
@@ -83,7 +86,6 @@ class TTSRouter:
         base = settings.PIPER_TTS_URL.rstrip("/")
         payload = {
             "input": text,
-            "text": text,
             "voice": voice_id or "en_US-lessac-medium",
             "speed": speed,
             "response_format": "wav",
@@ -92,6 +94,7 @@ class TTSRouter:
         async with httpx.AsyncClient(timeout=45) as client:
             resp = await client.post(f"{base}/v1/audio/speech", json=payload)
             if resp.status_code != 200:
+                logger.info("Piper /v1/audio/speech failed (%s), retrying /synthesize", resp.status_code)
                 resp = await client.post(f"{base}/synthesize", json=payload)
 
         if resp.status_code != 200:
@@ -141,5 +144,5 @@ class TTSRouter:
             with wave.open(out, "rb") as wf:
                 return wf.readframes(wf.getnframes())
         except Exception:
-            logger.warning("Failed to parse mu-law wav wrapper; returning wav payload")
-            return out.getvalue()
+            logger.error("Failed to parse mu-law wav wrapper", exc_info=True)
+            raise RuntimeError("mu-law conversion failed")

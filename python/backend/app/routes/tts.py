@@ -64,7 +64,7 @@ CPU_VOICE_LIST = [
 
 
 def resolve_edge_voice(voice_id: str) -> str:
-    if voice_id and "Neural" in voice_id:
+    if voice_id and voice_id.endswith("Neural"):
         return voice_id
     return EDGE_VOICES.get(voice_id, "en-US-AriaNeural")
 
@@ -107,9 +107,9 @@ async def _synthesise_edge(text: str, voice_id: str) -> dict | JSONResponse:
             "engine": "edge",
             "charCount": len(text),
         }
-    except Exception as exc:
+    except Exception:
         logger.exception("Edge TTS synthesis failed")
-        return JSONResponse({"error": f"Edge TTS failed: {exc}"}, status_code=503)
+        return JSONResponse({"error": "Edge TTS failed"}, status_code=503)
 
 
 async def _synthesise_cpu_engine(text: str, engine: str, voice_id: str) -> dict | JSONResponse:
@@ -122,9 +122,9 @@ async def _synthesise_cpu_engine(text: str, engine: str, voice_id: str) -> dict 
             "engine": engine,
             "charCount": len(text),
         }
-    except Exception as exc:
+    except Exception:
         logger.exception("%s synthesis failed", engine)
-        return JSONResponse({"error": f"{engine} synthesis failed: {exc}"}, status_code=503)
+        return JSONResponse({"error": f"{engine} synthesis failed"}, status_code=503)
 
 
 @router.get("/preset-voices")
@@ -185,7 +185,6 @@ async def synthesise(body: dict):
 
 @router.post("/clone-voice")
 async def clone_voice(file: UploadFile | None = File(default=None), audio: UploadFile | None = File(default=None)):
-    _ = file or audio
     return JSONResponse(
         {
             "error": "Voice cloning via this endpoint is disabled in CPU-only mode. Use Orpheus service for expressive/clone workflows.",
@@ -196,7 +195,6 @@ async def clone_voice(file: UploadFile | None = File(default=None), audio: Uploa
 
 @router.post("/clone-preview")
 async def clone_preview(body: dict):
-    _ = body
     return JSONResponse(
         {
             "error": "Clone preview is disabled in CPU-only mode. Use Orpheus service for expressive/clone workflows.",

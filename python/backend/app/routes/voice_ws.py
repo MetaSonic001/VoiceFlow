@@ -84,7 +84,14 @@ def _validate_ws_token(websocket: WebSocket) -> dict | None:
         return None
     try:
         return pyjwt.decode(token, settings.JWT_SECRET, algorithms=["HS256"])
-    except Exception:
+    except pyjwt.ExpiredSignatureError:
+        logger.warning("WebSocket token expired")
+        return None
+    except pyjwt.InvalidTokenError as exc:
+        logger.warning("WebSocket token invalid: %s", exc)
+        return None
+    except Exception as exc:
+        logger.exception("Unexpected WebSocket token validation failure: %s", exc)
         return None
 
 
@@ -125,12 +132,12 @@ def _cpu_voice_id(voice_id: str, engine: str) -> str:
 @router.websocket("/ws/{agent_id}")
 async def voice_websocket(websocket: WebSocket, agent_id: str):
     """WebSocket endpoint for browser-based voice interaction."""
+    await websocket.accept()
     claims = _validate_ws_token(websocket)
     if not claims:
+        await websocket.send_json({"type": "error", "message": "Unauthorized"})
         await websocket.close(code=1008)
         return
-
-    await websocket.accept()
 
     # Validate agent
     async with AsyncSessionLocal() as db:
