@@ -162,7 +162,7 @@ async def upload_contacts(
             parsed = phonenumbers.parse(phone, "IN")  # default region India
             phone = phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
         except Exception:
-            logger.warning("[campaigns] could not normalize phone number: %s — skipping", phone)
+            logger.warning("[campaigns] could not normalize phone number (row skipped)")
             skipped += 1
             continue
 
