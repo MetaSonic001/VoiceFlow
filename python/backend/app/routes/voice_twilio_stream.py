@@ -1,28 +1,29 @@
 """
 Twilio Media Streams voice pipeline.
 
-POST /api/voice/inbound/{agent_id}  — Returns TwiML <Connect><Stream> to start media stream
-POST /api/voice/status/{agent_id}   — Twilio status callback
+POST /api/voice/inbound/{agent_id}       — Returns TwiML <Connect><Stream>
+POST /api/voice/status/{agent_id}        — Twilio status callback
 WS   /api/voice/media-stream/{agent_id}  — Full-duplex audio: μ-law 8kHz ↔ PCM 16kHz
+POST /api/voice/transfer/{call_sid}      — Warm transfer to human agent
 """
 from __future__ import annotations
 
 import asyncio
 import base64
-import io
 import json
 import logging
 import struct
 from datetime import datetime, timezone
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import Response
+from fastapi import APIRouter, Depends, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse, Response
 from pydub import AudioSegment
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.database import AsyncSessionLocal
+from app.database import AsyncSessionLocal, get_db
 from app.models import Agent, CallLog, Tenant
 from app.services.credentials import decrypt_safe
 from app.services.stt_service import stt_service
@@ -437,3 +438,94 @@ async def _save_call_log(
         logger.info("[twilio_stream] call log saved call=%s duration=%ds", call_sid, duration)
     except Exception:
         logger.exception("[twilio_stream] failed to save call log call=%s", call_sid)
+
+
+# ── Warm transfer endpoint ────────────────────────────────────────────────────
+
+@router.post("/transfer/{call_sid}")
+async def transfer_call(
+    call_sid: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Warm transfer an active Media-Stream call to a human agent.
+
+    Steps:
+    1. Look up call session in Redis by call_sid.
+    2. Read `transferTo` phone number from JSON body.
+    3. Use Twilio REST API to update the live call with TwiML <Dial> to transfer.
+    """
+    # 1. Resolve session from Redis
+    redis = _redis_client()
+    try:
+        session_data: dict = {}
+        # We index streams by streamSid; scan for the call_sid match
+        async for key in redis.scan_iter("stream:*"):
+            raw = await redis.get(key)
+            if raw:
+                data = json.loads(raw)
+                if data.get("callSid") == call_sid:
+                    session_data = data
+                    break
+    finally:
+        await redis.aclose()
+
+    agent_id: str = session_data.get("agentId", "")
+    tenant_id: str = session_data.get("tenantId", "")
+
+    # 2. Get transferTo from request body
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+
+    transfer_to: str = body.get("transferTo", "")
+    if not transfer_to:
+        return JSONResponse({"error": "transferTo is required"}, status_code=400)
+
+    # 3. Resolve Twilio credentials
+    twilio_sid: str | None = settings.TWILIO_ACCOUNT_SID
+    twilio_token: str | None = settings.TWILIO_AUTH_TOKEN
+
+    # Prefer tenant-level credentials if available
+    if tenant_id:
+        async with AsyncSessionLocal() as _db:
+            t_result = await _db.execute(select(Tenant).where(Tenant.id == tenant_id))
+            tenant = t_result.scalar_one_or_none()
+            if tenant and tenant.settings:
+                ts = tenant.settings
+                if ts.get("twilioAccountSid") and ts.get("twilioAuthToken"):
+                    twilio_sid = ts["twilioAccountSid"]
+                    twilio_token = decrypt_safe(ts["twilioAuthToken"])
+
+    if not twilio_sid or not twilio_token:
+        return JSONResponse({"error": "Twilio credentials not configured"}, status_code=503)
+
+    # 4. Build <Dial> TwiML and send to Twilio REST API
+    import httpx
+
+    dial_twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response><Dial>{transfer_to}</Dial></Response>"""
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                f"https://api.twilio.com/2010-04-01/Accounts/{twilio_sid}/Calls/{call_sid}.json",
+                auth=(twilio_sid, twilio_token),
+                data={"Twiml": dial_twiml},
+            )
+        if resp.status_code in (200, 204):
+            logger.info("[twilio_stream] transfer call=%s to=%s", call_sid, transfer_to)
+            return JSONResponse({"status": "transferred", "transferTo": transfer_to})
+        else:
+            logger.warning(
+                "[twilio_stream] transfer failed call=%s status=%s", call_sid, resp.status_code
+            )
+            return JSONResponse(
+                {"error": "Twilio transfer failed", "detail": resp.text[:300]},
+                status_code=resp.status_code,
+            )
+    except Exception as exc:
+        logger.exception("[twilio_stream] transfer error call=%s", call_sid)
+        return JSONResponse({"error": str(exc)}, status_code=500)

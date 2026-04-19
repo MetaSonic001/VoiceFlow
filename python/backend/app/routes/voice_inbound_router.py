@@ -2,7 +2,7 @@
 /api/voice inbound router — delegates to the correct telephony handler
 based on the agent's telephony_provider field.
 
-  twilio-gather  → voice.py inbound handler (old Gather loop, direct call)
+  twilio-gather  → voice_twilio_gather.handle_inbound_call (Gather loop)
   twilio-stream  → voice_twilio_stream.handle_inbound_call (Media Streams)
 """
 from __future__ import annotations
@@ -12,7 +12,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 from sqlalchemy import select
-from twilio.twiml.voice_response import Gather, VoiceResponse
+from twilio.twiml.voice_response import VoiceResponse
 
 from app.database import AsyncSessionLocal
 from app.models import Agent
@@ -42,24 +42,9 @@ async def inbound_router(agent_id: str, request: Request) -> Response:
         return await handle_inbound_call(agent, request)
 
     if provider in ("twilio-gather", "twilio"):
-        # Twilio Gather loop — greet and collect speech
-        agent_name = agent.name or "your AI assistant"
-        resp = VoiceResponse()
-        gather = Gather(
-            input="speech",
-            action=f"/api/voice/gather/{agent_id}",
-            method="POST",
-            speech_timeout="auto",
-            language="en-US",
-        )
-        gather.say(
-            f"Hello, you've reached {agent_name}. How can I help you today?",
-            voice="Polly.Joanna",
-        )
-        resp.append(gather)
-        resp.say("I didn't hear anything. Goodbye.", voice="Polly.Joanna")
-        resp.hangup()
-        return Response(content=str(resp), media_type="application/xml")
+        from app.routes.voice_twilio_gather import handle_inbound_call as gather_inbound
+
+        return await gather_inbound(agent, request)
 
     raise HTTPException(
         status_code=400,

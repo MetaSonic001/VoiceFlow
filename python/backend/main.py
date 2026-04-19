@@ -197,8 +197,8 @@ async def health():
 from app.routes import auth, onboarding, agents, documents, templates, runner
 from app.routes import analytics, logs, brands, settings as settings_routes
 from app.routes import ingestion, users, retraining, admin, tts, rag
-from app.routes import widget, voice, voice_ws, platform, data_explorer
-from app.routes import voice_twilio_stream, voice_inbound_router
+from app.routes import widget, voice_ws, platform, data_explorer
+from app.routes import voice_twilio_stream, voice_twilio_gather, voice_inbound_router
 
 # WITHOUT /api prefix (matches Express)
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])
@@ -221,8 +221,8 @@ app.include_router(retraining.router, prefix="/api/retraining", tags=["Retrainin
 app.include_router(brands.router, prefix="/api/brands", tags=["Brands"])
 app.include_router(tts.router, prefix="/api/tts", tags=["TTS"])
 app.include_router(widget.router, prefix="/api/widget", tags=["Widget"])
-app.include_router(voice.router, prefix="/api/voice", tags=["Voice"])
 app.include_router(voice_ws.router, prefix="/api/voice", tags=["VoiceWS"])
+app.include_router(voice_twilio_gather.router, prefix="/api/voice", tags=["VoiceTwilioGather"])
 app.include_router(voice_twilio_stream.router, prefix="/api/voice", tags=["VoiceTwilioStream"])
 app.include_router(voice_inbound_router.router, prefix="/api/voice", tags=["VoiceInboundRouter"])
 app.include_router(platform.router, prefix="/api", tags=["Platform"])
