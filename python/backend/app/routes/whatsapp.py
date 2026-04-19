@@ -226,8 +226,9 @@ async def _transcribe_voice_note(
     twilio_token: str | None,
 ) -> str:
     """Download voice note from Twilio, convert to PCM 16kHz, and transcribe."""
-    # SSRF protection: only allow Twilio media URLs
-    from urllib.parse import urlparse
+    # SSRF protection: reconstruct the URL from validated components so that
+    # no user-supplied string is ever passed directly to the HTTP client.
+    from urllib.parse import urlparse, urlunparse
 
     parsed = urlparse(media_url)
     trusted_hosts = (
@@ -235,17 +236,27 @@ async def _transcribe_voice_note(
         "media.twiliocdn.com",
         "mcs.us1.twilio.com",
     )
-    if parsed.scheme not in ("https",) or not any(
+    if parsed.scheme != "https" or not any(
         parsed.netloc == h or parsed.netloc.endswith(f".{h}") for h in trusted_hosts
     ):
-        logger.warning("[whatsapp] blocked untrusted media URL host=%s", parsed.netloc)
+        logger.warning("[whatsapp] blocked untrusted media URL")
         return ""
+
+    # Reconstruct URL from validated parts to break the taint chain
+    safe_url = urlunparse((
+        "https",
+        parsed.netloc,
+        parsed.path,
+        "",
+        parsed.query,
+        "",
+    ))
 
     # Download the media
     try:
         auth = (twilio_sid, twilio_token) if twilio_sid and twilio_token else None
         async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(media_url, auth=auth)
+            resp = await client.get(safe_url, auth=auth)
         if resp.status_code != 200:
             logger.warning("[whatsapp] media download failed status=%s", resp.status_code)
             return ""
