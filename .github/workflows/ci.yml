@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: voiceflow_test
+          POSTGRES_USER: vf_admin
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7
+        ports:
+          - "6379:6379"
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://vf_admin:postgres@localhost:5432/voiceflow_test
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      GROQ_API_KEY: "sk-test-placeholder"
+      SECRET_KEY: "ci-test-secret-key"
+      ENVIRONMENT: "test"
+      MINIO_ENDPOINT: "localhost:9020"
+      CHROMA_HOST: "localhost"
+      CHROMA_PORT: "8030"
+      FASTAPI_URL: "http://localhost:8040"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install dependencies
+        run: |
+          cd python
+          uv sync
+
+      - name: Lint — ruff
+        run: |
+          cd python
+          uv run ruff check backend/
+
+      - name: Lint — black
+        run: |
+          cd python
+          uv run black --check backend/
+
+      - name: Run tests
+        run: |
+          cd python
+          uv run pytest tests/ -v --tb=short
+
+  # Sanity check: no banned imports
+  banned-imports:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for chatterbox / torch.cuda / audioop
+        run: |
+          if grep -r "chatterbox\|torch\.cuda\|audioop" python/; then
+            echo "ERROR: banned import found"
+            exit 1
+          fi
+          echo "No banned imports found."

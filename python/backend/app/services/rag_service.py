@@ -17,7 +17,7 @@ import json
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, AsyncGenerator, Optional
 
 import httpx
 import redis.asyncio as aioredis
@@ -134,6 +134,7 @@ async def assemble_context(
     tenant_id: str,
     agent_id: str,
     session_id: str = "default",
+    contact_variables: Optional[dict] = None,
 ) -> dict:
     """
     Assemble 5-layer context:
@@ -142,6 +143,7 @@ async def assemble_context(
       Layer 3: Brand voice + allowed/restricted topics + policyRules
       Layer 4: Agent config + template + persona
       Layer 5: Session history from Redis
+      Layer 6 (optional): Contact variables for outbound campaigns
     """
     ctx: dict[str, Any] = {
         "globalRules": GLOBAL_SAFETY_RULES,
@@ -262,6 +264,10 @@ async def assemble_context(
     ctx["conversationHistory"] = await get_conversation_history(
         tenant_id, agent_id, session_id
     )
+
+    # Layer 6: Contact variables (outbound campaigns)
+    if contact_variables and isinstance(contact_variables, dict):
+        ctx["contact_variables"] = contact_variables
 
     return ctx
 
@@ -615,6 +621,22 @@ def build_system_prompt(ctx: dict) -> str:
     if policy_parts:
         sections.append(f"[ACTIVE POLICIES]\n" + "\n".join(policy_parts))
 
+    # Section 8: Contact Variables (outbound campaign context)
+    contact_vars = ctx.get("contact_variables")
+    if contact_vars and isinstance(contact_vars, dict):
+        cv_parts = []
+        name = contact_vars.get("name")
+        if name:
+            cv_parts.append(f"You are speaking with {name}.")
+        for key, value in contact_vars.items():
+            if key == "name":
+                continue
+            # Human-readable key (order_id → "order ID")
+            readable_key = key.replace("_", " ")
+            cv_parts.append(f"Their {readable_key} is {value}.")
+        if cv_parts:
+            sections.append("[CONTACT CONTEXT]\n" + " ".join(cv_parts))
+
     return "\n\n---\n\n".join(sections)
 
 
@@ -790,3 +812,349 @@ async def process_query(
         "model": ctx["model"],
         "documentsRetrieved": len(retrieved_docs),
     }
+
+
+# ── 8. LLM Provider Abstraction ──────────────────────────────────────────────
+
+class LLMClient:
+    """
+    Multi-provider LLM client with streaming support.
+
+    Supported providers: groq, openai, gemini, ollama
+    All methods yield tokens as strings via AsyncGenerator[str, None].
+    """
+
+    async def stream_completion(
+        self,
+        messages: list[dict],
+        model: str,
+        provider: str,
+        api_key: str,
+    ):
+        """
+        Yield tokens from the LLM as they arrive.
+
+        provider: "groq" | "openai" | "gemini" | "ollama"
+        """
+        provider = (provider or "groq").lower()
+        if provider == "groq":
+            async for token in self._stream_groq(messages, model, api_key):
+                yield token
+        elif provider == "openai":
+            async for token in self._stream_openai(messages, model, api_key):
+                yield token
+        elif provider == "gemini":
+            async for token in self._stream_gemini(messages, model, api_key):
+                yield token
+        elif provider == "ollama":
+            async for token in self._stream_ollama(messages, model, api_key):
+                yield token
+        else:
+            logger.warning("[llm_client] unknown provider '%s', falling back to groq", provider)
+            async for token in self._stream_groq(messages, model, api_key):
+                yield token
+
+    # ── Groq (SSE via httpx) ──────────────────────────────────────────────────
+
+    async def _stream_groq(self, messages: list[dict], model: str, api_key: str):
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": model or "llama-3.1-8b-instant",
+            "messages": messages,
+            "stream": True,
+            "temperature": 0.7,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                async with client.stream(
+                    "POST",
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers=headers,
+                    json=payload,
+                ) as resp:
+                    if resp.status_code != 200:
+                        logger.warning("[llm_client] groq stream status=%s", resp.status_code)
+                        return
+                    async for line in resp.aiter_lines():
+                        if line.startswith("data: "):
+                            data = line[6:]
+                            if data == "[DONE]":
+                                break
+                            try:
+                                chunk = json.loads(data)
+                                delta = chunk["choices"][0]["delta"].get("content", "")
+                                if delta:
+                                    yield delta
+                            except (json.JSONDecodeError, KeyError, IndexError):
+                                pass
+        except Exception:
+            logger.exception("[llm_client] groq stream error")
+
+    # ── OpenAI ────────────────────────────────────────────────────────────────
+
+    async def _stream_openai(self, messages: list[dict], model: str, api_key: str):
+        try:
+            from openai import AsyncOpenAI  # type: ignore
+
+            client = AsyncOpenAI(api_key=api_key)
+            stream = await client.chat.completions.create(
+                model=model or "gpt-4o-mini",
+                messages=messages,
+                stream=True,
+            )
+            async for chunk in stream:
+                delta = chunk.choices[0].delta.content
+                if delta:
+                    yield delta
+        except ImportError:
+            logger.warning("[llm_client] openai package not installed, falling back to httpx SSE")
+            async for token in self._stream_groq(messages, model, api_key):
+                yield token
+        except Exception:
+            logger.exception("[llm_client] openai stream error")
+
+    # ── Gemini ────────────────────────────────────────────────────────────────
+
+    async def _stream_gemini(self, messages: list[dict], model: str, api_key: str):
+        try:
+            import google.generativeai as genai  # type: ignore
+
+            genai.configure(api_key=api_key)
+            gemini_model = genai.GenerativeModel(model or "gemini-1.5-flash")
+
+            # Convert messages to Gemini format
+            history = []
+            prompt = ""
+            for msg in messages:
+                role = msg.get("role")
+                content = msg.get("content", "")
+                if role == "system":
+                    prompt = f"[System instructions]\n{content}\n\n"
+                elif role == "user":
+                    history.append({"role": "user", "parts": [prompt + content]})
+                    prompt = ""
+                elif role == "assistant":
+                    history.append({"role": "model", "parts": [content]})
+
+            # Run in executor since Gemini SDK is sync
+            def _gen():
+                resp = gemini_model.generate_content(
+                    history,
+                    stream=True,
+                    generation_config=genai.types.GenerationConfig(temperature=0.7),
+                )
+                for chunk in resp:
+                    if chunk.text:
+                        yield chunk.text
+
+            loop = asyncio.get_event_loop()
+            queue: asyncio.Queue = asyncio.Queue()
+
+            async def _producer():
+                def _run():
+                    for token in _gen():
+                        asyncio.run_coroutine_threadsafe(queue.put(token), loop)
+                    asyncio.run_coroutine_threadsafe(queue.put(None), loop)
+
+                await loop.run_in_executor(None, _run)
+
+            asyncio.create_task(_producer())
+            while True:
+                token = await queue.get()
+                if token is None:
+                    break
+                yield token
+
+        except ImportError:
+            logger.warning("[llm_client] google-generativeai not installed")
+        except Exception:
+            logger.exception("[llm_client] gemini stream error")
+
+    # ── Ollama (local) ────────────────────────────────────────────────────────
+
+    async def _stream_ollama(self, messages: list[dict], model: str, api_key: str):
+        """Stream from a local Ollama instance (api_key ignored)."""
+        try:
+            import ollama  # type: ignore
+
+            client = ollama.AsyncClient()
+            async for chunk in await client.chat(
+                model=model or "llama3",
+                messages=messages,
+                stream=True,
+            ):
+                content = chunk.get("message", {}).get("content", "")
+                if content:
+                    yield content
+        except ImportError:
+            logger.warning("[llm_client] ollama package not installed")
+        except Exception:
+            logger.exception("[llm_client] ollama stream error")
+
+
+# Module-level singleton
+_llm_client = LLMClient()
+
+
+def _resolve_provider_and_key(tenant: Optional[Tenant], agent_prefs: dict) -> tuple[str, str, str]:
+    """
+    Return (provider, api_key, model) from tenant settings + agent preferences.
+    Falls back to Groq platform key.
+    """
+    from app.services.credentials import decrypt_safe
+
+    provider = agent_prefs.get("llmProvider", "groq").lower()
+    model = agent_prefs.get("model", "llama-3.1-8b-instant")
+
+    if tenant and tenant.settings:
+        ts = tenant.settings
+        if provider == "groq":
+            key_enc = ts.get("groqApiKey") or ""
+            key = decrypt_safe(key_enc) if key_enc else settings.GROQ_API_KEY
+        elif provider == "openai":
+            key_enc = ts.get("openaiApiKey") or ""
+            key = decrypt_safe(key_enc) if key_enc else ""
+        elif provider == "gemini":
+            key_enc = ts.get("geminiApiKey") or ""
+            key = decrypt_safe(key_enc) if key_enc else ""
+        elif provider == "ollama":
+            key = ""  # local, no key needed
+        else:
+            key = settings.GROQ_API_KEY
+    else:
+        key = settings.GROQ_API_KEY
+
+    return provider, key or "", model
+
+
+# ── 9. Streaming RAG Pipeline ────────────────────────────────────────────────
+
+async def process_query_streaming(
+    db: AsyncSession,
+    tenant_id: str,
+    agent_id: str,
+    query: str,
+    session_id: str = "default",
+    contact_variables: Optional[dict] = None,
+):
+    """
+    Streaming RAG pipeline.
+
+    1. Assemble context (5-layer + optional contact variables)
+    2. Retrieve docs (Chroma + BM25)
+    3. Build system prompt
+    4. Stream LLM tokens via LLMClient
+    5. Handle function-calling tool use mid-stream
+    6. Save full response to Redis history
+    7. Yield each token
+
+    Yields: str tokens or {"tool_call": ..., "tool_result": ...} dicts for function calls.
+    """
+    # 1. Assemble context
+    ctx = await assemble_context(db, tenant_id, agent_id, session_id, contact_variables)
+
+    # 2. Retrieve docs
+    retrieved_docs = await query_documents(tenant_id, agent_id, query)
+    if retrieved_docs and ctx.get("mergedPolicies"):
+        retrieved_docs = apply_policy_scoring(retrieved_docs, ctx["mergedPolicies"])
+
+    # 3. Build system prompt
+    system_prompt = build_system_prompt(ctx)
+
+    # Resolve provider, key, model
+    result_t = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
+    tenant = result_t.scalar_one_or_none()
+
+    result_a = await db.execute(select(Agent).where(Agent.id == agent_id))
+    agent = result_a.scalar_one_or_none()
+    agent_prefs = (agent.llmPreferences or {}) if agent else {}
+
+    provider, api_key, model = _resolve_provider_and_key(tenant, agent_prefs)
+
+    if not api_key and provider not in ("ollama",):
+        yield "No AI API key configured. Please add an API key in Settings."
+        return
+
+    # 4. Build messages
+    context_text = "\n\n".join(c["content"] for c in retrieved_docs if c.get("content"))
+    messages: list[dict] = [{"role": "system", "content": system_prompt}]
+    if context_text:
+        messages.append({
+            "role": "system",
+            "content": f"[KNOWLEDGE BASE CONTEXT]\n{context_text}",
+        })
+    for turn in ctx["conversationHistory"]:
+        role = turn.get("role", "user")
+        if role in ("user", "assistant"):
+            messages.append({"role": role, "content": turn.get("content", "")})
+    messages.append({"role": "user", "content": query})
+
+    # 5. Check for custom function definitions (function calling)
+    custom_functions: list[dict] = agent_prefs.get("customFunctions", [])
+    full_response_parts: list[str] = []
+
+    if custom_functions:
+        # --- Function-calling path (non-streaming tool detection) ---
+        tool_use_detected = False
+        try:
+            from app.services.voice_tools import TOOL_REGISTRY, VoiceToolExecutor
+
+            executor = VoiceToolExecutor()
+            # Ask LLM (non-streaming) first to detect tool calls
+            tool_check_response = await generate_response(
+                groq_key=api_key if provider == "groq" else "",
+                system_prompt=system_prompt,
+                query=query,
+                context_chunks=retrieved_docs,
+                conversation_history=ctx["conversationHistory"],
+                token_limit=ctx["tokenLimit"],
+                model=model,
+            )
+
+            # Parse tool call JSON if present
+            tool_match = re.search(
+                r'\{[^{}]*"tool":\s*"([^"]+)"[^{}]*"arguments":\s*(\{[^{}]*\})[^{}]*\}',
+                tool_check_response,
+            )
+            if tool_match:
+                tool_use_detected = True
+                tool_name = tool_match.group(1)
+                try:
+                    tool_args = json.loads(tool_match.group(2))
+                except json.JSONDecodeError:
+                    tool_args = {}
+
+                # Yield filler while executing
+                yield "One moment..."
+                full_response_parts.append("One moment...")
+
+                tool_obj = TOOL_REGISTRY.get(tool_name)
+                if tool_obj:
+                    tool_result = await executor.execute(tool_obj, tool_args)
+                else:
+                    tool_result = {"error": f"Unknown tool: {tool_name}"}
+
+                # Inject result and continue
+                messages.append({"role": "assistant", "content": tool_check_response})
+                messages.append({
+                    "role": "user",
+                    "content": f"[TOOL RESULT for {tool_name}]: {json.dumps(tool_result)}\n\nPlease continue.",
+                })
+
+        except Exception:
+            logger.exception("[rag_streaming] function-calling error")
+
+    # 6. Stream remaining response
+    async for token in _llm_client.stream_completion(messages, model, provider, api_key):
+        full_response_parts.append(token)
+        yield token
+
+    # 7. Save full response to Redis
+    full_response = "".join(full_response_parts)
+    history = ctx["conversationHistory"]
+    history.append({"role": "user", "content": query})
+    history.append({"role": "assistant", "content": full_response})
+    await save_conversation_history(tenant_id, agent_id, session_id, history)

@@ -7,9 +7,9 @@
     <div class="max-w-4xl mx-auto px-6 py-4">
       <div class="flex items-center justify-between mb-3">
         <a href="{% url 'dashboard' %}" class="text-sm text-gray-400 hover:text-gray-600">&larr; Skip to Dashboard</a>
-        <span class="text-sm text-gray-500" x-text="'Step ' + step + ' of 7'"></span>
+        <span class="text-sm text-gray-500" x-text="'Step ' + step + ' of 8'"></span>
       </div>
-      <div class="w-full bg-gray-200 rounded-full h-2"><div class="bg-blue-600 h-2 rounded-full transition-all duration-500" :style="'width:' + (step/7*100) + '%'"></div></div>
+      <div class="w-full bg-gray-200 rounded-full h-2"><div class="bg-blue-600 h-2 rounded-full transition-all duration-500" :style="'width:' + (step/8*100) + '%'"></div></div>
       <div class="flex justify-between mt-2">
         <template x-for="(label, i) in stepLabels" :key="i">
           <span class="text-[10px] text-gray-400 cursor-pointer" :class="step > i+1 ? 'text-blue-600' : step===i+1 ? 'text-gray-700 font-semibold' : ''" @click="if(i+1<step) step=i+1" x-text="label"></span>
@@ -21,8 +21,71 @@
   <div class="flex-1 flex items-start justify-center pt-8 pb-16 px-4">
     <div class="w-full max-w-2xl">
 
-      <!-- Step 1: Company -->
+      <!-- Step 1: LLM Provider Selection (NEW) -->
       <div x-show="step===1" x-transition>
+        <h2 class="text-2xl font-bold mb-2">Choose your AI provider</h2>
+        <p class="text-gray-500 text-sm mb-6">
+          VoiceFlow needs an LLM API key to power your agent.
+          <strong>Groq is free</strong> and the easiest way to start.
+        </p>
+        <div class="space-y-3 mb-6">
+          <template x-for="p in llmProviders" :key="p.id">
+            <label class="flex items-start gap-4 p-4 border rounded-xl cursor-pointer transition-all"
+                   :class="llmProvider===p.id ? 'border-blue-500 ring-2 ring-blue-200 bg-blue-50/30' : 'border-gray-200 hover:bg-gray-50'">
+              <input type="radio" :value="p.id" x-model="llmProvider" class="mt-1 text-blue-600">
+              <div class="flex-1">
+                <div class="flex items-center gap-2">
+                  <span class="font-semibold text-sm" x-text="p.name"></span>
+                  <template x-if="p.free">
+                    <span class="px-1.5 py-0.5 text-[10px] bg-green-100 text-green-700 rounded-full font-medium">Free</span>
+                  </template>
+                  <template x-if="p.local">
+                    <span class="px-1.5 py-0.5 text-[10px] bg-purple-100 text-purple-700 rounded-full font-medium">Local</span>
+                  </template>
+                </div>
+                <p class="text-xs text-gray-400 mt-0.5" x-text="p.description"></p>
+              </div>
+            </label>
+          </template>
+        </div>
+
+        <!-- API Key input (hidden for Ollama) -->
+        <div x-show="llmProvider !== 'ollama'" x-transition class="space-y-2">
+          <label class="block text-sm font-medium">
+            <span x-text="llmProviders.find(p=>p.id===llmProvider)?.name || 'LLM'"></span>
+            API Key
+          </label>
+          <div class="flex gap-2">
+            <input x-model="llmApiKey"
+                   :type="showApiKey ? 'text' : 'password'"
+                   class="flex-1 border rounded-lg px-4 py-2.5 text-sm font-mono"
+                   :placeholder="llmProviders.find(p=>p.id===llmProvider)?.placeholder || 'Paste your API key…'">
+            <button @click="showApiKey=!showApiKey"
+                    class="px-3 border rounded-lg text-gray-400 hover:text-gray-600 transition">
+              <span x-text="showApiKey ? '🙈' : '👁️'"></span>
+            </button>
+          </div>
+          <p class="text-xs text-gray-400">
+            Your key is encrypted and stored securely. It is never logged.
+          </p>
+          <!-- Validate key -->
+          <button @click="validateApiKey()"
+                  :disabled="!llmApiKey.trim() || keyValidating"
+                  class="mt-2 px-4 py-2 text-xs bg-blue-600 text-white rounded-lg disabled:opacity-50 hover:bg-blue-700 transition"
+                  x-text="keyValidating ? 'Validating…' : 'Test & Validate Key'">
+          </button>
+          <p x-show="keyValid === true" class="text-xs text-green-600 font-medium">✅ Key validated successfully!</p>
+          <p x-show="keyValid === false" class="text-xs text-red-600 font-medium">❌ Key appears invalid. Please check and retry.</p>
+        </div>
+
+        <div x-show="llmProvider === 'ollama'" class="p-4 bg-purple-50 rounded-xl border border-purple-200 text-sm text-purple-700">
+          <strong>Ollama</strong> runs locally — no API key needed.
+          Ensure Ollama is running on <code class="bg-white/50 px-1 rounded">localhost:11434</code>.
+        </div>
+      </div>
+
+      <!-- Step 2: Company (was Step 1) -->
+      <div x-show="step===2" x-transition>
         <h2 class="text-2xl font-bold mb-2">Tell us about your company</h2>
         <p class="text-gray-500 text-sm mb-6">This helps agents answer questions about your business.</p>
         <div class="space-y-4">
@@ -33,8 +96,8 @@
         </div>
       </div>
 
-      <!-- Step 2: Choose Template -->
-      <div x-show="step===2" x-transition>
+      <!-- Step 3: Choose Template (was Step 2) -->
+      <div x-show="step===3" x-transition>
         <h2 class="text-2xl font-bold mb-2">Choose an agent template</h2>
         <p class="text-gray-500 text-sm mb-6">Select a starting point — you can customize later.</p>
         <div class="grid sm:grid-cols-2 gap-4">
@@ -47,8 +110,8 @@
         </div>
       </div>
 
-      <!-- Step 3: Agent Config -->
-      <div x-show="step===3" x-transition>
+      <!-- Step 4: Agent Config (was Step 3) -->
+      <div x-show="step===4" x-transition>
         <h2 class="text-2xl font-bold mb-2">Configure your agent</h2>
         <p class="text-gray-500 text-sm mb-6">Set the name, greeting, and persona.</p>
         <div class="space-y-4">
@@ -58,8 +121,8 @@
         </div>
       </div>
 
-      <!-- Step 4: Knowledge -->
-      <div x-show="step===4" x-transition>
+      <!-- Step 5: Knowledge (was Step 4) -->
+      <div x-show="step===5" x-transition>
         <h2 class="text-2xl font-bold mb-2">Add knowledge</h2>
         <p class="text-gray-500 text-sm mb-6">Upload documents or add a website URL for the agent to learn from.</p>
         <div class="space-y-4">
@@ -74,8 +137,8 @@
         </div>
       </div>
 
-      <!-- Step 5: Voice -->
-      <div x-show="step===5" x-transition>
+      <!-- Step 6: Voice (was Step 5) -->
+      <div x-show="step===6" x-transition>
         <h2 class="text-2xl font-bold mb-2">Choose a voice</h2>
         <p class="text-gray-500 text-sm mb-6">Select a voice for your AI agent. Click the play button to hear a sample.</p>
         <div x-data="{presets:[], loading:true, playingId:null, previewAudio:null}" x-init="fetch('/api/voice/presets/').then(r=>r.json()).then(d=>{presets=d.voices||[];loading=false}).catch(()=>loading=false)">
@@ -111,8 +174,8 @@
         </div>
       </div>
 
-      <!-- Step 6: Channels -->
-      <div x-show="step===6" x-transition>
+      <!-- Step 7: Channels (was Step 6) -->
+      <div x-show="step===7" x-transition>
         <h2 class="text-2xl font-bold mb-2">Enable channels</h2>
         <p class="text-gray-500 text-sm mb-6">Where will your agent be available?</p>
         <div class="space-y-3">
@@ -134,8 +197,8 @@
         </div>
       </div>
 
-      <!-- Step 7: Test & Deploy -->
-      <div x-show="step===7" x-transition>
+      <!-- Step 8: Test & Deploy (was Step 7) -->
+      <div x-show="step===8" x-transition>
         <h2 class="text-2xl font-bold mb-2">Test your agent</h2>
         <p class="text-gray-500 text-sm mb-6">Try a quick conversation — type or talk.</p>
         <div class="bg-white border rounded-xl p-6 mb-4 relative">
@@ -188,7 +251,7 @@
       <div class="flex justify-between mt-8">
         <button x-show="step>1" @click="step--" class="px-6 py-2.5 border rounded-lg text-sm hover:bg-gray-50">Back</button>
         <div x-show="step<=1"></div>
-        <button x-show="step<7" @click="nextStep()" :disabled="saving" class="px-6 py-2.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50 ml-auto" x-text="saving ? 'Saving…' : 'Continue'"></button>
+        <button x-show="step<8" @click="nextStep()" :disabled="saving" class="px-6 py-2.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50 ml-auto" x-text="saving ? 'Saving…' : 'Continue'"></button>
       </div>
     </div>
   </div>
@@ -198,8 +261,22 @@
 function onboardingApp() {
   return {
     step: 1,
-    stepLabels: ['Company','Template','Config','Knowledge','Voice','Channels','Test'],
+    stepLabels: ['LLM','Company','Template','Config','Knowledge','Voice','Channels','Test'],
     saving: false, deploying: false,
+
+    // Step 1: LLM Provider
+    llmProvider: 'groq',
+    llmApiKey: '',
+    showApiKey: false,
+    keyValidating: false,
+    keyValid: null,
+    llmProviders: [
+      { id: 'groq',   name: 'Groq',   description: 'Fast inference, free tier available. Get key at console.groq.com.', placeholder: 'gsk_…', free: true },
+      { id: 'openai', name: 'OpenAI', description: 'GPT-4o and GPT-4o-mini. Get key at platform.openai.com.', placeholder: 'sk-…' },
+      { id: 'gemini', name: 'Gemini', description: 'Google Gemini 1.5 Flash. Get key at aistudio.google.com.', placeholder: 'AIza…' },
+      { id: 'ollama', name: 'Ollama', description: 'Run models locally on your machine. No API key needed.', local: true },
+    ],
+
     company: {name:'', industry:'', description:'', website:''},
     selectedTemplate: '',
     agentConfig: {name:'', firstMessage:'Hello! How can I help you today?', persona:''},
@@ -212,24 +289,57 @@ function onboardingApp() {
     testMediaRecorder: null, testAudioChunks: [],
     createdAgentId: null,
 
+    async validateApiKey() {
+      if (!this.llmApiKey.trim()) return;
+      this.keyValidating = true;
+      this.keyValid = null;
+      try {
+        const r = await fetch('/api/settings/groq/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+          body: JSON.stringify({
+            provider: this.llmProvider,
+            apiKey: this.llmApiKey,
+            validate: true,
+          }),
+        });
+        const d = await r.json();
+        this.keyValid = d.valid !== false && r.ok;
+      } catch {
+        this.keyValid = false;
+      } finally {
+        this.keyValidating = false;
+      }
+    },
+
     async nextStep() {
       this.saving = true;
       try {
         if (this.step === 1) {
+          // Save LLM provider + key
+          if (this.llmProvider !== 'ollama' && this.llmApiKey.trim()) {
+            try {
+              await apiFetch('/api/settings/', {method:'POST', json:{
+                llmProvider: this.llmProvider,
+                llmApiKey: this.llmApiKey,
+              }});
+            } catch { /* non-fatal */ }
+          }
+        } else if (this.step === 2) {
           await apiFetch('/api/onboarding/company/', {method:'POST', json:{
             company_name: this.company.name,
             industry: this.company.industry,
             description: this.company.description,
             website_url: this.company.website,
           }});
-        } else if (this.step === 3) {
+        } else if (this.step === 4) {
           const d = await apiFetch('/api/agents/', {method:'POST', json:{
             name: this.agentConfig.name || 'My Agent',
             systemPrompt: this.agentConfig.persona,
             templateId: this.selectedTemplate,
           }});
           this.createdAgentId = d.id || d.agent?.id;
-        } else if (this.step === 4) {
+        } else if (this.step === 5) {
           if (this.knowledgeFile) {
             const fd = new FormData();
             fd.append('file', this.knowledgeFile);
@@ -239,12 +349,12 @@ function onboardingApp() {
           if (this.knowledgeUrl) {
             await apiFetch('/api/documents/ingest-url/', {method:'POST', json:{url:this.knowledgeUrl}});
           }
-        } else if (this.step === 5) {
+        } else if (this.step === 6) {
           // Save voice selection to the agent
           if (this.createdAgentId && this.selectedVoice) {
             await apiFetch(`/api/agents/${this.createdAgentId}/`, {method:'PUT', json:{voiceType: this.selectedVoice}});
           }
-        } else if (this.step === 6) {
+        } else if (this.step === 7) {
           // Save channel selections + Twilio credentials to the agent
           if (this.createdAgentId) {
             const payload = {channels: this.channels};

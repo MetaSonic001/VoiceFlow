@@ -1,0 +1,297 @@
+{% extends "base_dashboard.html" %}
+{% block title %}Campaigns — VoiceFlow AI{% endblock %}
+
+{% block content %}
+<div x-data="campaignsApp()" x-init="init()">
+
+  <!-- Header -->
+  <div class="flex items-center justify-between mb-6">
+    <div>
+      <h1 class="text-3xl font-bold vf-heading">Campaigns</h1>
+      <p class="text-slate-500 text-sm mt-1">Manage outbound calling campaigns.</p>
+    </div>
+    <button @click="showCreate=true"
+            class="px-5 py-2.5 bg-gradient-to-r from-teal-600 to-cyan-600 text-white text-sm font-medium rounded-lg hover:shadow-lg transition-all">
+      + New Campaign
+    </button>
+  </div>
+
+  <!-- Create campaign modal -->
+  <div x-show="showCreate" x-cloak @click.self="showCreate=false"
+       class="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
+      <h3 class="text-lg font-bold mb-4 text-slate-800">Create Campaign</h3>
+      <form @submit.prevent="createCampaign()" class="space-y-3">
+        <input x-model="form.name" required placeholder="Campaign name"
+               class="w-full px-4 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 outline-none">
+        <select x-model="form.agentId" required
+                class="w-full px-4 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 outline-none">
+          <option value="">Select agent…</option>
+          <template x-for="ag in agents" :key="ag.id">
+            <option :value="ag.id" x-text="ag.name"></option>
+          </template>
+        </select>
+        <input x-model="form.scheduledAt" type="datetime-local"
+               class="w-full px-4 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 outline-none">
+        <div class="flex gap-3 pt-2">
+          <button type="submit"
+                  class="flex-1 py-2 bg-teal-600 text-white rounded-lg text-sm font-medium hover:bg-teal-700 transition">
+            Create
+          </button>
+          <button type="button" @click="showCreate=false"
+                  class="flex-1 py-2 border border-slate-200 rounded-lg text-sm hover:bg-slate-50 transition">
+            Cancel
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Upload CSV modal -->
+  <div x-show="uploadModal.open" x-cloak @click.self="uploadModal.open=false"
+       class="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
+      <h3 class="text-lg font-bold mb-2 text-slate-800">Upload Contacts CSV</h3>
+      <p class="text-xs text-slate-500 mb-4">
+        Required column: <code class="bg-slate-100 px-1 rounded">phone_number</code>.
+        Optional: <code class="bg-slate-100 px-1 rounded">name</code> and any variable columns.
+      </p>
+
+      <!-- Drag-drop zone -->
+      <label
+        @dragover.prevent="dragging=true"
+        @dragleave="dragging=false"
+        @drop.prevent="dragging=false; handleDrop($event)"
+        :class="dragging ? 'border-teal-400 bg-teal-50' : 'border-slate-200 hover:border-teal-300'"
+        class="block border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition"
+      >
+        <input type="file" accept=".csv" class="hidden" @change="handleFile($event)">
+        <div class="text-3xl mb-2">📁</div>
+        <p class="text-sm text-slate-600" x-text="uploadModal.file ? uploadModal.file.name : 'Drop CSV here or click to browse'"></p>
+        <p class="text-xs text-slate-400 mt-1" x-show="!uploadModal.file">Max 5 MB</p>
+      </label>
+
+      <div class="flex gap-3 mt-4">
+        <button @click="uploadCSV()"
+                :disabled="!uploadModal.file"
+                class="flex-1 py-2 bg-teal-600 text-white rounded-lg text-sm font-medium hover:bg-teal-700 transition disabled:opacity-40">
+          Upload
+        </button>
+        <button @click="uploadModal.open=false"
+                class="flex-1 py-2 border border-slate-200 rounded-lg text-sm hover:bg-slate-50 transition">
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Campaign cards (HTMX live-stats every 5s) -->
+  <template x-if="campaigns.length === 0">
+    <div class="text-center py-16 vf-card">
+      <div class="text-5xl mb-4">📣</div>
+      <p class="text-slate-500 text-sm">No campaigns yet. Create one to get started.</p>
+    </div>
+  </template>
+
+  <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+    <template x-for="c in campaigns" :key="c.id">
+      <div class="vf-card p-5 flex flex-col gap-3">
+
+        <!-- Title + status -->
+        <div class="flex items-start justify-between">
+          <div>
+            <h3 class="font-semibold text-slate-800" x-text="c.name"></h3>
+            <p class="text-xs text-slate-500 mt-0.5" x-text="c.agentId || '—'"></p>
+          </div>
+          <span class="px-2 py-0.5 rounded-full text-xs font-medium border"
+                :class="{
+                  'bg-green-50 text-green-700 border-green-200': c.status === 'running',
+                  'bg-yellow-50 text-yellow-700 border-yellow-200': c.status === 'paused',
+                  'bg-slate-50 text-slate-600 border-slate-200': c.status === 'draft' || c.status === 'pending',
+                  'bg-blue-50 text-blue-700 border-blue-200': c.status === 'completed',
+                }"
+                x-text="c.status || 'draft'">
+          </span>
+        </div>
+
+        <!-- Progress bar -->
+        <div>
+          <div class="flex justify-between text-xs text-slate-500 mb-1">
+            <span x-text="(c.answeredCalls||0) + ' answered'"></span>
+            <span x-text="(c.totalCalls||0) + ' total'"></span>
+          </div>
+          <div class="h-2 bg-slate-100 rounded-full overflow-hidden">
+            <div class="h-full bg-teal-500 rounded-full transition-[width] duration-700"
+                 :style="'width:' + (c.totalCalls > 0 ? Math.round((c.answeredCalls||0)/c.totalCalls*100) : 0) + '%'">
+            </div>
+          </div>
+        </div>
+
+        <!-- Live stats (polled every 5s via HTMX) -->
+        <div class="grid grid-cols-3 gap-2 text-center"
+             :id="'stats-'+c.id"
+             hx-get="javascript:void(0)"
+             hx-trigger="every 5s">
+          <div>
+            <div class="text-lg font-bold text-blue-600" x-text="c.totalCalls||0"></div>
+            <div class="text-[10px] text-slate-400">Total</div>
+          </div>
+          <div>
+            <div class="text-lg font-bold text-green-600" x-text="c.answeredCalls||0"></div>
+            <div class="text-[10px] text-slate-400">Answered</div>
+          </div>
+          <div>
+            <div class="text-lg font-bold text-red-500" x-text="c.failedCalls||0"></div>
+            <div class="text-[10px] text-slate-400">Failed</div>
+          </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="flex gap-2 pt-1">
+          <button @click="uploadModal.open=true; uploadModal.campaignId=c.id"
+                  class="flex-1 py-1.5 text-xs border border-slate-200 rounded-lg hover:bg-slate-50 transition">
+            📁 Upload CSV
+          </button>
+          <template x-if="c.status !== 'running'">
+            <button @click="startCampaign(c)"
+                    class="flex-1 py-1.5 text-xs bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition">
+              ▶ Start
+            </button>
+          </template>
+          <template x-if="c.status === 'running'">
+            <button @click="pauseCampaign(c)"
+                    class="flex-1 py-1.5 text-xs bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition">
+              ⏸ Pause
+            </button>
+          </template>
+        </div>
+
+      </div>
+    </template>
+  </div>
+
+</div>
+
+<script>
+function campaignsApp() {
+  return {
+    campaigns: [],
+    agents: [],
+    showCreate: false,
+    dragging: false,
+    uploadModal: { open: false, campaignId: null, file: null },
+    form: { name: '', agentId: '', scheduledAt: '' },
+    _pollTimer: null,
+
+    async init() {
+      await this.loadCampaigns();
+      await this.loadAgents();
+      // Poll stats every 5 seconds
+      this._pollTimer = setInterval(() => this.refreshStats(), 5000);
+    },
+
+    async loadCampaigns() {
+      try {
+        const r = await fetch('/api/campaigns/', { headers: {'X-Requested-With':'XMLHttpRequest'} });
+        if (r.ok) {
+          const d = await r.json();
+          this.campaigns = d.campaigns || d || [];
+        }
+      } catch (e) { console.warn('campaigns load error', e); }
+    },
+
+    async loadAgents() {
+      try {
+        const r = await fetch('/api/agents/?limit=50', { headers: {'X-Requested-With':'XMLHttpRequest'} });
+        if (r.ok) { const d = await r.json(); this.agents = d.agents || []; }
+      } catch {}
+    },
+
+    async refreshStats() {
+      for (const c of this.campaigns) {
+        try {
+          const r = await fetch(`/api/campaigns/${c.id}/stats`, { headers: {'X-Requested-With':'XMLHttpRequest'} });
+          if (r.ok) {
+            const d = await r.json();
+            Object.assign(c, d);
+          }
+        } catch {}
+      }
+    },
+
+    async createCampaign() {
+      try {
+        const r = await fetch('/api/campaigns/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+          body: JSON.stringify(this.form),
+        });
+        if (r.ok) {
+          const d = await r.json();
+          this.campaigns.unshift(d.campaign || d);
+          this.showCreate = false;
+          this.form = { name: '', agentId: '', scheduledAt: '' };
+          window.vfToast && window.vfToast('Campaign created', 'success');
+        } else {
+          window.vfToast && window.vfToast('Failed to create campaign', 'error');
+        }
+      } catch (e) {
+        window.vfToast && window.vfToast('Error: ' + e.message, 'error');
+      }
+    },
+
+    async startCampaign(c) {
+      try {
+        const r = await fetch(`/api/campaigns/${c.id}/start`, { method: 'POST', headers: {'X-Requested-With':'XMLHttpRequest'} });
+        if (r.ok) { c.status = 'running'; window.vfToast && window.vfToast('Campaign started', 'success'); }
+        else window.vfToast && window.vfToast('Failed to start', 'error');
+      } catch (e) { window.vfToast && window.vfToast('Error: '+e.message, 'error'); }
+    },
+
+    async pauseCampaign(c) {
+      try {
+        const r = await fetch(`/api/campaigns/${c.id}/pause`, { method: 'POST', headers: {'X-Requested-With':'XMLHttpRequest'} });
+        if (r.ok) { c.status = 'paused'; window.vfToast && window.vfToast('Campaign paused', 'success'); }
+        else window.vfToast && window.vfToast('Failed to pause', 'error');
+      } catch (e) { window.vfToast && window.vfToast('Error: '+e.message, 'error'); }
+    },
+
+    handleFile(event) {
+      this.uploadModal.file = event.target.files[0] || null;
+    },
+
+    handleDrop(event) {
+      const file = event.dataTransfer.files[0];
+      if (file && file.name.endsWith('.csv')) {
+        this.uploadModal.file = file;
+      } else {
+        window.vfToast && window.vfToast('Please drop a CSV file', 'warning');
+      }
+    },
+
+    async uploadCSV() {
+      if (!this.uploadModal.file || !this.uploadModal.campaignId) return;
+      const fd = new FormData();
+      fd.append('file', this.uploadModal.file);
+      try {
+        const r = await fetch(`/api/campaigns/${this.uploadModal.campaignId}/contacts/upload`, {
+          method: 'POST',
+          headers: {'X-Requested-With': 'XMLHttpRequest'},
+          body: fd,
+        });
+        if (r.ok) {
+          const d = await r.json();
+          window.vfToast && window.vfToast(`Uploaded ${d.count || 'contacts'} contacts`, 'success');
+          this.uploadModal = { open: false, campaignId: null, file: null };
+          await this.refreshStats();
+        } else {
+          window.vfToast && window.vfToast('Upload failed', 'error');
+        }
+      } catch (e) {
+        window.vfToast && window.vfToast('Error: '+e.message, 'error');
+      }
+    },
+  };
+}
+</script>
+{% endblock %}

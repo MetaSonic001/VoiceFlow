@@ -3,7 +3,7 @@ import requests, time, json
 
 TENANT = "demo-tenant"
 AGENT_ID = "9f807ac4-9928-49fa-b81b-7fe342c98c14"
-BASE = "http://127.0.0.1:8000"
+BASE = "http://127.0.0.1:8040"
 H = {"x-tenant-id": TENANT}
 
 test_content = """VoiceFlow AI Platform - Product Overview

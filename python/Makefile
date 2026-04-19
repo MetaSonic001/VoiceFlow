@@ -309,3 +309,45 @@ nuke: ## Stop everything + wipe ALL data (Postgres, Redis, ChromaDB, MinIO) + re
 	@Write-Host '=== NUKE COMPLETE ===' -ForegroundColor Green
 	@Write-Host 'All data wiped. Docker services running fresh.' -ForegroundColor Green
 	@Write-Host 'Run "make all" to start backend + frontend.' -ForegroundColor Cyan
+
+
+# ─── LINUX / macOS / CI TARGETS ───────────────────────────────────
+# The following targets override SHELL per-target and are designed
+# to run on Linux/macOS (GitHub Actions, local Unix development).
+# They will fail on Windows — use the PowerShell targets above there.
+
+.PHONY: lint
+lint: SHELL := /bin/bash
+lint: ## Lint with ruff + black (Linux/macOS/CI)
+	cd backend && uv run ruff check backend/
+	cd backend && uv run black --check backend/
+
+.PHONY: format
+format: SHELL := /bin/bash
+format: ## Auto-format with black + ruff (Linux/macOS/CI)
+	cd backend && uv run black backend/
+	cd backend && uv run ruff check --fix backend/
+
+.PHONY: pytest
+pytest: SHELL := /bin/bash
+pytest: ## Run pytest suite (Linux/macOS/CI)
+	uv run pytest tests/ -v --tb=short
+
+.PHONY: ci
+ci: SHELL := /bin/bash
+ci: ## Run lint + pytest (Linux/macOS/CI)
+	$(MAKE) lint
+	$(MAKE) pytest
+	@echo "CI checks passed"
+
+.PHONY: kokoro-logs
+kokoro-logs: SHELL := /bin/bash
+kokoro-logs: ## Tail Kokoro TTS container logs
+	docker logs -f voiceflow_kokoro
+
+.PHONY: vosk-download
+vosk-download: SHELL := /bin/bash
+vosk-download: ## Download Vosk small English model
+	mkdir -p models && cd models && \
+	curl -LO https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip && \
+	unzip -o vosk-model-small-en-us-0.15.zip && rm -f vosk-model-small-en-us-0.15.zip

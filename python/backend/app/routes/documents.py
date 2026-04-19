@@ -42,7 +42,9 @@ def _doc_to_dict(doc: Document) -> dict:
 def _get_s3_client():
     """Get MinIO/S3 client."""
     import boto3
-    endpoint = settings.MINIO_ENDPOINT or "localhost:9002"
+    endpoint = settings.MINIO_ENDPOINT
+    if not endpoint:
+        endpoint = "localhost:9020"
     if not endpoint.startswith("http"):
         endpoint = f"http://{endpoint}"
     return boto3.client(

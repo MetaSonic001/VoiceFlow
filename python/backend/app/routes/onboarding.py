@@ -94,7 +94,7 @@ async def save_company(request: Request, auth: AuthContext = Depends(get_auth), 
             }
             async with httpx.AsyncClient(timeout=30) as client:
                 resp = await client.post(
-                    f"{settings.FASTAPI_URL}/api/ingestion/company",
+                    f"{settings.FASTAPI_URL}/api/ingestion/start",
                     headers=internal_headers,
                     json={
                         "tenantId": auth.tenant_id,
@@ -131,7 +131,10 @@ async def scrape_status(job_id: str):
 async def company_knowledge(auth: AuthContext = Depends(get_auth)):
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(f"{settings.FASTAPI_URL}/knowledge/company/{auth.tenant_id}")
+            resp = await client.get(
+                f"{settings.FASTAPI_URL}/api/documents/",
+                headers={"x-tenant-id": auth.tenant_id},
+            )
             return resp.json()
     except Exception:
         return JSONResponse({"error": "Failed to fetch company knowledge"}, status_code=500)
@@ -225,7 +228,7 @@ async def upload_knowledge(
                     upload_files.append(("files", (f.filename, content, f.content_type or "application/octet-stream")))
 
             resp = await client.post(
-                f"{settings.FASTAPI_URL}/ingest",
+                f"{settings.FASTAPI_URL}/api/ingestion/start",
                 data=data,
                 files=upload_files if upload_files else None,
             )

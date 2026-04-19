@@ -255,3 +255,16 @@ def brands(request):
     except Exception:
         pass
     return render(request, "dashboard/brands.html", {"brands": json.dumps(brands_list)})
+
+
+@login_required
+def campaigns(request):
+    """Campaigns page — campaign cards with HTMX live stats."""
+    return render(request, "dashboard/campaigns.html")
+
+
+@login_required
+def agent_builder(request):
+    """Visual flow builder for an agent."""
+    agent_id = request.GET.get("agent_id", "")
+    return render(request, "agents/builder.html", {"agent_id": agent_id})

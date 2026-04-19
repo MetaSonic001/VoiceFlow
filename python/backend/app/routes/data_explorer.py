@@ -61,7 +61,7 @@ async def data_overview(auth: AuthContext = Depends(get_auth), db: AsyncSession 
             redis_info["bm25_indexes"] += 1
         for key in r.scan_iter("job:*", count=100):
             redis_info["jobs"] += 1
-        for key in r.scan_iter("conv:*", count=100):
+        for key in r.scan_iter("conversation:*", count=100):
             redis_info["conversations"] += 1
     except Exception as e:
         redis_info["error"] = str(e)
@@ -192,7 +192,7 @@ async def redis_detail(auth: AuthContext = Depends(get_auth)):
                 })
             except Exception:
                 result["bm25_indexes"].append({"key": key, "ttl": ttl})
-        elif key.startswith("conv:"):
+        elif key.startswith("conversation:"):
             result["conversations"].append({"key": key, "ttl": ttl})
         else:
             result["other_keys"].append({"key": key, "ttl": ttl, "type": r.type(key)})

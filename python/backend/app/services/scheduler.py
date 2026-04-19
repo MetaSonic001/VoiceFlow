@@ -116,7 +116,7 @@ async def retrain_approved_examples():
                         host=settings.CHROMA_HOST,
                         port=settings.CHROMA_PORT,
                     )
-                    collection_name = f"tenant_{agent.tenantId}_agent_{agent_id}"
+                    collection_name = f"tenant_{agent.tenantId}"
                     collection = chroma.get_or_create_collection(collection_name)
 
                     ids = []
@@ -129,7 +129,7 @@ async def retrain_approved_examples():
                         documents.append(doc_text)
                         metadatas.append({
                             "source": "retraining",
-                            "agentId": agent_id,
+                            "agentId": str(ex.agentId),
                             "tenantId": agent.tenantId,
                             "type": "retraining_example",
                             "originalBadResponse": ex.badResponse[:200],

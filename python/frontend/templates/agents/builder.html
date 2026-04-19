@@ -1,0 +1,340 @@
+{% extends "base_dashboard.html" %}
+{% block title %}Flow Builder — VoiceFlow AI{% endblock %}
+{% block extra_head %}
+<!-- Mermaid.js for flow visualization -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.0/dist/mermaid.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div x-data="flowBuilder()" x-init="init()">
+
+  <!-- Header -->
+  <div class="flex items-center justify-between mb-6">
+    <div>
+      <h1 class="text-3xl font-bold vf-heading">Visual Flow Builder</h1>
+      <p class="text-slate-500 text-sm mt-1">
+        Design your agent's conversation flow visually.
+        <span class="font-medium text-teal-600" x-text="agentName ? 'Agent: ' + agentName : ''"></span>
+      </p>
+    </div>
+    <div class="flex gap-3">
+      <button @click="addNode('greeting')"
+              class="px-3 py-2 text-xs border border-slate-200 rounded-lg hover:bg-slate-50 transition">
+        + Greeting
+      </button>
+      <button @click="addNode('knowledge')"
+              class="px-3 py-2 text-xs border border-slate-200 rounded-lg hover:bg-slate-50 transition">
+        + Knowledge
+      </button>
+      <button @click="addNode('condition')"
+              class="px-3 py-2 text-xs border border-slate-200 rounded-lg hover:bg-slate-50 transition">
+        + Condition
+      </button>
+      <button @click="addNode('api_call')"
+              class="px-3 py-2 text-xs border border-slate-200 rounded-lg hover:bg-slate-50 transition">
+        + API Call
+      </button>
+      <button @click="addNode('human_transfer')"
+              class="px-3 py-2 text-xs border border-slate-200 rounded-lg hover:bg-slate-50 transition">
+        + Transfer
+      </button>
+      <button @click="saveFlow()"
+              class="px-5 py-2 bg-gradient-to-r from-teal-600 to-cyan-600 text-white text-sm font-medium rounded-lg hover:shadow-lg transition-all">
+        💾 Save Flow
+      </button>
+    </div>
+  </div>
+
+  <!-- Main layout: palette | canvas | inspector -->
+  <div class="grid grid-cols-1 xl:grid-cols-[200px_1fr_260px] gap-4">
+
+    <!-- Node Palette -->
+    <div class="vf-card p-4 flex flex-col gap-2">
+      <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Nodes</p>
+      <template x-for="type in nodeTypes" :key="type.id">
+        <button
+          draggable="true"
+          @dragstart="dragType=$event.dataTransfer.setData('nodeType', type.id) || type.id; dragType=type.id"
+          @click="addNode(type.id)"
+          class="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium border border-slate-200 hover:border-teal-300 hover:bg-teal-50 transition cursor-grab active:cursor-grabbing"
+        >
+          <span x-text="type.icon" class="text-base"></span>
+          <span x-text="type.label" class="text-slate-700"></span>
+        </button>
+      </template>
+    </div>
+
+    <!-- Canvas + Preview -->
+    <div class="flex flex-col gap-4">
+
+      <!-- Mermaid preview -->
+      <div class="vf-card p-4">
+        <div class="flex items-center justify-between mb-3">
+          <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Flow Preview</p>
+          <button @click="renderDiagram()" class="text-xs text-teal-600 hover:underline">Refresh</button>
+        </div>
+        <div id="mermaid-diagram" class="overflow-x-auto text-center min-h-[160px]">
+          <p class="text-slate-400 text-xs py-8">Add nodes to see the flow diagram.</p>
+        </div>
+      </div>
+
+      <!-- Node list -->
+      <div class="vf-card p-4">
+        <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Flow Nodes</p>
+        <template x-if="nodes.length === 0">
+          <p class="text-slate-400 text-xs text-center py-4">No nodes yet. Add nodes from the palette.</p>
+        </template>
+        <div class="space-y-2">
+          <template x-for="(node, idx) in nodes" :key="node.id">
+            <div
+              class="flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition"
+              :class="selected && selected.id===node.id ? 'border-teal-400 bg-teal-50' : 'border-slate-200 hover:border-slate-300'"
+              @click="selected=node"
+            >
+              <span x-text="nodeTypeMap[node.type]?.icon || '⬜'" class="text-lg"></span>
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-medium text-slate-800 truncate" x-text="node.label || node.id"></p>
+                <p class="text-xs text-slate-500 truncate" x-text="node.type"></p>
+              </div>
+              <div class="flex gap-1">
+                <!-- Move up -->
+                <button @click.stop="moveNode(idx, -1)" :disabled="idx===0"
+                        class="p-1 rounded hover:bg-slate-100 disabled:opacity-30 text-xs">↑</button>
+                <!-- Move down -->
+                <button @click.stop="moveNode(idx, 1)" :disabled="idx===nodes.length-1"
+                        class="p-1 rounded hover:bg-slate-100 disabled:opacity-30 text-xs">↓</button>
+                <!-- Delete -->
+                <button @click.stop="removeNode(node.id)"
+                        class="p-1 rounded hover:bg-red-50 text-red-400 text-xs">✕</button>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- Inspector Panel -->
+    <div class="vf-card p-4">
+      <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Inspector</p>
+      <template x-if="!selected">
+        <p class="text-slate-400 text-xs text-center py-4">Select a node to edit its properties.</p>
+      </template>
+      <template x-if="selected">
+        <div class="space-y-3">
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">Node ID</label>
+            <input x-model="selected.id" readonly
+                   class="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg bg-slate-50 text-slate-500">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">Label</label>
+            <input x-model="selected.label" @input="renderDiagram()"
+                   class="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400 outline-none">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">Type</label>
+            <select x-model="selected.type" @change="renderDiagram()"
+                    class="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400 outline-none">
+              <template x-for="t in nodeTypes" :key="t.id">
+                <option :value="t.id" x-text="t.label"></option>
+              </template>
+            </select>
+          </div>
+          <!-- Type-specific fields -->
+          <template x-if="selected.type==='greeting' || selected.type==='end'">
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">Text</label>
+              <textarea x-model="selected.text" rows="3"
+                        class="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400 outline-none resize-none"></textarea>
+            </div>
+          </template>
+          <template x-if="selected.type==='condition'">
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">Match Field</label>
+              <input x-model="selected.field" placeholder="e.g. intent"
+                     class="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400 outline-none">
+            </div>
+          </template>
+          <template x-if="selected.type==='api_call'">
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">Tool Name</label>
+              <input x-model="selected.tool" placeholder="e.g. book_appointment"
+                     class="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400 outline-none">
+            </div>
+          </template>
+          <template x-if="selected.type==='human_transfer'">
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">Transfer Number</label>
+              <input x-model="selected.number" placeholder="+91…"
+                     class="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400 outline-none">
+            </div>
+          </template>
+          <!-- Edge (next node) -->
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">Next Node</label>
+            <select x-model="selected.nextId" @change="rebuildEdges(); renderDiagram()"
+                    class="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400 outline-none">
+              <option value="">— none —</option>
+              <template x-for="n in nodes.filter(n=>n.id!==selected.id)" :key="n.id">
+                <option :value="n.id" x-text="n.label || n.id"></option>
+              </template>
+            </select>
+          </div>
+        </div>
+      </template>
+
+      <!-- JSON export -->
+      <div class="mt-6 pt-4 border-t border-slate-100">
+        <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Flow JSON</p>
+        <textarea :value="JSON.stringify({nodes, edges}, null, 2)"
+                  readonly rows="8"
+                  class="w-full px-3 py-2 text-[10px] font-mono border border-slate-200 rounded-lg bg-slate-50 resize-none">
+        </textarea>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+mermaid.initialize({ startOnLoad: false, theme: 'default', flowchart: { useMaxWidth: true } });
+
+function flowBuilder() {
+  const NODE_TYPES = [
+    { id: 'start',          label: 'Start',          icon: '▶' },
+    { id: 'greeting',       label: 'Greeting',        icon: '👋' },
+    { id: 'knowledge',      label: 'Knowledge',       icon: '🔍' },
+    { id: 'condition',      label: 'Condition',       icon: '🔀' },
+    { id: 'api_call',       label: 'API Call',        icon: '⚡' },
+    { id: 'human_transfer', label: 'Human Transfer',  icon: '🧑' },
+    { id: 'end',            label: 'End',             icon: '⏹' },
+  ];
+  const MAP = Object.fromEntries(NODE_TYPES.map(t => [t.id, t]));
+  let _counter = 0;
+
+  return {
+    nodeTypes: NODE_TYPES,
+    nodeTypeMap: MAP,
+    nodes: [{ id: 'start', type: 'start', label: 'Start', nextId: '' }],
+    edges: [],
+    selected: null,
+    agentName: '',
+    agentId: new URLSearchParams(window.location.search).get('agent_id') || '',
+    dragType: null,
+
+    async init() {
+      // Bootstrap with start node
+      if (this.agentId) {
+        try {
+          const r = await fetch(`/api/agents/${this.agentId}/`, { headers: {'X-Requested-With':'XMLHttpRequest'} });
+          if (r.ok) {
+            const d = await r.json();
+            this.agentName = d.name || '';
+            // Load existing flow if stored
+            const flow = d.flowDefinition || d.configuration?.flowDefinition;
+            if (flow && flow.nodes) {
+              this.nodes = flow.nodes.map(n => ({ ...n, nextId: '' }));
+              this.edges = flow.edges || [];
+              // Rebuild nextId from edges
+              for (const e of this.edges) {
+                const src = this.nodes.find(n => n.id === e.from);
+                if (src && !src.nextId) src.nextId = e.to;
+              }
+            }
+          }
+        } catch {}
+      }
+      this.$nextTick(() => this.renderDiagram());
+    },
+
+    addNode(type) {
+      _counter++;
+      const id = type + '_' + _counter;
+      this.nodes.push({ id, type, label: MAP[type]?.label + ' ' + _counter, nextId: '' });
+      this.rebuildEdges();
+      this.$nextTick(() => this.renderDiagram());
+    },
+
+    removeNode(id) {
+      this.nodes = this.nodes.filter(n => n.id !== id);
+      // Clean up edges referencing this node
+      this.nodes.forEach(n => { if (n.nextId === id) n.nextId = ''; });
+      if (this.selected?.id === id) this.selected = null;
+      this.rebuildEdges();
+      this.$nextTick(() => this.renderDiagram());
+    },
+
+    moveNode(idx, dir) {
+      const newIdx = idx + dir;
+      if (newIdx < 0 || newIdx >= this.nodes.length) return;
+      [this.nodes[idx], this.nodes[newIdx]] = [this.nodes[newIdx], this.nodes[idx]];
+      this.renderDiagram();
+    },
+
+    rebuildEdges() {
+      this.edges = [];
+      for (const n of this.nodes) {
+        if (n.nextId) {
+          this.edges.push({ from: n.id, to: n.nextId });
+        }
+      }
+    },
+
+    async renderDiagram() {
+      const el = document.getElementById('mermaid-diagram');
+      if (!el) return;
+      if (this.nodes.length <= 1 && !this.edges.length) {
+        el.innerHTML = '<p class="text-slate-400 text-xs py-8">Add nodes to see the flow diagram.</p>';
+        return;
+      }
+      let def = 'flowchart TD\n';
+      const shapeFor = type => {
+        if (type === 'start') return n => `${n}([${n}])`;
+        if (type === 'end') return n => `${n}([${n}])`;
+        if (type === 'condition') return n => `${n}{${n}}`;
+        if (type === 'api_call') return n => `${n}[(${n})]`;
+        return n => `${n}[${n}]`;
+      };
+      for (const n of this.nodes) {
+        const label = (n.label || n.id).replace(/[<>"']/g, '_');
+        const shape = shapeFor(n.type);
+        def += `  ${shape(n.id.replace(/-/g,'_'))}\n`;
+        def = def.replace(n.id.replace(/-/g,'_'), `${n.id.replace(/-/g,'_')}["${label}"]`);
+      }
+      for (const e of this.edges) {
+        def += `  ${e.from.replace(/-/g,'_')} --> ${e.to.replace(/-/g,'_')}\n`;
+      }
+      try {
+        const { svg } = await mermaid.render('mermaid-svg-' + Date.now(), def);
+        el.innerHTML = svg;
+      } catch (err) {
+        el.innerHTML = `<pre class="text-xs text-red-500 text-left overflow-auto">${err.message}</pre>`;
+      }
+    },
+
+    async saveFlow() {
+      this.rebuildEdges();
+      const flow = { nodes: this.nodes, edges: this.edges };
+      if (!this.agentId) {
+        window.vfToast && window.vfToast('No agent selected. Open this page with ?agent_id=…', 'error');
+        return;
+      }
+      try {
+        const r = await fetch(`/api/agents/${this.agentId}/flow`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+          body: JSON.stringify({ flow }),
+        });
+        if (r.ok) {
+          window.vfToast && window.vfToast('Flow saved!', 'success');
+        } else {
+          window.vfToast && window.vfToast('Save failed', 'error');
+        }
+      } catch (e) {
+        window.vfToast && window.vfToast('Error: ' + e.message, 'error');
+      }
+    },
+  };
+}
+</script>
+{% endblock %}
