@@ -224,6 +224,9 @@ async def media_stream_ws(websocket: WebSocket, agent_id: str):
                     "callSid": call_sid,
                 }).encode()
                 await redis.setex(f"stream:{stream_sid}", 3600, session_data)
+                # Reverse index: callSid → streamSid (for efficient transfer lookup)
+                if call_sid:
+                    await redis.setex(f"call_stream:{call_sid}", 3600, stream_sid.encode())
 
             elif event == "media":
                 payload_b64 = msg.get("media", {}).get("payload", "")
@@ -299,6 +302,8 @@ async def media_stream_ws(websocket: WebSocket, agent_id: str):
         )
         if stream_sid:
             await redis.delete(f"stream:{stream_sid}")
+        if call_sid:
+            await redis.delete(f"call_stream:{call_sid}")
         await redis.aclose()
 
 
@@ -452,22 +457,21 @@ async def transfer_call(
     Warm transfer an active Media-Stream call to a human agent.
 
     Steps:
-    1. Look up call session in Redis by call_sid.
+    1. Look up call session in Redis via the call_sid→streamSid reverse index.
     2. Read `transferTo` phone number from JSON body.
     3. Use Twilio REST API to update the live call with TwiML <Dial> to transfer.
     """
-    # 1. Resolve session from Redis
+    # 1. Resolve session from Redis using the O(1) reverse index
     redis = _redis_client()
     try:
+        # call_stream:{call_sid} → streamSid (written at "start" event)
+        stream_sid_raw = await redis.get(f"call_stream:{call_sid}")
         session_data: dict = {}
-        # We index streams by streamSid; scan for the call_sid match
-        async for key in redis.scan_iter("stream:*"):
-            raw = await redis.get(key)
+        if stream_sid_raw:
+            stream_sid_str = stream_sid_raw.decode() if isinstance(stream_sid_raw, bytes) else stream_sid_raw
+            raw = await redis.get(f"stream:{stream_sid_str}")
             if raw:
-                data = json.loads(raw)
-                if data.get("callSid") == call_sid:
-                    session_data = data
-                    break
+                session_data = json.loads(raw)
     finally:
         await redis.aclose()
 
@@ -526,6 +530,6 @@ async def transfer_call(
                 {"error": "Twilio transfer failed", "detail": resp.text[:300]},
                 status_code=resp.status_code,
             )
-    except Exception as exc:
+    except Exception:
         logger.exception("[twilio_stream] transfer error call=%s", call_sid)
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        return JSONResponse({"error": "Transfer request failed"}, status_code=500)

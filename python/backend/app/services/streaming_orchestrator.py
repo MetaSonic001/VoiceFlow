@@ -26,6 +26,10 @@ from app.services.call_state import CallState, CallStateManager
 
 logger = logging.getLogger("voiceflow.orchestrator")
 
+# Sentinel returned by get_nowait() when the queue is empty (distinct from the
+# None sentinel that signals end-of-stream).
+_NO_DATA = object()
+
 # ── VAD / interruption constants ─────────────────────────────────────────────
 
 # PCM energy below this = silence (16-bit RMS)
@@ -308,20 +312,23 @@ class StreamingOrchestrator:
             chunk = mulaw_bytes[i : i + _FRAME_BYTES]
             yield {"type": "audio", "bytes": chunk}
 
-            # Non-blocking check for incoming audio
-            inbound: bytes | None = None
+            # Non-blocking check for incoming audio:
+            #   _NO_DATA  → queue was empty, no inbound audio this tick
+            #   None      → end-of-stream sentinel from _feed_audio
+            #   bytes     → actual audio chunk; check RMS for barge-in
+            inbound = _NO_DATA
             try:
                 inbound = audio_queue.get_nowait()
             except asyncio.QueueEmpty:
-                inbound = ...  # type: ignore[assignment]  # sentinel for "no data"
+                pass  # _NO_DATA remains
 
             if inbound is None:
-                # None sentinel → audio_input exhausted; stop streaming
+                # End-of-stream sentinel → stop streaming
                 yield {"type": "done"}
                 return
 
-            if inbound is not ...:  # actual audio arrived
-                rms = _pcm_rms(inbound)  # type: ignore[arg-type]
+            if inbound is not _NO_DATA:  # actual audio chunk arrived
+                rms = _pcm_rms(inbound)
                 if rms > _INTERRUPT_RMS_THRESHOLD:
                     logger.info(
                         "[orchestrator] barge-in call=%s rms=%.1f", call_sid, rms
