@@ -2,7 +2,7 @@
 /api/agents routes — mirrors Express src/routes/agents.ts
 GET /, GET /:id, POST /, PUT /:id, DELETE /:id
 """
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -181,6 +181,65 @@ async def delete_agent(agent_id: str, auth: AuthContext = Depends(get_auth), db:
     return Response(status_code=204)
 
 
+@router.put("/{agent_id}/telephony")
+async def update_telephony(
+    agent_id: str,
+    request: Request,
+    auth: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update telephony_provider for an agent (twilio-gather | twilio-stream | twilio-whatsapp)."""
+    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.tenantId == auth.tenant_id))
+    agent = result.scalar_one_or_none()
+    if not agent:
+        return JSONResponse({"error": "Agent not found"}, status_code=404)
+
+    body = await request.json()
+    provider = (body.get("telephonyProvider") or "").strip()
+    allowed = {"twilio-gather", "twilio-stream", "twilio-whatsapp"}
+    if provider and provider not in allowed:
+        return JSONResponse({"error": f"Invalid provider. Must be one of: {', '.join(sorted(allowed))}"}, status_code=400)
+
+    if provider:
+        agent.telephony_provider = provider
+    await db.commit()
+    await db.refresh(agent)
+    return {"id": agent.id, "telephonyProvider": agent.telephony_provider}
+
+
+@router.post("/{agent_id}/whatsapp")
+async def configure_whatsapp(
+    agent_id: str,
+    request: Request,
+    auth: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Save WhatsApp configuration into agent.channels."""
+    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.tenantId == auth.tenant_id))
+    agent = result.scalar_one_or_none()
+    if not agent:
+        return JSONResponse({"error": "Agent not found"}, status_code=404)
+
+    body = await request.json()
+    whatsapp_number = (body.get("whatsapp_number") or "").strip()
+    messaging_sid = (body.get("twilio_messaging_sid") or "").strip()
+
+    channels: dict = agent.channels or {}
+    channels["whatsapp"] = {
+        "enabled": bool(whatsapp_number),
+        "whatsapp_number": whatsapp_number,
+        "twilio_messaging_sid": messaging_sid,
+    }
+    agent.channels = channels
+    await db.commit()
+    await db.refresh(agent)
+    return {
+        "id": agent.id,
+        "whatsapp": channels["whatsapp"],
+        "webhookUrl": f"/api/whatsapp/inbound/{agent.id}",
+    }
+
+
 @router.post("/{agent_id}/activate")
 async def activate_agent(agent_id: str, auth: AuthContext = Depends(get_auth), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.tenantId == auth.tenant_id))
@@ -201,3 +260,4 @@ async def pause_agent(agent_id: str, auth: AuthContext = Depends(get_auth), db: 
     agent.status = "paused"
     await db.commit()
     return {"success": True}
+

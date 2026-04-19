@@ -156,6 +156,16 @@ async def upload_contacts(
             skipped += 1
             continue
 
+        # Normalize phone number to E.164 format
+        try:
+            import phonenumbers
+            parsed = phonenumbers.parse(phone, "IN")  # default region India
+            phone = phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
+        except Exception:
+            logger.warning("[campaigns] could not normalize phone number: %s — skipping", phone)
+            skipped += 1
+            continue
+
         name = (row.get("name") or "").strip() or None
         variables = {k: v for k, v in row.items() if k not in reserved_cols and v}
 

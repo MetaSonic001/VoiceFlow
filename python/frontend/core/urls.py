@@ -40,6 +40,7 @@ urlpatterns = [
     path("dashboard/pipelines/", pages.pipelines, name="pipelines"),
     path("dashboard/brands/", pages.brands, name="brands"),
     path("dashboard/campaigns/", pages.campaigns, name="campaigns"),
+    path("dashboard/webhooks/", pages.webhooks, name="webhooks"),
     path("dashboard/agents/builder/", pages.agent_builder, name="agent_builder"),
 
     # API proxy endpoints (for HTMX / JS calls from the browser)

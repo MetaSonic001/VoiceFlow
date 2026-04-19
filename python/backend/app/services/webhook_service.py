@@ -97,7 +97,10 @@ class WebhookService:
                 return
             if attempt < len(_RETRY_DELAYS):
                 await asyncio.sleep(delay)
-        logger.error("[webhook] all delivery attempts failed for endpoint=%s", endpoint.id)
+        logger.error(
+            "[webhook] permanently failed url=%s event=unknown endpoint=%s — dead letter",
+            endpoint.url, endpoint.id,
+        )
 
     # ── Public dispatch ───────────────────────────────────────────────────────
 

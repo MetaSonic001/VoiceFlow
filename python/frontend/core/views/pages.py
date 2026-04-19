@@ -264,6 +264,12 @@ def campaigns(request):
 
 
 @login_required
+def webhooks(request):
+    """Webhook endpoints management page."""
+    return render(request, "dashboard/webhooks.html")
+
+
+@login_required
 def agent_builder(request):
     """Visual flow builder for an agent."""
     agent_id = request.GET.get("agent_id", "")

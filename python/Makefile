@@ -328,6 +328,11 @@ format: ## Auto-format with black + ruff (Linux/macOS/CI)
 	cd backend && uv run black backend/
 	cd backend && uv run ruff check --fix backend/
 
+.PHONY: alembic-migrate
+alembic-migrate: SHELL := /bin/bash
+alembic-migrate: ## Run Alembic migrations (Linux/macOS/CI)  —  alembic upgrade head
+	cd backend && uv run alembic upgrade head
+
 .PHONY: pytest
 pytest: SHELL := /bin/bash
 pytest: ## Run pytest suite (Linux/macOS/CI)

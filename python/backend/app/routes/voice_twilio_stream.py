@@ -19,7 +19,7 @@ import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, Response
 from pydub import AudioSegment
-from sqlalchemy import select
+from sqlalchemy import select, update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -87,17 +87,49 @@ async def _groq_key_for_tenant(tenant_id: str) -> str | None:
     return settings.GROQ_API_KEY
 
 
+# ── Twilio request validator helper ──────────────────────────────────────────
+
+def _validate_twilio_signature(request: Request, form_data: dict) -> bool:
+    """Return True if Twilio signature is valid (or Twilio creds not configured)."""
+    account_sid = settings.TWILIO_ACCOUNT_SID
+    auth_token = settings.TWILIO_AUTH_TOKEN
+    if not account_sid or not auth_token:
+        # Credentials not configured — skip validation (dev/test mode)
+        return True
+    try:
+        from twilio.request_validator import RequestValidator
+        validator = RequestValidator(auth_token)
+        signature = request.headers.get("X-Twilio-Signature", "")
+        proto = request.headers.get("x-forwarded-proto", "https")
+        host = request.headers.get("host", "localhost")
+        url = f"{proto}://{host}{request.url.path}"
+        return validator.validate(url, form_data, signature)
+    except Exception:
+        logger.warning("[twilio_stream] signature validation error — allowing request")
+        return True
+
+
 # ── TwiML inbound endpoint ────────────────────────────────────────────────────
 
 async def handle_inbound_call(agent: Agent, request: Request) -> Response:
-    """Return TwiML <Connect><Stream> for the given agent."""
-    from twilio.twiml.voice_response import VoiceResponse, Connect, Stream
+    """Return TwiML <Connect><Stream> with optional call recording for the given agent."""
+    from twilio.twiml.voice_response import VoiceResponse, Connect, Stream, Record
 
     proto = request.headers.get("x-forwarded-proto", "https")
     host = request.headers.get("host", "localhost")
     ws_url = f"wss://{host}/api/voice/media-stream/{agent.id}"
+    recording_status_url = f"{proto}://{host}/api/voice/recording-status/{agent.id}"
 
     resp = VoiceResponse()
+    # Start call recording — store recording URL via status callback
+    resp.record(
+        action=recording_status_url,
+        recording_status_callback=recording_status_url,
+        recording_status_callback_method="POST",
+        recording_channels="mono",
+        timeout=0,
+        play_beep=False,
+    )
     connect = Connect()
     stream = Stream(url=ws_url)
     stream.parameter(name="agentId", value=agent.id)
@@ -109,7 +141,12 @@ async def handle_inbound_call(agent: Agent, request: Request) -> Response:
 
 @router.post("/inbound/{agent_id}")
 async def voice_inbound(agent_id: str, request: Request):
-    """Twilio inbound webhook — returns Media Stream TwiML."""
+    """Twilio inbound webhook — validates signature then returns Media Stream TwiML."""
+    form = await request.form()
+    if not _validate_twilio_signature(request, dict(form)):
+        logger.warning("[twilio_stream] invalid Twilio signature on /inbound/%s", agent_id)
+        return Response(content="Forbidden", status_code=403, media_type="text/plain")
+
     async with AsyncSessionLocal() as db:
         result = await db.execute(select(Agent).where(Agent.id == agent_id))
         agent = result.scalar_one_or_none()
@@ -123,6 +160,111 @@ async def voice_inbound(agent_id: str, request: Request):
         return Response(content=str(resp), media_type="application/xml")
 
     return await handle_inbound_call(agent, request)
+
+
+@router.post("/outbound/{agent_id}")
+async def voice_outbound(agent_id: str, request: Request):
+    """
+    Twilio outbound webhook — called when campaign-dialled call is answered.
+
+    Reads AnsweredBy from AMD (Answering Machine Detection) result:
+    - human: look up CampaignContact by ?contact_id=, inject contact.variables as
+      stream parameters, return <Connect><Stream> TwiML.
+    - machine_*/fax: hang up.
+    """
+    form = await request.form()
+    answered_by = (form.get("AnsweredBy") or "").lower()
+    call_sid = form.get("CallSid", "")
+
+    if answered_by.startswith("machine") or answered_by == "fax":
+        from twilio.twiml.voice_response import VoiceResponse
+        resp = VoiceResponse()
+        resp.hangup()
+        logger.info("[twilio_stream] AMD machine detected — hanging up call=%s", call_sid)
+        return Response(content=str(resp), media_type="application/xml")
+
+    contact_id = request.query_params.get("contact_id", "")
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(Agent).where(Agent.id == agent_id))
+        agent = result.scalar_one_or_none()
+
+        contact_vars: dict = {}
+        if contact_id:
+            from app.models import CampaignContact
+            cr = await db.execute(
+                select(CampaignContact).where(CampaignContact.id == contact_id)
+            )
+            contact = cr.scalar_one_or_none()
+            if contact:
+                if contact.name:
+                    contact_vars["name"] = contact.name
+                if contact.variables:
+                    contact_vars.update(contact.variables)
+
+    if not agent:
+        from twilio.twiml.voice_response import VoiceResponse
+        resp = VoiceResponse()
+        resp.say("Agent not found.")
+        resp.hangup()
+        return Response(content=str(resp), media_type="application/xml")
+
+    from twilio.twiml.voice_response import VoiceResponse, Connect, Stream
+    proto = request.headers.get("x-forwarded-proto", "https")
+    host = request.headers.get("host", "localhost")
+    ws_url = f"wss://{host}/api/voice/media-stream/{agent.id}"
+
+    resp = VoiceResponse()
+    connect = Connect()
+    stream = Stream(url=ws_url)
+    stream.parameter(name="agentId", value=agent.id)
+    for key, value in contact_vars.items():
+        stream.parameter(name=key, value=str(value))
+    connect.append(stream)
+    resp.append(connect)
+
+    logger.info(
+        "[twilio_stream] outbound answered call=%s agent=%s contact_vars=%s",
+        call_sid, agent_id, list(contact_vars.keys()),
+    )
+    return Response(content=str(resp), media_type="application/xml")
+
+
+@router.post("/recording-status/{agent_id}")
+async def recording_status(agent_id: str, request: Request):
+    """Twilio recording status callback — persist recording URL in CallLog."""
+    form = await request.form()
+    recording_url = form.get("RecordingUrl", "")
+    call_sid = form.get("CallSid", "")
+    recording_status = form.get("RecordingStatus", "")
+
+    if recording_url and call_sid:
+        try:
+            async with AsyncSessionLocal() as db:
+                # Find the most recent call log for this agent
+                result = await db.execute(
+                    select(CallLog)
+                    .where(CallLog.agentId == agent_id)
+                    .order_by(CallLog.createdAt.desc())
+                    .limit(1)
+                )
+                call_log = result.scalar_one_or_none()
+                if call_log:
+                    existing = call_log.analysis or {}
+                    existing.update({
+                        "recording_url": recording_url,
+                        "recording_status": recording_status,
+                        "call_sid": call_sid,
+                    })
+                    call_log.analysis = existing
+                    await db.commit()
+            logger.info(
+                "[twilio_stream] recording saved call=%s url=%s", call_sid, recording_url
+            )
+        except Exception:
+            logger.exception("[twilio_stream] failed to save recording call=%s", call_sid)
+
+    return Response(content="OK", media_type="text/plain")
 
 
 @router.post("/status/{agent_id}")

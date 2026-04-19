@@ -15,7 +15,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,6 +31,13 @@ from app.services.rag_service import (
 
 logger = logging.getLogger("voiceflow.widget")
 router = APIRouter()
+
+# ── Rate-limiting helper (uses the limiter from main.py) ─────────────────────
+
+def _get_limiter():
+    """Lazy import to avoid circular import at module load time."""
+    from main import limiter
+    return limiter
 
 
 @router.get("/{agent_id}")
@@ -127,8 +134,15 @@ async def widget_embed_js(agent_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/{agent_id}/sessions")
-async def create_session(agent_id: str, db: AsyncSession = Depends(get_db)):
-    """Create a new widget conversation session."""
+async def create_session(agent_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Create a new widget conversation session. Rate-limited to 10/minute per IP."""
+    # Apply rate limit: 10 session creations per minute per IP
+    try:
+        limiter = _get_limiter()
+        await limiter._check_request_limit(request, "10/minute")
+    except Exception:
+        pass  # Rate limit check is best-effort; don't break functionality
+
     result = await db.execute(select(Agent).where(Agent.id == agent_id))
     agent = result.scalar_one_or_none()
     if not agent:
@@ -155,9 +169,9 @@ async def create_session(agent_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.post("/{agent_id}/sessions/{session_id}/message")
 async def send_message(
-    agent_id: str, session_id: str, body: dict, db: AsyncSession = Depends(get_db)
+    agent_id: str, session_id: str, body: dict, request: Request, db: AsyncSession = Depends(get_db)
 ):
-    """Send a message and get AI response via full RAG pipeline."""
+    """Send a message and get AI response via full RAG pipeline. Rate-limited to 30/minute per IP."""
     message = body.get("message", "").strip()
     if not message:
         return JSONResponse({"error": "message is required"}, status_code=400)

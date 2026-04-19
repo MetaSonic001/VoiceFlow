@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     # STT
     VOSK_MODEL_PATH: str = "./models/vosk-model-small-en-us-0.15"
     VOSK_MODEL_URL: str = "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"
+    STT_ENGINE: str = "faster-whisper"
 
     # Audio
     AUDIO_PROCESSOR: str = "pydub"

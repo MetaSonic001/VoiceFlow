@@ -36,6 +36,25 @@ def _get_twilio_creds(tenant_settings: dict) -> tuple[str | None, str | None]:
     return sid, decrypt_safe(token_enc)
 
 
+def _validate_twilio_signature(request: Request, form_data: dict) -> bool:
+    """Return True if Twilio signature is valid (or Twilio creds not configured)."""
+    account_sid = settings.TWILIO_ACCOUNT_SID
+    auth_token = settings.TWILIO_AUTH_TOKEN
+    if not account_sid or not auth_token:
+        return True
+    try:
+        from twilio.request_validator import RequestValidator
+        validator = RequestValidator(auth_token)
+        signature = request.headers.get("X-Twilio-Signature", "")
+        proto = request.headers.get("x-forwarded-proto", "https")
+        host = request.headers.get("host", "localhost")
+        url = f"{proto}://{host}{request.url.path}"
+        return validator.validate(url, form_data, signature)
+    except Exception:
+        logger.warning("[gather] signature validation error — allowing request")
+        return True
+
+
 # ── Public function called by voice_inbound_router ───────────────────────────
 
 async def handle_inbound_call(agent: Agent, request: Request) -> Response:
@@ -69,10 +88,13 @@ async def handle_inbound_call(agent: Agent, request: Request) -> Response:
 @router.post("/gather-inbound/{agent_id}")
 async def voice_inbound(agent_id: str, request: Request, db: AsyncSession = Depends(get_db)):
     """
-    Twilio Gather-loop inbound: greet and collect speech.
-    This route is kept for agents that still have Twilio's webhook set directly
-    to /api/voice/gather-inbound/{agent_id}.
+    Twilio Gather-loop inbound: validate signature, greet and collect speech.
     """
+    form = await request.form()
+    if not _validate_twilio_signature(request, dict(form)):
+        logger.warning("[gather] invalid Twilio signature on /gather-inbound/%s", agent_id)
+        return Response(content="Forbidden", status_code=403, media_type="text/plain")
+
     result = await db.execute(select(Agent).where(Agent.id == agent_id))
     agent = result.scalar_one_or_none()
 
@@ -103,6 +125,10 @@ async def voice_gather(
     from twilio.twiml.voice_response import VoiceResponse, Gather
 
     form = await request.form()
+    if not _validate_twilio_signature(request, dict(form)):
+        logger.warning("[gather] invalid Twilio signature on /gather/%s", agent_id)
+        return Response(content="Forbidden", status_code=403, media_type="text/plain")
+
     speech_result = form.get("SpeechResult", "")
     caller = form.get("From", "unknown")
     call_sid = form.get("CallSid", "")

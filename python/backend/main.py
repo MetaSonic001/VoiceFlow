@@ -19,6 +19,7 @@ from app.config import settings
 from app.database import AsyncSessionLocal, get_db
 from app.auth import AuthContext, get_auth
 from app.models import Tenant, User, AgentTemplate
+from app.middleware import RequestLoggingMiddleware
 
 logger = logging.getLogger("voiceflow")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -176,6 +177,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["Content-Type", "Authorization", "x-tenant-id", "x-user-id", "x-user-email", "X-API-Key"],
 )
+app.add_middleware(RequestLoggingMiddleware)
 
 # ── Health check ─────────────────────────────────────────────────────────────
 
@@ -201,6 +203,7 @@ from app.routes import widget, voice_ws, platform, data_explorer
 from app.routes import voice_twilio_stream, voice_twilio_gather, voice_inbound_router
 from app.routes import campaigns, whatsapp, webhooks
 from app.routes import ab_testing
+from app.routes import dnd
 
 # WITHOUT /api prefix (matches Express)
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])
@@ -231,6 +234,7 @@ app.include_router(campaigns.router, prefix="/api/campaigns", tags=["Campaigns"]
 app.include_router(whatsapp.router, prefix="/api/whatsapp", tags=["WhatsApp"])
 app.include_router(webhooks.router, prefix="/api/webhooks", tags=["Webhooks"])
 app.include_router(ab_testing.router)
+app.include_router(dnd.router, prefix="/api/dnd", tags=["DND"])
 app.include_router(platform.router, prefix="/api", tags=["Platform"])
 app.include_router(data_explorer.router, prefix="/api/data-explorer", tags=["DataExplorer"])
 
