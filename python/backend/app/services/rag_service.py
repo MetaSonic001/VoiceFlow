@@ -890,8 +890,8 @@ class LLMClient:
                                     yield delta
                             except (json.JSONDecodeError, KeyError, IndexError):
                                 pass
-        except Exception:
-            logger.exception("[llm_client] groq stream error")
+        except Exception as exc:
+            logger.error("[llm_client] groq stream error: %s", type(exc).__name__)
 
     # ── OpenAI ────────────────────────────────────────────────────────────────
 
@@ -913,8 +913,8 @@ class LLMClient:
             logger.warning("[llm_client] openai package not installed, falling back to httpx SSE")
             async for token in self._stream_groq(messages, model, api_key):
                 yield token
-        except Exception:
-            logger.exception("[llm_client] openai stream error")
+        except Exception as exc:
+            logger.error("[llm_client] openai stream error: %s", type(exc).__name__)
 
     # ── Gemini ────────────────────────────────────────────────────────────────
 
@@ -970,8 +970,8 @@ class LLMClient:
 
         except ImportError:
             logger.warning("[llm_client] google-generativeai not installed")
-        except Exception:
-            logger.exception("[llm_client] gemini stream error")
+        except Exception as exc:
+            logger.error("[llm_client] gemini stream error: %s", type(exc).__name__)
 
     # ── Ollama (local) ────────────────────────────────────────────────────────
 
@@ -991,8 +991,8 @@ class LLMClient:
                     yield content
         except ImportError:
             logger.warning("[llm_client] ollama package not installed")
-        except Exception:
-            logger.exception("[llm_client] ollama stream error")
+        except Exception as exc:
+            logger.error("[llm_client] ollama stream error: %s", type(exc).__name__)
 
 
 # Module-level singleton

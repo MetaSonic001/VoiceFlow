@@ -6,9 +6,15 @@ on:
   pull_request:
     branches: ["**"]
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
 
     services:
       postgres:
@@ -80,6 +86,8 @@ jobs:
   # Sanity check: no banned imports
   banned-imports:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - name: Check for chatterbox / torch.cuda / audioop
