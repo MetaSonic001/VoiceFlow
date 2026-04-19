@@ -226,6 +226,21 @@ async def _transcribe_voice_note(
     twilio_token: str | None,
 ) -> str:
     """Download voice note from Twilio, convert to PCM 16kHz, and transcribe."""
+    # SSRF protection: only allow Twilio media URLs
+    from urllib.parse import urlparse
+
+    parsed = urlparse(media_url)
+    trusted_hosts = (
+        "api.twilio.com",
+        "media.twiliocdn.com",
+        "mcs.us1.twilio.com",
+    )
+    if parsed.scheme not in ("https",) or not any(
+        parsed.netloc == h or parsed.netloc.endswith(f".{h}") for h in trusted_hosts
+    ):
+        logger.warning("[whatsapp] blocked untrusted media URL host=%s", parsed.netloc)
+        return ""
+
     # Download the media
     try:
         auth = (twilio_sid, twilio_token) if twilio_sid and twilio_token else None
@@ -236,7 +251,7 @@ async def _transcribe_voice_note(
             return ""
         audio_bytes = resp.content
     except Exception:
-        logger.exception("[whatsapp] media download error url=%s", media_url)
+        logger.exception("[whatsapp] media download error")
         return ""
 
     # Convert to PCM 16kHz mono via pydub

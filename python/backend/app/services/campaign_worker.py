@@ -163,7 +163,7 @@ class CampaignWorker:
                         )
                         await db.commit()
                         logger.info(
-                            "[campaign_worker] skipped %s reason=%s", contact.phoneNumber, reason
+                            "[campaign_worker] skipped contact reason=%s", reason
                         )
                         await asyncio.sleep(1)
                         continue
@@ -365,7 +365,7 @@ class CampaignWorker:
             if resp.status_code in (200, 201):
                 call_sid = resp.json().get("sid")
                 logger.info(
-                    "[campaign_worker] initiated call=%s to=%s", call_sid, contact.phoneNumber
+                    "[campaign_worker] initiated call=%s", call_sid
                 )
                 return call_sid
             else:
@@ -375,7 +375,7 @@ class CampaignWorker:
                 )
         except Exception:
             logger.exception(
-                "[campaign_worker] Twilio call error to=%s", contact.phoneNumber
+                "[campaign_worker] Twilio call error"
             )
         return None
 
