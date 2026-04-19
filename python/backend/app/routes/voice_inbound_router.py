@@ -16,7 +16,6 @@ from twilio.twiml.voice_response import Gather, VoiceResponse
 
 from app.database import AsyncSessionLocal
 from app.models import Agent
-from app.services.rag_service import process_query
 
 logger = logging.getLogger("voiceflow.inbound_router")
 router = APIRouter()

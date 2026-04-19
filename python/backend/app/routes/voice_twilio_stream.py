@@ -13,7 +13,6 @@ import io
 import json
 import logging
 import struct
-import time
 from datetime import datetime, timezone
 
 import redis.asyncio as aioredis
@@ -179,8 +178,17 @@ async def media_stream_ws(websocket: WebSocket, agent_id: str):
     # Session-level buffers and state
     pcm_buffer = bytearray()
     silence_frames = 0
-    agent_speaking = False
+    # asyncio.Event: set while agent audio is being streamed to Twilio
+    agent_speaking_event = asyncio.Event()
     full_transcript: list[dict] = []
+
+    # Track background tasks so we can log/cancel on shutdown
+    pending_tasks: set[asyncio.Task] = set()
+
+    def _track_task(coro) -> None:
+        task = asyncio.create_task(coro)
+        pending_tasks.add(task)
+        task.add_done_callback(pending_tasks.discard)
 
     try:
         async for raw in _ws_iter(websocket):
@@ -195,10 +203,10 @@ async def media_stream_ws(websocket: WebSocket, agent_id: str):
                 logger.info("[twilio_stream] connected agent=%s", agent_id)
 
             elif event == "start":
-                start = msg.get("start", {})
-                stream_sid = start.get("streamSid", "")
-                call_sid = start.get("callSid", "")
-                caller_phone = start.get("customParameters", {}).get("From", "")
+                start_data = msg.get("start", {})
+                stream_sid = start_data.get("streamSid", "")
+                call_sid = start_data.get("callSid", "")
+                caller_phone = start_data.get("customParameters", {}).get("From", "")
                 logger.info(
                     "[twilio_stream] start agent=%s stream=%s call=%s",
                     agent_id, stream_sid, call_sid,
@@ -222,9 +230,9 @@ async def media_stream_ws(websocket: WebSocket, agent_id: str):
                 rms = _pcm_rms(pcm_chunk)
 
                 # Interruption detection while agent is speaking
-                if agent_speaking and rms > _INTERRUPT_RMS_THRESHOLD:
+                if agent_speaking_event.is_set() and rms > _INTERRUPT_RMS_THRESHOLD:
                     logger.debug("[twilio_stream] interruption detected rms=%.1f", rms)
-                    agent_speaking = False
+                    agent_speaking_event.clear()
                     if stream_sid:
                         await _send_clear(websocket, stream_sid)
                     pcm_buffer.clear()
@@ -243,8 +251,8 @@ async def media_stream_ws(websocket: WebSocket, agent_id: str):
                     pcm_buffer.clear()
                     silence_frames = 0
 
-                    # Async pipeline: STT → RAG → TTS → send
-                    asyncio.create_task(
+                    # Background pipeline: STT → RAG → TTS → send
+                    _track_task(
                         _handle_utterance(
                             websocket=websocket,
                             utterance=utterance,
@@ -256,7 +264,7 @@ async def media_stream_ws(websocket: WebSocket, agent_id: str):
                             tts_engine=tts_engine,
                             groq_key=groq_key,
                             full_transcript=full_transcript,
-                            agent_speaking_flag={"value": agent_speaking},
+                            agent_speaking_event=agent_speaking_event,
                         )
                     )
 
@@ -269,6 +277,12 @@ async def media_stream_ws(websocket: WebSocket, agent_id: str):
     except Exception:
         logger.exception("[twilio_stream] error agent=%s", agent_id)
     finally:
+        # Cancel any pending utterance tasks
+        for task in list(pending_tasks):
+            task.cancel()
+        if pending_tasks:
+            await asyncio.gather(*pending_tasks, return_exceptions=True)
+
         # Persist call log
         await _save_call_log(
             tenant_id=tenant_id,
@@ -304,7 +318,7 @@ async def _handle_utterance(
     tts_engine: str,
     groq_key: str | None,
     full_transcript: list[dict],
-    agent_speaking_flag: dict,
+    agent_speaking_event: asyncio.Event,
 ) -> None:
     """STT → RAG → TTS → Twilio for a single utterance."""
     # 1. STT
@@ -346,20 +360,24 @@ async def _handle_utterance(
         return
 
     # 4. Stream μ-law back in 20ms chunks
-    agent_speaking_flag["value"] = True
+    agent_speaking_event.set()
     try:
-        await _stream_mulaw_to_twilio(websocket, stream_sid, mulaw_bytes)
+        await _stream_mulaw_to_twilio(websocket, stream_sid, mulaw_bytes, agent_speaking_event)
     finally:
-        agent_speaking_flag["value"] = False
+        agent_speaking_event.clear()
 
 
 async def _stream_mulaw_to_twilio(
     websocket: WebSocket,
     stream_sid: str,
     mulaw_bytes: bytes,
+    agent_speaking_event: asyncio.Event,
 ) -> None:
     """Send μ-law audio to Twilio in 160-byte chunks (20ms at 8kHz)."""
     for i in range(0, len(mulaw_bytes), _FRAME_BYTES):
+        # Stop if interrupted
+        if not agent_speaking_event.is_set():
+            break
         chunk = mulaw_bytes[i : i + _FRAME_BYTES]
         payload_b64 = base64.b64encode(chunk).decode()
         await websocket.send_text(json.dumps({

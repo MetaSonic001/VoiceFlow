@@ -159,24 +159,48 @@ class STTService:
 
         return ""
 
+    def create_vosk_recognizer(self, sample_rate: int = 16000):
+        """
+        Create a persistent KaldiRecognizer for streaming recognition.
+        The returned recognizer should be reused across calls to
+        transcribe_stream_chunk() for the same audio stream.
+        Returns None if Vosk is not available.
+        """
+        if not _VOSK_AVAILABLE or _VOSK_MODEL is None:
+            return None
+        try:
+            from vosk import KaldiRecognizer
+
+            return KaldiRecognizer(_VOSK_MODEL, sample_rate)
+        except Exception as exc:
+            logger.warning("[stt] KaldiRecognizer creation failed: %s", exc)
+            return None
+
     async def transcribe_stream_chunk(
         self,
         pcm_chunk: bytes,
         sample_rate: int = 16000,
+        recognizer=None,
     ) -> Optional[str]:
         """
-        Feed a PCM chunk to Vosk for partial/online recognition.
+        Feed a PCM chunk to a persistent Vosk recognizer for partial/online recognition.
+        Pass the recognizer returned by create_vosk_recognizer() to maintain state across
+        chunks. If no recognizer is provided a temporary one is created (loses context).
         Returns partial transcript text or None if nothing ready yet.
         """
         if not _VOSK_AVAILABLE or _VOSK_MODEL is None:
             return None
 
+        _rec = recognizer  # captured into closure
+
         loop = asyncio.get_event_loop()
 
         def _run() -> Optional[str]:
-            from vosk import KaldiRecognizer
+            rec = _rec
+            if rec is None:
+                from vosk import KaldiRecognizer
 
-            rec = KaldiRecognizer(_VOSK_MODEL, sample_rate)
+                rec = KaldiRecognizer(_VOSK_MODEL, sample_rate)
             if rec.AcceptWaveform(pcm_chunk):
                 result = json.loads(rec.Result())
                 return result.get("text") or None
