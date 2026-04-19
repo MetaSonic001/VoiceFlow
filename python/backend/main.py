@@ -199,6 +199,7 @@ from app.routes import analytics, logs, brands, settings as settings_routes
 from app.routes import ingestion, users, retraining, admin, tts, rag
 from app.routes import widget, voice_ws, platform, data_explorer
 from app.routes import voice_twilio_stream, voice_twilio_gather, voice_inbound_router
+from app.routes import campaigns, whatsapp, webhooks
 
 # WITHOUT /api prefix (matches Express)
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])
@@ -225,6 +226,9 @@ app.include_router(voice_ws.router, prefix="/api/voice", tags=["VoiceWS"])
 app.include_router(voice_twilio_gather.router, prefix="/api/voice", tags=["VoiceTwilioGather"])
 app.include_router(voice_twilio_stream.router, prefix="/api/voice", tags=["VoiceTwilioStream"])
 app.include_router(voice_inbound_router.router, prefix="/api/voice", tags=["VoiceInboundRouter"])
+app.include_router(campaigns.router, prefix="/api/campaigns", tags=["Campaigns"])
+app.include_router(whatsapp.router, prefix="/api/whatsapp", tags=["WhatsApp"])
+app.include_router(webhooks.router, prefix="/api/webhooks", tags=["Webhooks"])
 app.include_router(platform.router, prefix="/api", tags=["Platform"])
 app.include_router(data_explorer.router, prefix="/api/data-explorer", tags=["DataExplorer"])
 

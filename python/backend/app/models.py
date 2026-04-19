@@ -44,6 +44,8 @@ class Tenant(Base):
     retraining_examples = relationship("RetrainingExample", back_populates="tenant", cascade="all, delete-orphan")
     onboarding_progress = relationship("OnboardingProgress", back_populates="tenant")
     pipelines = relationship("Pipeline", back_populates="tenant", cascade="all, delete-orphan")
+    campaigns = relationship("Campaign", back_populates="tenant", cascade="all, delete-orphan")
+    webhook_endpoints = relationship("WebhookEndpoint", back_populates="tenant", cascade="all, delete-orphan")
 
 
 # ── User ──────────────────────────────────────────────────────────────────────
@@ -127,6 +129,7 @@ class Agent(Base):
     documents = relationship("Document", back_populates="agent", cascade="all, delete-orphan")
     call_logs = relationship("CallLog", back_populates="agent", cascade="all, delete-orphan")
     retraining_examples = relationship("RetrainingExample", back_populates="agent", cascade="all, delete-orphan")
+    campaigns = relationship("Campaign", back_populates="agent", cascade="all, delete-orphan")
 
 
 # ── AgentConfiguration ────────────────────────────────────────────────────────
@@ -323,3 +326,96 @@ class Notification(Base):
     isRead: Mapped[bool] = mapped_column("isRead", Boolean, default=False)
     link: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     createdAt: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+
+
+# ── Campaign ──────────────────────────────────────────────────────────────────
+
+class Campaign(Base):
+    __tablename__ = "campaigns"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    tenantId: Mapped[str] = mapped_column("tenantId", String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    agentId: Mapped[str] = mapped_column("agentId", String, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    # status: draft | active | paused | completed | failed
+    status: Mapped[str] = mapped_column(String, default="draft", nullable=False)
+    # Calling window e.g. {"start": "09:00", "end": "17:00"}
+    allowedCallHours: Mapped[Optional[Any]] = mapped_column("allowedCallHours", JSON, nullable=True)
+    timezone: Mapped[str] = mapped_column(String, default="UTC", nullable=False)
+    maxRetries: Mapped[int] = mapped_column("maxRetries", Integer, default=3)
+    # voicemail_action: leave_voicemail | hangup
+    voicemailAction: Mapped[str] = mapped_column("voicemailAction", String, default="hangup")
+    voicemailMessage: Mapped[Optional[str]] = mapped_column("voicemailMessage", Text, nullable=True)
+    # Aggregate counters
+    totalContacts: Mapped[int] = mapped_column("totalContacts", Integer, default=0)
+    dialedCount: Mapped[int] = mapped_column("dialedCount", Integer, default=0)
+    answeredCount: Mapped[int] = mapped_column("answeredCount", Integer, default=0)
+    machinedCount: Mapped[int] = mapped_column("machinedCount", Integer, default=0)
+    failedCount: Mapped[int] = mapped_column("failedCount", Integer, default=0)
+    startedAt: Mapped[Optional[datetime]] = mapped_column("startedAt", DateTime(timezone=True), nullable=True)
+    completedAt: Mapped[Optional[datetime]] = mapped_column("completedAt", DateTime(timezone=True), nullable=True)
+    createdAt: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+    updatedAt: Mapped[datetime] = mapped_column("updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    tenant = relationship("Tenant", back_populates="campaigns")
+    agent = relationship("Agent", back_populates="campaigns")
+    contacts = relationship("CampaignContact", back_populates="campaign", cascade="all, delete-orphan")
+
+
+# ── CampaignContact ───────────────────────────────────────────────────────────
+
+class CampaignContact(Base):
+    __tablename__ = "campaign_contacts"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    campaignId: Mapped[str] = mapped_column("campaignId", String, ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False)
+    tenantId: Mapped[str] = mapped_column("tenantId", String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    phoneNumber: Mapped[str] = mapped_column("phoneNumber", String, nullable=False)
+    name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    variables: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)  # extra CSV columns
+    # status: pending | dialing | answered | voicemail | failed | skipped
+    status: Mapped[str] = mapped_column(String, default="pending", nullable=False)
+    callAttempts: Mapped[int] = mapped_column("callAttempts", Integer, default=0)
+    lastCallSid: Mapped[Optional[str]] = mapped_column("lastCallSid", String, nullable=True)
+    lastCalledAt: Mapped[Optional[datetime]] = mapped_column("lastCalledAt", DateTime(timezone=True), nullable=True)
+    callLogId: Mapped[Optional[str]] = mapped_column("callLogId", String, ForeignKey("call_logs.id"), nullable=True)
+    createdAt: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+    updatedAt: Mapped[datetime] = mapped_column("updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    campaign = relationship("Campaign", back_populates="contacts")
+    tenant = relationship("Tenant")
+
+
+# ── DNDRegistry ───────────────────────────────────────────────────────────────
+
+class DNDRegistry(Base):
+    """Do-Not-Disturb list. Numbers on this list are never dialled."""
+
+    __tablename__ = "dnd_registry"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    tenantId: Mapped[str] = mapped_column("tenantId", String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    phoneNumber: Mapped[str] = mapped_column("phoneNumber", String, nullable=False)
+    reason: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    createdAt: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+
+    tenant = relationship("Tenant")
+
+
+# ── WebhookEndpoint ───────────────────────────────────────────────────────────
+
+class WebhookEndpoint(Base):
+    __tablename__ = "webhook_endpoints"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    tenantId: Mapped[str] = mapped_column("tenantId", String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    url: Mapped[str] = mapped_column(String, nullable=False)
+    # Comma-separated event types or JSON array stored as text
+    events: Mapped[Any] = mapped_column(JSON, nullable=False, default=list)
+    secret: Mapped[str] = mapped_column(String, nullable=False, default=_uuid)
+    isActive: Mapped[bool] = mapped_column("isActive", Boolean, default=True)
+    description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    createdAt: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+    updatedAt: Mapped[datetime] = mapped_column("updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    tenant = relationship("Tenant", back_populates="webhook_endpoints")
