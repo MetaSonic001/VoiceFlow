@@ -2,7 +2,7 @@
 
 A multi-tenant SaaS platform for building, deploying, and managing AI-powered voice and chat agents. Businesses onboard through a guided wizard, upload their knowledge base, and receive a domain-specific AI agent that answers customer queries over phone (Twilio), browser-based WebSocket voice calls, or a web chat interface — using Retrieval-Augmented Generation (RAG) over their own documents with hierarchical context injection and policy-based retrieval scoring.
 
-> **Status (April 2026):** The full pipeline is functional end-to-end: 7-step onboarding → document ingestion → per-tenant vector isolation → 5-layer context injection → policy-scored retrieval → dynamic 7-section prompt assembly → Groq LLM generation (per-tenant model selection, conversation history in all code paths) → TTS → multi-channel delivery (Twilio voice, **real WebSocket audio** with local `faster-whisper` or Groq Whisper STT + Edge/Chatterbox TTS, web chat, embeddable widget, **per-agent REST API for third-party integration**). Analytics use real DB queries. A retraining pipeline captures bad calls and injects learned corrections as few-shot examples. Admin pipeline management with real CRUD. Data Explorer dashboard to visualise Postgres, ChromaDB & Redis contents. Interactive API docs via FastAPI at `/docs`. **Stack: Django 6 (HTMX + Alpine.js) frontend + FastAPI backend + Docker services (Postgres, Redis, ChromaDB, MinIO).** See [Implementation Status](#implementation-status) for the full breakdown.
+> **Status (April 2026):** The full pipeline is functional end-to-end: 7-step onboarding → document ingestion → per-tenant vector isolation → 5-layer context injection → policy-scored retrieval → dynamic 7-section prompt assembly → Groq LLM generation (per-tenant model selection, conversation history in all code paths) → TTS → multi-channel delivery (Twilio voice, **real WebSocket audio** with local `faster-whisper` or Groq Whisper STT + Edge/Kokoro TTS, web chat, embeddable widget, **per-agent REST API for third-party integration**). Analytics use real DB queries. A retraining pipeline captures bad calls and injects learned corrections as few-shot examples. Admin pipeline management with real CRUD. Data Explorer dashboard to visualise Postgres, ChromaDB & Redis contents. Interactive API docs via FastAPI at `/docs`. **Stack: Django 6 (HTMX + Alpine.js) frontend + FastAPI backend + Docker services (Postgres, Redis, ChromaDB, MinIO).** See [Implementation Status](#implementation-status) for the full breakdown.
 
 ---
 
@@ -140,7 +140,7 @@ The primary market is Indian SMBs. Every tenant and agent is logically isolated 
 │   │  file store   │  │  External APIs                           │  │
 │   │  TTS cache    │  │  • Groq LLM (llama-3.3-70b-versatile)   │  │
 │   │  (S3-compat)  │  │  • Groq Whisper (STT)                   │  │
-│   └──────────────┘  │  • Edge TTS + Chatterbox fallback         │  │
+│   └──────────────┘  │  • Edge TTS + Kokoro fallback         │  │
 │                      │  • Twilio (per-tenant telephony)         │  │
 │                      └──────────────────────────────────────────┘  │
 └────────────────────────────────────────────────────────────────────┘
@@ -278,7 +278,7 @@ VoiceFlow/
 | Cache / Queue | Redis 7 (Docker, port 8020) |
 | File Storage | MinIO S3-compatible (Docker, port 9020/8070) |
 | LLM | Groq API (`Llama` / `GPT-OSS` family) |
-| TTS | Edge TTS (primary) + Chatterbox local fallback/cloning |
+| TTS | Edge TTS (primary) + Kokoro local fallback/cloning |
 | Telephony | Twilio (TwiML Gather loop, per-tenant credentials) |
 | Credential Encryption | AES-256-GCM via `cryptography` library |
 | Build / Dev Tooling | PowerShell Makefile with startup, reset, and test targets |
@@ -305,7 +305,7 @@ Django frontend redirects to /onboarding or /dashboard
   Step 1: Company Profile    → POST /onboarding/company     → auto-scrapes website
   Step 2: Agent Creation     → POST /onboarding/agent       → creates Agent row
   Step 3: Knowledge Upload   → POST /onboarding/knowledge   → triggers ingestion
-  Step 4: Voice & Personality→ POST /onboarding/voice       → Edge + Chatterbox voice preview
+  Step 4: Voice & Personality→ POST /onboarding/voice       → Edge + Kokoro voice preview
   Step 5: Channel Setup      → POST /onboarding/channels    → Twilio BYOK / WebSocket
   Step 6: Testing Sandbox    → UI tests chat/voice in real-time
   Step 7: Go Live / Deploy   → POST /onboarding/deploy      → activates agent (demo mode returns mock number)
@@ -455,7 +455,7 @@ Server: voice_ws.py —
   `_transcribe_local()` (faster-whisper) OR `_transcribe_groq()`
   → `process_query()` (full RAG pipeline)
   → returns transcript + text response
-  → synthesises response audio via Edge (primary) with Chatterbox/clone fallback
+  → synthesises response audio via Edge (primary) with Kokoro/Piper fallback
   → sends transcript, response, and audio data URI over WebSocket
         │
         ▼  (loop continues until disconnect)
@@ -513,7 +513,7 @@ On next query, assemble_context() loads approved examples:
 - Docker Desktop (for infrastructure services)
 - Python 3.11+ (3.12 recommended)
 - `make` (via Chocolatey: `choco install make`)
-- **CUDA/CPU PyTorch runtime** — installed by `make install` (used by local Chatterbox TTS path)
+- **CUDA/CPU PyTorch runtime** — installed by `make install` (used by local Kokoro TTS path)
 - **SoX (Sound eXchange)** — recommended for local audio tooling
   - Download from: [http://sox.sourceforge.net/](http://sox.sourceforge.net/)
   - Or via Chocolatey: `choco install sox`
@@ -753,10 +753,10 @@ x-user-id: <user_uuid>
 | GET | `/api/settings/twilio` | Get credential status (never returns auth token) |
 | DELETE | `/api/settings/twilio` | Remove Twilio credentials |
 
-### TTS (Text-to-Speech — Edge + Chatterbox)
+### TTS (Text-to-Speech — Edge + Kokoro)
 | Method | Endpoint | Description |
 |---|---|---|
-| GET | `/api/tts/preset-voices` | List Edge voices + local Chatterbox options |
+| GET | `/api/tts/preset-voices` | List Edge voices + local Kokoro/Piper options |
 | POST | `/api/tts/preview` | Generate voice preview audio for a given voiceId |
 | POST | `/api/tts/synthesise` | Generate speech audio for text + voiceId |
 | POST | `/api/tts/clone-voice` | Upload reference audio and generate 3 clone confirmation samples |
@@ -901,14 +901,14 @@ A complete breakdown of what works versus what needs attention.
 | Twilio onboarding deploy | Demo-mode deploy endpoint activates agent and returns mock number (`+1-555-DEMO`) |
 | Twilio webhook endpoints | Inbound/gather/status webhooks implemented at `/api/voice/*` |
 | Agent template system | 6 seeded templates (Customer Support, Cold Calling, Lead Qualification, Technical Support, Receptionist, Survey Agent) |
-| Voice selector UI | Edge + Chatterbox voices with real-time preview and cloned voice selection |
-| TTS | Edge TTS (primary) + Chatterbox local fallback, with voice cloning and custom clone preview |
+| Voice selector UI | Edge + Kokoro voices with real-time preview and cloned voice selection |
+| TTS | Edge TTS (primary) + Kokoro local fallback, with voice cloning and custom clone preview |
 | Call logging | CallLog records with duration, transcript, caller phone, rating, flagging |
 | **Analytics dashboard** | Real SQLAlchemy queries — overview, realtime, metrics-chart, agent-comparison |
 | Onboarding progress (server-side) | GET/POST/DELETE `/onboarding/progress` for resume |
 | Deploy gating | Frontend checks Twilio credential status before allowing deploy |
 | **Retraining pipeline** | Nightly cron extracts flagged calls → admin review queue → approved examples injected as few-shot learning |
-| **WebSocket voice calls** | Real audio pipeline: MediaRecorder → local `faster-whisper` or Groq Whisper STT → RAG → Edge/Clone/Chatterbox TTS → audio playback. Text fallback for no-mic browsers. |
+| **WebSocket voice calls** | Real audio pipeline: MediaRecorder → local `faster-whisper` or Groq Whisper STT → RAG → Edge/Clone/Kokoro TTS → audio playback. Text fallback for no-mic browsers. |
 | **Embeddable call widget** | Public `<script>` tag serves push-to-talk widget with real audio capture/playback |
 | **Retraining admin UI** | `/dashboard/retraining` — filter, edit, approve/reject, manual trigger |
 | **Widget management UI** | `/dashboard/widget` — per-agent embed code with copy-to-clipboard |
@@ -1203,7 +1203,7 @@ Incoming Request (Voice or Text)
                      ▼
           ┌──────────▼─────────┐
           │  If voice output:  │
-          │  TTS (`<Say>` for Twilio, Edge/Chatterbox for web) │
+          │  TTS (`<Say>` for Twilio, Edge/Kokoro for web) │
           │  → audio response   │
           └──────────┬─────────┘
                      │
@@ -1244,7 +1244,7 @@ See `PATENT_CLAIMS_MAPPING.md` for the full claim-to-code trace document.
 | 10 | Real-time ingestion without downtime | **Done** — FastAPI background task ingestion |
 | 11 | Tenant isolation at storage AND inference layers | **Done** — Storage: per-tenant ChromaDB collections. Inference: `assemble_context()` scopes all DB queries to tenantId |
 | 12 | Telephony with tenant-from-phone-number resolution | **Partial** — Current implementation resolves tenant via `/api/voice/inbound/{agent_id}`; phone-number mapping is pending |
-| 13 | TTS audio response back via telephony | **Partial** — Twilio loop currently uses TwiML `<Say>` (Edge/Chatterbox used in web voice paths) |
+| 13 | TTS audio response back via telephony | **Partial** — Twilio loop currently uses TwiML `<Say>` (Edge/Kokoro used in web voice paths) |
 | 14 | Non-voice channels use same RAG pipeline | **Done** — `/api/runner/chat`, WebSocket `/api/voice/ws/{agent_id}`, embeddable widget all share same pipeline |
 | 15 | Shared infra, logically separated per-tenant | **Done** — All services scope to tenantId; no cross-tenant data access possible |
 
@@ -1308,7 +1308,7 @@ If you start all services (`make init && make all`):
 3. Documents are scraped/processed (Docling + PaddleOCR + trafilatura) → embedded → stored in `tenant_{id}` ChromaDB collection
 4. Ask questions via web chat → full 5-layer context injection → policy-scored retrieval → 7-section prompt → Groq LLM → text response
 5. Call via Twilio → same pipeline → TwiML `<Say>` voice response → conversational Gather loop
-6. Call via WebSocket widget → embeddable `<script>` tag → MediaRecorder captures audio → server-side `faster-whisper` or Groq Whisper STT → RAG pipeline → Edge/Chatterbox TTS audio playback
+6. Call via WebSocket widget → embeddable `<script>` tag → MediaRecorder captures audio → server-side `faster-whisper` or Groq Whisper STT → RAG pipeline → Edge/Kokoro TTS audio playback
 7. **Integrate via REST API** → any third-party website can create sessions, send messages, and get AI responses via 4 public endpoints per agent — no embed script needed
 8. Agent remembers conversation context → last 20 turns from Redis included in every LLM call
 9. Per-tenant model selection → each agent can use a different Groq model from the allowlist
@@ -1324,3 +1324,91 @@ If you start all services (`make init && make all`):
 ## License
 
 License file is not yet committed in this repository. Add a `LICENSE` file before distribution.
+---
+
+## CPU-Only Mode — Included Services
+
+All voice services run on CPU with no GPU requirement:
+
+| Service | Technology | Port | Notes |
+|---|---|---|---|
+| Kokoro TTS | `ghcr.io/remsky/kokoro-fastapi-cpu` | 8880 | Primary TTS, natural voice |
+| Piper TTS | `rhasspy/wyoming-piper` | 8890 | Fast ONNX CPU, low latency |
+| Edge TTS | Cloud API (Microsoft) | — | Fallback; 300+ voices |
+| Vosk STT | Offline model (auto-download) | — | Primary STT |
+| faster-whisper | Local model (int8 CPU) | — | Fallback STT |
+
+**TTS fallback chain:** Kokoro → Piper → Edge TTS  
+**STT fallback chain:** faster-whisper (local) → Groq Whisper (API)
+
+---
+
+## What Is Not Included (GPU / Experimental Features)
+
+The following features require GPU or are experimental and have been intentionally omitted from this release to keep the stack production-ready on CPU-only hardware:
+
+| Feature | Status | Notes |
+|---|---|---|
+| **Orpheus TTS** (emotion/expressive) | Not included | Requires 3B GGUF model (~1.8 GB) + llama.cpp server; see commented block in `docker-compose.yml` |
+| **Voice Cloning** | GPU only | Returns `410 Gone` with message "Voice cloning requires GPU". Endpoint scaffold exists at `POST /api/tts/clone-voice`. |
+| **Hinglish (Hindi-English)** | Planned v2 | `agent.language = "hinglish"` column exists; transliteration pipeline not yet implemented |
+| **CUDA/GPU torch** | Not needed | All inference is CPU-only; no `torch.cuda` in codebase |
+
+---
+
+## Telephony Architecture
+
+```
+Inbound / Outbound call
+        │
+        ▼
+voice_inbound_router.py  (/api/voice/inbound/{agent_id})
+        │
+        ├─[telephony_provider = twilio-stream]──► voice_twilio_stream.py
+        │                                         ├─ Twilio Media Streams WebSocket
+        │                                         ├─ streaming_orchestrator.py
+        │                                         │   ├─ Vosk / faster-whisper STT
+        │                                         │   ├─ rag_service.process_query()
+        │                                         │   └─ tts_router → μ-law → Twilio
+        │                                         └─ Barge-in / interruption detection
+        │
+        └─[telephony_provider = twilio-gather]──► voice_twilio_gather.py
+                                                  ├─ <Gather> TwiML loop
+                                                  ├─ rag_service.process_query()
+                                                  └─ <Say> TwiML response
+
+Outbound campaigns:
+  campaign_worker.py → Twilio REST API dial
+        │
+        └─► /api/voice/outbound/{agent_id}?contact_id=...
+              ├─ AMD check (machine → hangup)
+              └─ <Connect><Stream> + contact variables as <Parameter> tags
+```
+
+## Running Alembic Migrations
+
+Alembic manages the FastAPI backend database schema. Run migrations:
+
+```bash
+cd python
+# Linux/macOS/CI
+make alembic-migrate
+
+# Windows PowerShell
+cd backend
+uv run alembic upgrade head
+```
+
+Django migrations (frontend auth/sessions) are separate:
+
+```bash
+cd python/frontend
+python manage.py migrate
+```
+
+To run both at once (Linux/macOS):
+
+```bash
+cd python
+make migrate-all
+```

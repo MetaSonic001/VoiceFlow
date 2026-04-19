@@ -333,6 +333,12 @@ alembic-migrate: SHELL := /bin/bash
 alembic-migrate: ## Run Alembic migrations (Linux/macOS/CI)  —  alembic upgrade head
 	cd backend && uv run alembic upgrade head
 
+.PHONY: migrate-all
+migrate-all: SHELL := /bin/bash
+migrate-all: ## Run BOTH Django migrations and Alembic migrations (Linux/macOS/CI)
+	cd frontend && python manage.py migrate --no-input
+	cd backend && uv run alembic upgrade head
+
 .PHONY: pytest
 pytest: SHELL := /bin/bash
 pytest: ## Run pytest suite (Linux/macOS/CI)

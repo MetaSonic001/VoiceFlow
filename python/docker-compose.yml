@@ -92,21 +92,27 @@ services:
     networks:
       - voiceflow-network
 
-  orpheus-llm:
-    image: ghcr.io/ggerganov/llama.cpp:server
-    container_name: voiceflow_orpheus
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./models/orpheus:/models
-    command: >
-      -m /models/orpheus-3b-gguf.gguf
-      --host 0.0.0.0 --port 8080
-      --ctx-size 4096 --n-predict 4096
-      --rope-scaling linear
-    restart: unless-stopped
-    networks:
-      - voiceflow-network
+  # NOTE: orpheus-tts (Orpheus 3B emotion TTS) is NOT included because
+  # it requires a manually downloaded 3B GGUF model (~1.8 GB) that cannot
+  # be fetched automatically at container start.  The tts_router.py
+  # "orpheus" engine path does text pre-processing via a local llama.cpp
+  # server and then delegates synthesis to Kokoro — useful for expressive
+  # speech, but not required for the core voice pipeline.
+  # To enable it in future: download the GGUF model, uncomment the block
+  # below, and set ORPHEUS_URL=http://localhost:8080/v1/chat/completions.
+  #
+  # orpheus-tts:
+  #   image: ghcr.io/ggerganov/llama.cpp:server
+  #   ports:
+  #     - "8080:8080"
+  #   volumes:
+  #     - ./models/orpheus:/models
+  #   command: >
+  #     -m /models/orpheus-3b-gguf.gguf
+  #     --host 0.0.0.0 --port 8080 --ctx-size 4096 --n-predict 4096
+  #   restart: unless-stopped
+  #   networks:
+  #     - voiceflow-network
 
 volumes:
   postgres_data:

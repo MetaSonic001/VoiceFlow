@@ -23,6 +23,7 @@
     <nav class="flex gap-6 -mb-px">
       <button @click="tab='overview'" :class="tab==='overview' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500'" class="pb-3 border-b-2 text-sm font-medium">Overview</button>
       <button @click="tab='llm'" :class="tab==='llm' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500'" class="pb-3 border-b-2 text-sm font-medium">LLM Settings</button>
+      <button @click="tab='telephony'" :class="tab==='telephony' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500'" class="pb-3 border-b-2 text-sm font-medium">Telephony</button>
       <button @click="tab='conversations'; loadConversations()" :class="tab==='conversations' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500'" class="pb-3 border-b-2 text-sm font-medium">Conversations</button>
     </nav>
   </div>
@@ -76,6 +77,62 @@
     </div>
   </div>
 
+  <!-- Telephony Tab -->
+  <div x-show="tab==='telephony'" x-transition>
+    <div class="grid md:grid-cols-2 gap-6">
+
+      <!-- Voice Provider -->
+      <div class="bg-white rounded-xl border p-6 space-y-4">
+        <h3 class="font-semibold">Telephony Provider</h3>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Provider</label>
+          <select x-model="agent.telephony_provider" class="w-full border rounded-lg px-3 py-2 text-sm">
+            <option value="twilio-gather">Twilio Gather (DTMF + Speech)</option>
+            <option value="twilio-stream">Twilio Media Streams (Real-time WebSocket)</option>
+            <option value="twilio-whatsapp">Twilio WhatsApp</option>
+          </select>
+          <p class="text-xs text-gray-400 mt-1">
+            <strong>Twilio Media Streams</strong> (recommended) enables real-time interruption and barge-in.
+            <strong>Twilio Gather</strong> uses the simpler request/response loop — lower latency on slow networks.
+          </p>
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">TTS Engine</label>
+          <select x-model="ttsEngine" class="w-full border rounded-lg px-3 py-2 text-sm">
+            <option value="kokoro">Kokoro (CPU, natural)</option>
+            <option value="piper">Piper (CPU, fast ONNX)</option>
+            <option value="edge">Edge TTS (cloud, 300+ voices)</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Voice ID</label>
+          <input x-model="ttsVoiceId" class="w-full border rounded-lg px-3 py-2 text-sm font-mono" placeholder="e.g. af_sky (kokoro) or en_US-lessac-medium (piper)">
+          <p class="text-xs text-gray-400 mt-1">Leave blank to use the default voice for the selected engine.</p>
+        </div>
+        <button @click="saveTelephony()" :disabled="savingTel" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50" x-text="savingTel ? 'Saving…' : 'Save Telephony Settings'"></button>
+      </div>
+
+      <!-- WhatsApp Config -->
+      <div class="bg-white rounded-xl border p-6 space-y-4">
+        <h3 class="font-semibold">WhatsApp Channel</h3>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">WhatsApp Number (E.164)</label>
+          <input x-model="whatsappNumber" class="w-full border rounded-lg px-3 py-2 text-sm font-mono" placeholder="+91XXXXXXXXXX">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Twilio Messaging Service SID (optional)</label>
+          <input x-model="whatsappSid" class="w-full border rounded-lg px-3 py-2 text-sm font-mono" placeholder="MG...">
+        </div>
+        <button @click="saveWhatsApp()" :disabled="savingWa" class="px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 disabled:opacity-50" x-text="savingWa ? 'Saving…' : 'Save WhatsApp Config'"></button>
+        <div x-show="whatsappNumber" class="mt-3 p-3 bg-gray-50 rounded-lg">
+          <p class="text-xs font-medium text-gray-600">Configure this webhook URL in your Twilio console:</p>
+          <code class="block mt-1 text-xs font-mono text-blue-700 break-all" x-text="location.origin.replace(':8050','') + '/api/whatsapp/inbound/{{ agent.id|default:"AGENT_ID" }}'"></code>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
   <!-- Conversations Tab -->
   <div x-show="tab==='conversations'" x-transition>
     <div class="bg-white rounded-xl border p-6">
@@ -116,11 +173,20 @@ function agentDetailApp() {
   }
   if (!raw.llmPreferences.temperature) raw.llmPreferences.temperature = 0.7;
   if (!raw.llmPreferences.model) raw.llmPreferences.model = 'llama-3.3-70b-versatile';
+  const wa = (raw.channels && raw.channels.whatsapp) || {};
   return {
     tab: 'overview',
     saving: false,
+    savingTel: false,
+    savingWa: false,
     agent: raw,
     conversations: null,
+    // Telephony
+    ttsEngine: (raw.llmPreferences && raw.llmPreferences.ttsEngine) || 'kokoro',
+    ttsVoiceId: (raw.llmPreferences && raw.llmPreferences.voiceId) || '',
+    // WhatsApp
+    whatsappNumber: wa.whatsapp_number || '',
+    whatsappSid: wa.twilio_messaging_sid || '',
     async loadConversations() {
       if (this.conversations !== null) return;
       try {
@@ -148,6 +214,33 @@ function agentDetailApp() {
         showToast('Agent updated','success');
       } catch(e) { showToast('Save failed','error'); }
       this.saving = false;
+    },
+    async saveTelephony() {
+      this.savingTel = true;
+      try {
+        await apiFetch('/api/agents/{{ agent.id|default:"" }}/telephony', {method:'PUT', json:{
+          telephony_provider: this.agent.telephony_provider,
+          tts_engine: this.ttsEngine,
+          tts_voice_id: this.ttsVoiceId,
+        }});
+        // Keep llmPreferences in sync for the orchestrator
+        if (!this.agent.llmPreferences) this.agent.llmPreferences = {};
+        this.agent.llmPreferences.ttsEngine = this.ttsEngine;
+        this.agent.llmPreferences.voiceId = this.ttsVoiceId;
+        showToast('Telephony settings saved','success');
+      } catch(e) { showToast('Save failed','error'); }
+      this.savingTel = false;
+    },
+    async saveWhatsApp() {
+      this.savingWa = true;
+      try {
+        await apiFetch('/api/agents/{{ agent.id|default:"" }}/whatsapp', {method:'POST', json:{
+          whatsapp_number: this.whatsappNumber,
+          twilio_messaging_sid: this.whatsappSid,
+        }});
+        showToast('WhatsApp config saved','success');
+      } catch(e) { showToast('Save failed','error'); }
+      this.savingWa = false;
     },
     async activateAgent() {
       const action = this.agent.status==='active' ? 'pause' : 'activate';
