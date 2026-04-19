@@ -26,8 +26,9 @@ from app.services.call_state import CallState, CallStateManager
 
 logger = logging.getLogger("voiceflow.orchestrator")
 
-# Sentinel returned by get_nowait() when the queue is empty (distinct from the
-# None sentinel that signals end-of-stream).
+# Sentinel returned by get_nowait() when the queue is empty.
+# We need a value distinct from both `None` (the end-of-stream sentinel put by
+# _feed_audio) and actual `bytes` chunks, so we use a unique object instance.
 _NO_DATA = object()
 
 # ── VAD / interruption constants ─────────────────────────────────────────────

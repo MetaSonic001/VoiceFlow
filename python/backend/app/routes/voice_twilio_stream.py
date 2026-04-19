@@ -471,7 +471,13 @@ async def transfer_call(
             stream_sid_str = stream_sid_raw.decode() if isinstance(stream_sid_raw, bytes) else stream_sid_raw
             raw = await redis.get(f"stream:{stream_sid_str}")
             if raw:
-                session_data = json.loads(raw)
+                try:
+                    session_data = json.loads(raw)
+                except json.JSONDecodeError:
+                    logger.warning(
+                        "[twilio_stream] corrupt session data for call=%s stream=%s",
+                        call_sid, stream_sid_str,
+                    )
     finally:
         await redis.aclose()
 

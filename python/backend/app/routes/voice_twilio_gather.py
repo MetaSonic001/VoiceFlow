@@ -6,6 +6,7 @@ All routes live here so voice_inbound_router.py can delegate to handle_inbound_c
 """
 import json
 import logging
+import re
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Request, BackgroundTasks
@@ -18,6 +19,9 @@ from app.auth import AuthContext, get_auth
 from app.models import Agent, CallLog, Tenant
 from app.config import settings
 from app.services.credentials import decrypt_safe
+
+# Pre-compiled pattern for extracting JSON from LLM markdown code blocks
+_JSON_CODE_BLOCK_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 
 logger = logging.getLogger("voiceflow.gather")
 router = APIRouter()
@@ -244,8 +248,7 @@ Transcript:
                     try:
                         analysis = json.loads(content)
                     except json.JSONDecodeError:
-                        import re
-                        match = re.search(r"```(?:json)?\s*(.*?)```", content, re.DOTALL)
+                        match = _JSON_CODE_BLOCK_RE.search(content)
                         if match:
                             analysis = json.loads(match.group(1))
                         else:
