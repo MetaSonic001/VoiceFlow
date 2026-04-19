@@ -47,6 +47,8 @@ class TTSRouter:
             if not current:
                 continue
 
+            # Flush on sentence boundaries or every ~64 whitespace-split tokens to
+            # balance audio latency (~1-2 s) against synthesis request overhead.
             if token_count >= 64 or _SENTENCE_END_RE.search(current):
                 yield await self.synthesize(current, engine=engine, voice_id=voice_id)
                 buffer.clear()

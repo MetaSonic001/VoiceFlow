@@ -206,7 +206,11 @@ async def media_stream_ws(websocket: WebSocket, agent_id: str):
                 start_data = msg.get("start", {})
                 stream_sid = start_data.get("streamSid", "")
                 call_sid = start_data.get("callSid", "")
-                caller_phone = start_data.get("customParameters", {}).get("From", "")
+                # Twilio puts call metadata at top-level of start, customParameters holds app-defined extras
+                caller_phone = (
+                    start_data.get("from", "")
+                    or start_data.get("customParameters", {}).get("From", "")
+                )
                 logger.info(
                     "[twilio_stream] start agent=%s stream=%s call=%s",
                     agent_id, stream_sid, call_sid,

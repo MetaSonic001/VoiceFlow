@@ -159,7 +159,7 @@ class STTService:
 
         return ""
 
-    def create_vosk_recognizer(self, sample_rate: int = 16000):
+    def create_vosk_recognizer(self, sample_rate: int = 16000) -> "Optional[Any]":
         """
         Create a persistent KaldiRecognizer for streaming recognition.
         The returned recognizer should be reused across calls to
