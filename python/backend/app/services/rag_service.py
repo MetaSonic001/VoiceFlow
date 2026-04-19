@@ -851,7 +851,7 @@ class LLMClient:
             return self._stream_gemini
         if provider == "ollama":
             return self._stream_ollama
-        logger.warning("[llm_client] unknown provider '%s', falling back to groq", provider)
+        logger.warning("[llm_client] unrecognized LLM provider, falling back to groq")
         return self._stream_groq
 
     # ── Groq (SSE via httpx) ──────────────────────────────────────────────────
