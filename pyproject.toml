@@ -18,7 +18,7 @@ dependencies = [
     "redis>=5.2",
     "PyJWT>=2.10",
     "python-jose[cryptography]>=3.3",
-    "httpx>=0.28",
+    "httpx>=0.27.0",
     "psycopg2-binary>=2.9",
     "python-dotenv>=1.0",
     "aiofiles>=24.0",
@@ -47,13 +47,17 @@ dependencies = [
     "trafilatura>=2.0",
     "beautifulsoup4>=4.12",
 
-    # ── TTS (Edge + Chatterbox) ─────────────────────────
-    "edge-tts>=6.1",
-    "chatterbox-tts>=0.1.2",
-    "soundfile>=0.12",
-    "torch==2.5.1",
-    "torchvision==0.20.1",
-    "torchaudio==2.5.1",
+    # ── TTS/STT/Audio (CPU-only) ────────────────────────
+    "edge-tts>=6.1.0",
+    "piper-tts>=1.2.0",
+    "pydub>=0.25.1",
+    "vosk>=0.3.45",
+    "faster-whisper>=1.0.0",
+
+    # ── Multi-LLM Providers ──────────────────────────────
+    "google-generativeai>=0.7.0",
+    "openai>=1.30.0",
+    "ollama>=0.2.0",
 
     # ── Object Storage ───────────────────────────────────
     "boto3>=1.35",
@@ -62,18 +66,24 @@ dependencies = [
     "Django>=6.0",
     "django-htmx>=1.27",
     "whitenoise>=6.7",
-    # ── Patent Claim Features ────────────────────────────────────
+
+    # ── Platform utilities ───────────────────────────────
     "twilio>=9.0",
     "cryptography>=44.0",
     "slowapi>=0.1.9",
     "apscheduler>=3.10",
-    "psutil>=6.0",]
+    "psutil>=6.0",
+    "phonenumbers>=8.13.0",
+    "pytz>=2024.1",
+]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0",
-    "pytest-asyncio>=0.24",
-    "ruff>=0.8",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pre-commit>=3.7.0",
+    "black>=24.0.0",
+    "ruff>=0.4.0",
 ]
 
 [tool.ruff]
@@ -87,13 +97,3 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-
-[[tool.uv.index]]
-name = "pytorch-cu121"
-url = "https://download.pytorch.org/whl/cu121"
-explicit = true
-
-[tool.uv.sources]
-torch = { index = "pytorch-cu121" }
-torchvision = { index = "pytorch-cu121" }
-torchaudio = { index = "pytorch-cu121" }

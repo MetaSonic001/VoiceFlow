@@ -2,8 +2,9 @@
 Environment / settings loaded once from .env or env vars.
 Used by FastAPI backend routes and services.
 """
-from pydantic_settings import BaseSettings
 from typing import Optional
+
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
@@ -22,8 +23,25 @@ class Settings(BaseSettings):
     # Auth
     JWT_SECRET: str = "dev-secret"
 
-    # Groq LLM
+    # LLMs
     GROQ_API_KEY: Optional[str] = None
+    OPENAI_API_KEY: Optional[str] = None
+    GEMINI_API_KEY: Optional[str] = None
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    SUPPORTED_LLMS: list[str] = ["groq", "openai", "gemini", "ollama"]
+    DEFAULT_LLM: str = "groq"
+
+    # TTS
+    KOKORO_TTS_URL: str = "http://localhost:8880"
+    PIPER_TTS_URL: str = "http://localhost:8890"
+    ORPHEUS_URL: str = "http://localhost:8080/v1/chat/completions"
+
+    # STT
+    VOSK_MODEL_PATH: str = "./models/vosk-model-small-en-us-0.15"
+    VOSK_MODEL_URL: str = "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"
+
+    # Audio
+    AUDIO_PROCESSOR: str = "pydub"
 
     # Base URL for this API when handlers call themselves via HTTP (onboarding → ingestion).
     FASTAPI_URL: str = "http://127.0.0.1:8040"

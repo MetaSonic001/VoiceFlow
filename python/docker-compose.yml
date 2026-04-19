@@ -66,11 +66,55 @@ services:
       timeout: 3s
       retries: 3
 
+  kokoro-tts:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
+    container_name: voiceflow_kokoro
+    ports:
+      - "8880:8880"
+    volumes:
+      - kokoro_cache:/root/.cache
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8880/health || exit 1"]
+      interval: 30s
+      start_period: 60s
+    networks:
+      - voiceflow-network
+
+  piper-tts:
+    image: rhasspy/wyoming-piper:latest
+    container_name: voiceflow_piper
+    ports:
+      - "8890:10200"
+    volumes:
+      - piper_voices:/data
+    command: --voice en_US-lessac-medium --update-voices
+    restart: unless-stopped
+    networks:
+      - voiceflow-network
+
+  orpheus-llm:
+    image: ghcr.io/ggerganov/llama.cpp:server
+    container_name: voiceflow_orpheus
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./models/orpheus:/models
+    command: >
+      -m /models/orpheus-3b-gguf.bin
+      --host 0.0.0.0 --port 8080
+      --ctx-size 4096 --n-predict 4096
+      --rope-scaling linear
+    restart: unless-stopped
+    networks:
+      - voiceflow-network
+
 volumes:
   postgres_data:
   minio_data:
   chroma_data:
   redis_data:
+  kokoro_cache:
+  piper_voices:
 
 networks:
   voiceflow-network:
