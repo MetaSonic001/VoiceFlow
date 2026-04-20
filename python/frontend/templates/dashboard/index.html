@@ -205,12 +205,12 @@
   <!-- Empty state -->
   <template x-if="filteredAgents.length === 0 && !loading">
     <div class="text-center py-16 vf-card">
-      <div class="w-16 h-16 rounded-full bg-blue-50 flex items-center justify-center mx-auto mb-4">
-        <svg class="w-8 h-8 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
+      <div class="w-16 h-16 rounded-full bg-gradient-to-br from-teal-50 to-cyan-50 dark:from-teal-900/30 dark:to-cyan-900/30 flex items-center justify-center mx-auto mb-4">
+        <svg class="w-8 h-8 text-teal-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
       </div>
-      <h3 class="text-lg font-semibold mb-2">No agents yet</h3>
-      <p class="text-gray-500 text-sm mb-6">Create your first AI agent to get started</p>
-      <a href="{% url 'onboarding' %}" class="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-purple-600 text-white text-sm font-medium rounded-lg">Create Agent</a>
+      <h3 class="text-lg font-semibold mb-2 dark:text-white">No agents yet</h3>
+      <p class="text-gray-500 dark:text-gray-400 text-sm mb-6">Create your first AI agent to get started</p>
+      <a href="{% url 'onboarding' %}" class="px-6 py-2.5 bg-gradient-to-r from-teal-500 to-cyan-500 text-white text-sm font-medium rounded-lg shadow-lg shadow-teal-500/25 hover:from-teal-600 hover:to-cyan-600 transition">Create Agent</a>
     </div>
   </template>
 

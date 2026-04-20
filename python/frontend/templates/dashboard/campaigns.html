@@ -2,44 +2,58 @@
 {% block title %}Campaigns — VoiceFlow AI{% endblock %}
 
 {% block content %}
-<div x-data="campaignsApp()" x-init="init()">
+<div x-data="campaignsApp()" x-init="init()" class="space-y-6 fade-in">
 
   <!-- Header -->
-  <div class="flex items-center justify-between mb-6">
+  <div class="flex items-center justify-between">
     <div>
-      <h1 class="text-3xl font-bold vf-heading">Campaigns</h1>
-      <p class="text-slate-500 text-sm mt-1">Manage outbound calling campaigns.</p>
+      <h1 class="text-2xl font-bold vf-heading bg-gradient-to-r from-slate-900 to-slate-600 dark:from-slate-100 dark:to-slate-400 bg-clip-text text-transparent">Campaigns</h1>
+      <p class="text-slate-500 dark:text-slate-400 text-sm mt-1">Manage outbound calling campaigns with AI agents.</p>
     </div>
     <button @click="showCreate=true"
-            class="px-5 py-2.5 bg-gradient-to-r from-teal-600 to-cyan-600 text-white text-sm font-medium rounded-lg hover:shadow-lg transition-all">
-      + New Campaign
+            class="vf-btn px-5 py-2.5 bg-gradient-to-r from-teal-600 to-cyan-600 text-white text-sm font-medium rounded-xl">
+      <span class="flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        New Campaign
+      </span>
     </button>
   </div>
 
   <!-- Create campaign modal -->
   <div x-show="showCreate" x-cloak @click.self="showCreate=false"
-       class="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
-      <h3 class="text-lg font-bold mb-4 text-slate-800">Create Campaign</h3>
-      <form @submit.prevent="createCampaign()" class="space-y-3">
-        <input x-model="form.name" required placeholder="Campaign name"
-               class="w-full px-4 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 outline-none">
-        <select x-model="form.agentId" required
-                class="w-full px-4 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 outline-none">
-          <option value="">Select agent…</option>
-          <template x-for="ag in agents" :key="ag.id">
-            <option :value="ag.id" x-text="ag.name"></option>
-          </template>
-        </select>
-        <input x-model="form.scheduledAt" type="datetime-local"
-               class="w-full px-4 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 outline-none">
+       x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+       x-transition:leave="transition ease-in duration-200" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
+       class="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+    <div x-show="showCreate"
+         x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0 scale-95 translate-y-4" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
+         class="vf-card-static max-w-md w-full p-6 dark:bg-slate-800">
+      <h3 class="text-lg font-bold mb-4 vf-heading">Create Campaign</h3>
+      <form @submit.prevent="createCampaign()" class="space-y-4">
+        <div>
+          <label class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">Campaign Name</label>
+          <input x-model="form.name" required placeholder="Q4 Lead Outreach"
+                 class="vf-input w-full">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">Agent</label>
+          <select x-model="form.agentId" required class="vf-input w-full">
+            <option value="">Select agent…</option>
+            <template x-for="ag in agents" :key="ag.id">
+              <option :value="ag.id" x-text="ag.name"></option>
+            </template>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">Scheduled Start (optional)</label>
+          <input x-model="form.scheduledAt" type="datetime-local" class="vf-input w-full">
+        </div>
         <div class="flex gap-3 pt-2">
           <button type="submit"
-                  class="flex-1 py-2 bg-teal-600 text-white rounded-lg text-sm font-medium hover:bg-teal-700 transition">
+                  class="vf-btn flex-1 py-2.5 bg-gradient-to-r from-teal-600 to-cyan-600 text-white rounded-xl text-sm font-medium">
             Create
           </button>
           <button type="button" @click="showCreate=false"
-                  class="flex-1 py-2 border border-slate-200 rounded-lg text-sm hover:bg-slate-50 transition">
+                  class="flex-1 py-2.5 border border-slate-200 dark:border-slate-600 rounded-xl text-sm hover:bg-slate-50 dark:hover:bg-slate-700 transition">
             Cancel
           </button>
         </div>
@@ -49,12 +63,14 @@
 
   <!-- Upload CSV modal -->
   <div x-show="uploadModal.open" x-cloak @click.self="uploadModal.open=false"
-       class="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
-      <h3 class="text-lg font-bold mb-2 text-slate-800">Upload Contacts CSV</h3>
-      <p class="text-xs text-slate-500 mb-4">
-        Required column: <code class="bg-slate-100 px-1 rounded">phone_number</code>.
-        Optional: <code class="bg-slate-100 px-1 rounded">name</code> and any variable columns.
+       x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+       class="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+    <div x-show="uploadModal.open" x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0 scale-95" x-transition:enter-end="opacity-100 scale-100"
+         class="vf-card-static max-w-md w-full p-6 dark:bg-slate-800">
+      <h3 class="text-lg font-bold mb-2 vf-heading">Upload Contacts CSV</h3>
+      <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">
+        Required column: <code class="bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded text-xs">phone_number</code>.
+        Optional: <code class="bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded text-xs">name</code> and any variable columns.
       </p>
 
       <!-- Drag-drop zone -->
@@ -62,53 +78,64 @@
         @dragover.prevent="dragging=true"
         @dragleave="dragging=false"
         @drop.prevent="dragging=false; handleDrop($event)"
-        :class="dragging ? 'border-teal-400 bg-teal-50' : 'border-slate-200 hover:border-teal-300'"
+        :class="dragging ? 'border-teal-400 bg-teal-50 dark:bg-teal-900/10' : 'border-slate-200 dark:border-slate-600 hover:border-teal-300'"
         class="block border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition"
       >
         <input type="file" accept=".csv" class="hidden" @change="handleFile($event)">
-        <div class="text-3xl mb-2">📁</div>
-        <p class="text-sm text-slate-600" x-text="uploadModal.file ? uploadModal.file.name : 'Drop CSV here or click to browse'"></p>
+        <svg class="w-8 h-8 mx-auto mb-2 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+        <p class="text-sm text-slate-600 dark:text-slate-300" x-text="uploadModal.file ? uploadModal.file.name : 'Drop CSV here or click to browse'"></p>
         <p class="text-xs text-slate-400 mt-1" x-show="!uploadModal.file">Max 5 MB</p>
       </label>
 
       <div class="flex gap-3 mt-4">
         <button @click="uploadCSV()"
                 :disabled="!uploadModal.file"
-                class="flex-1 py-2 bg-teal-600 text-white rounded-lg text-sm font-medium hover:bg-teal-700 transition disabled:opacity-40">
+                class="vf-btn flex-1 py-2.5 bg-gradient-to-r from-teal-600 to-cyan-600 text-white rounded-xl text-sm font-medium disabled:opacity-40">
           Upload
         </button>
         <button @click="uploadModal.open=false"
-                class="flex-1 py-2 border border-slate-200 rounded-lg text-sm hover:bg-slate-50 transition">
+                class="flex-1 py-2.5 border border-slate-200 dark:border-slate-600 rounded-xl text-sm hover:bg-slate-50 dark:hover:bg-slate-700 transition">
           Cancel
         </button>
       </div>
     </div>
   </div>
 
-  <!-- Campaign cards (HTMX live-stats every 5s) -->
+  <!-- Campaign cards -->
   <template x-if="campaigns.length === 0">
-    <div class="text-center py-16 vf-card">
-      <div class="text-5xl mb-4">📣</div>
-      <p class="text-slate-500 text-sm">No campaigns yet. Create one to get started.</p>
+    <div class="vf-card-static p-12 text-center fade-in-up">
+      <div class="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-teal-100 to-cyan-100 dark:from-teal-900/30 dark:to-cyan-900/30 flex items-center justify-center">
+        <svg class="w-8 h-8 text-teal-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg>
+      </div>
+      <h3 class="text-lg font-semibold text-slate-700 dark:text-slate-200 mb-1">No Campaigns Yet</h3>
+      <p class="text-sm text-slate-500 mb-4">Create your first outbound campaign to start calling leads at scale.</p>
+      <button @click="showCreate=true" class="vf-btn px-5 py-2 bg-gradient-to-r from-teal-600 to-cyan-600 text-white text-sm rounded-xl">
+        Create First Campaign
+      </button>
     </div>
   </template>
 
-  <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+  <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 stagger">
     <template x-for="c in campaigns" :key="c.id">
-      <div class="vf-card p-5 flex flex-col gap-3">
+      <div class="vf-card p-5 flex flex-col gap-4">
 
         <!-- Title + status -->
         <div class="flex items-start justify-between">
-          <div>
-            <h3 class="font-semibold text-slate-800" x-text="c.name"></h3>
-            <p class="text-xs text-slate-500 mt-0.5" x-text="c.agentId || '—'"></p>
+          <div class="flex items-center gap-3">
+            <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-teal-500 to-cyan-600 flex items-center justify-center shadow-md shadow-teal-500/20">
+              <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6"/></svg>
+            </div>
+            <div>
+              <h3 class="font-semibold text-sm text-slate-800 dark:text-slate-200" x-text="c.name"></h3>
+              <p class="text-[11px] text-slate-500" x-text="c.agentName || 'No agent assigned'"></p>
+            </div>
           </div>
-          <span class="px-2 py-0.5 rounded-full text-xs font-medium border"
+          <span class="vf-badge"
                 :class="{
-                  'bg-green-50 text-green-700 border-green-200': c.status === 'running',
-                  'bg-yellow-50 text-yellow-700 border-yellow-200': c.status === 'paused',
-                  'bg-slate-50 text-slate-600 border-slate-200': c.status === 'draft' || c.status === 'pending',
-                  'bg-blue-50 text-blue-700 border-blue-200': c.status === 'completed',
+                  'vf-badge-success': c.status === 'running',
+                  'vf-badge-warning': c.status === 'paused',
+                  'vf-badge-neutral': c.status === 'draft' || c.status === 'pending',
+                  'vf-badge-info': c.status === 'completed',
                 }"
                 x-text="c.status || 'draft'">
           </span>
@@ -116,60 +143,58 @@
 
         <!-- Progress bar -->
         <div>
-          <div class="flex justify-between text-xs text-slate-500 mb-1">
+          <div class="flex justify-between text-[11px] text-slate-500 mb-1.5">
             <span x-text="(c.answeredCalls||0) + ' answered'"></span>
             <span x-text="(c.totalCalls||0) + ' total'"></span>
           </div>
-          <div class="h-2 bg-slate-100 rounded-full overflow-hidden">
-            <div class="h-full bg-teal-500 rounded-full transition-[width] duration-700"
+          <div class="h-2 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+            <div class="vf-progress h-full"
                  :style="'width:' + (c.totalCalls > 0 ? Math.round((c.answeredCalls||0)/c.totalCalls*100) : 0) + '%'">
             </div>
           </div>
         </div>
 
-        <!-- Live stats (polled every 5s via HTMX) -->
-        <div class="grid grid-cols-3 gap-2 text-center"
-             :id="'stats-'+c.id"
-             hx-get="javascript:void(0)"
-             hx-trigger="every 5s">
+        <!-- Stats row -->
+        <div class="grid grid-cols-3 gap-2 text-center pt-2 border-t border-slate-100 dark:border-slate-700">
           <div>
-            <div class="text-lg font-bold text-blue-600" x-text="c.totalCalls||0"></div>
-            <div class="text-[10px] text-slate-400">Total</div>
+            <div class="text-lg font-bold text-slate-800 dark:text-slate-200" x-text="c.totalCalls||0"></div>
+            <div class="text-[10px] text-slate-400 uppercase tracking-wide">Total</div>
           </div>
           <div>
             <div class="text-lg font-bold text-green-600" x-text="c.answeredCalls||0"></div>
-            <div class="text-[10px] text-slate-400">Answered</div>
+            <div class="text-[10px] text-slate-400 uppercase tracking-wide">Answered</div>
           </div>
           <div>
             <div class="text-lg font-bold text-red-500" x-text="c.failedCalls||0"></div>
-            <div class="text-[10px] text-slate-400">Failed</div>
+            <div class="text-[10px] text-slate-400 uppercase tracking-wide">Failed</div>
           </div>
         </div>
 
         <!-- Actions -->
         <div class="flex gap-2 pt-1">
           <button @click="uploadModal.open=true; uploadModal.campaignId=c.id"
-                  class="flex-1 py-1.5 text-xs border border-slate-200 rounded-lg hover:bg-slate-50 transition">
-            📁 Upload CSV
+                  class="flex-1 py-2 text-xs border border-slate-200 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition font-medium flex items-center justify-center gap-1.5">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+            CSV
           </button>
           <template x-if="c.status !== 'running'">
             <button @click="startCampaign(c)"
-                    class="flex-1 py-1.5 text-xs bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition">
-              ▶ Start
+                    class="vf-btn flex-1 py-2 text-xs bg-gradient-to-r from-teal-600 to-cyan-600 text-white rounded-lg font-medium flex items-center justify-center gap-1.5">
+              <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+              Start
             </button>
           </template>
           <template x-if="c.status === 'running'">
             <button @click="pauseCampaign(c)"
-                    class="flex-1 py-1.5 text-xs bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition">
-              ⏸ Pause
+                    class="vf-btn flex-1 py-2 text-xs bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-lg font-medium flex items-center justify-center gap-1.5">
+              <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg>
+              Pause
             </button>
           </template>
         </div>
-
       </div>
     </template>
   </div>
-
 </div>
 
 <script>

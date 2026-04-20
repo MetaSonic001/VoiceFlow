@@ -1,61 +1,77 @@
 {% extends "base_dashboard.html" %}
 {% block title %}Knowledge Base — VoiceFlow AI{% endblock %}
 {% block content %}
-<div x-data="knowledgeApp()">
+<div x-data="knowledgeApp()" class="fade-in-up">
   <div class="flex items-center justify-between mb-8">
-    <div><h1 class="text-2xl font-bold">Knowledge Base</h1><p class="text-gray-500 text-sm mt-1">Manage documents and company knowledge</p></div>
+    <div>
+      <h1 class="text-2xl font-bold bg-gradient-to-r from-gray-900 via-gray-700 to-gray-900 dark:from-white dark:via-gray-200 dark:to-white bg-clip-text text-transparent">Knowledge Base</h1>
+      <p class="text-gray-500 dark:text-gray-400 text-sm mt-1">Manage documents and company knowledge</p>
+    </div>
     <div class="flex gap-3">
-      <button @click="showUpload=true" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition">Upload Document</button>
-      <button @click="showIngest=true" class="px-4 py-2 border border-gray-200 text-sm font-medium rounded-lg hover:bg-gray-50 transition">Ingest URL</button>
+      <button @click="showUpload=true" class="vf-btn px-4 py-2 bg-gradient-to-r from-teal-500 to-cyan-500 text-white text-sm font-medium rounded-lg shadow-lg shadow-teal-500/25 hover:from-teal-600 hover:to-cyan-600 transition">Upload Document</button>
+      <button @click="showIngest=true" class="vf-btn px-4 py-2 border border-gray-200 dark:border-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition">Ingest URL</button>
     </div>
   </div>
 
   {% if company_profile.name %}
-  <div class="bg-white rounded-xl border p-5 mb-6">
-    <h3 class="font-semibold mb-2">Company Profile</h3>
+  <div class="vf-card p-5 mb-6">
+    <h3 class="font-semibold mb-2 text-gray-900 dark:text-white">Company Profile</h3>
     <div class="grid md:grid-cols-3 gap-4 text-sm">
-      <div><span class="text-gray-500">Name:</span> {{ company_profile.name }}</div>
-      <div><span class="text-gray-500">Industry:</span> {{ company_profile.industry|default:"—" }}</div>
-      <div><span class="text-gray-500">Website:</span> {{ company_profile.website|default:"—" }}</div>
+      <div><span class="text-gray-500 dark:text-gray-400">Name:</span> <span class="text-gray-900 dark:text-gray-100">{{ company_profile.name }}</span></div>
+      <div><span class="text-gray-500 dark:text-gray-400">Industry:</span> <span class="text-gray-900 dark:text-gray-100">{{ company_profile.industry|default:"—" }}</span></div>
+      <div><span class="text-gray-500 dark:text-gray-400">Website:</span> <span class="text-gray-900 dark:text-gray-100">{{ company_profile.website|default:"—" }}</span></div>
     </div>
   </div>
   {% endif %}
 
   <!-- Documents -->
-  <div class="bg-white rounded-xl border mb-6">
-    <div class="p-4 border-b font-semibold">Documents ({{ documents|length }})</div>
+  <div class="vf-card mb-6">
+    <div class="p-4 border-b border-gray-100 dark:border-gray-700 font-semibold text-gray-900 dark:text-white">Documents <span class="vf-badge-neutral ml-2">{{ documents|length }}</span></div>
+    <div class="stagger">
     {% for doc in documents %}
-    <div class="flex items-center justify-between px-4 py-3 border-t hover:bg-gray-50">
+    <div class="group flex items-center justify-between px-4 py-3 border-t border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition">
       <div class="flex items-center gap-3">
-        <div class="w-8 h-8 rounded bg-blue-50 flex items-center justify-center text-blue-500 text-xs font-bold">{{ doc.title|default:"DOC"|truncatechars:3|upper }}</div>
-        <div><div class="font-medium text-sm">{{ doc.title|default:doc.url|default:"Document" }}</div><div class="text-xs text-gray-400">{{ doc.status|default:"processed" }} · {{ doc.createdAt|default:"" }}</div></div>
+        <div class="w-8 h-8 rounded bg-teal-50 dark:bg-teal-900/30 flex items-center justify-center text-teal-500 text-xs font-bold">{{ doc.title|default:"DOC"|truncatechars:3|upper }}</div>
+        <div>
+          <div class="font-medium text-sm text-gray-900 dark:text-gray-100">{{ doc.title|default:doc.url|default:"Document" }}</div>
+          <div class="text-xs text-gray-400 dark:text-gray-500">{{ doc.status|default:"processed" }} · {{ doc.createdAt|default:"" }}</div>
+        </div>
       </div>
-      <button class="text-red-500 hover:text-red-700 text-xs" onclick="deleteDoc('{{ doc.id }}')">Delete</button>
+      <button class="opacity-0 group-hover:opacity-100 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 px-2 py-1 rounded text-xs transition" onclick="deleteDoc('{{ doc.id }}')">Delete</button>
     </div>
     {% empty %}
-    <div class="p-8 text-center text-gray-400 text-sm">No documents uploaded yet.</div>
+    <div class="p-12 text-center">
+      <div class="mx-auto w-16 h-16 rounded-2xl bg-gradient-to-br from-teal-50 to-cyan-50 dark:from-teal-900/30 dark:to-cyan-900/30 flex items-center justify-center mb-4">
+        <svg class="w-8 h-8 text-teal-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"/></svg>
+      </div>
+      <p class="text-gray-500 dark:text-gray-400 text-sm">No documents uploaded yet.</p>
+      <p class="text-gray-400 dark:text-gray-500 text-xs mt-1">Upload a file or ingest a URL to get started</p>
+    </div>
     {% endfor %}
+    </div>
   </div>
 
   <!-- Knowledge Chunks -->
   {% if chunks %}
-  <div class="bg-white rounded-xl border">
-    <div class="p-4 border-b font-semibold">Knowledge Chunks ({{ chunks|length }})</div>
+  <div class="vf-card">
+    <div class="p-4 border-b border-gray-100 dark:border-gray-700 font-semibold text-gray-900 dark:text-white">Knowledge Chunks <span class="vf-badge-info ml-2">{{ chunks|length }}</span></div>
+    <div class="stagger">
     {% for chunk in chunks %}
-    <div class="px-4 py-3 border-t text-sm text-gray-600">{{ chunk.text|truncatechars:200 }}</div>
+    <div class="px-4 py-3 border-t border-gray-100 dark:border-gray-700 text-sm text-gray-600 dark:text-gray-300">{{ chunk.text|truncatechars:200 }}</div>
     {% endfor %}
+    </div>
   </div>
   {% endif %}
 
   <!-- Upload modal -->
   <div x-show="showUpload" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/40" @click.self="showUpload=false">
-    <div class="bg-white rounded-2xl p-6 w-full max-w-md shadow-xl">
-      <h3 class="font-semibold text-lg mb-4">Upload Document</h3>
+    <div class="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-md shadow-xl border border-gray-200 dark:border-gray-700">
+      <h3 class="font-semibold text-lg mb-4 text-gray-900 dark:text-white">Upload Document</h3>
       <form @submit.prevent="uploadFile">
-        <input type="file" accept=".pdf,.doc,.docx,.txt,.md" @change="file=$event.target.files[0]" class="w-full border rounded-lg p-3 text-sm mb-4">
+        <input type="file" accept=".pdf,.doc,.docx,.txt,.md" @change="file=$event.target.files[0]" class="vf-input w-full p-3 text-sm mb-4">
         <div class="flex justify-end gap-3">
-          <button type="button" @click="showUpload=false" class="px-4 py-2 border rounded-lg text-sm">Cancel</button>
-          <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm" :disabled="!file">Upload</button>
+          <button type="button" @click="showUpload=false" class="vf-btn px-4 py-2 border border-gray-200 dark:border-gray-700 rounded-lg text-sm hover:bg-gray-50 dark:hover:bg-gray-800">Cancel</button>
+          <button type="submit" class="vf-btn px-4 py-2 bg-gradient-to-r from-teal-500 to-cyan-500 text-white rounded-lg text-sm shadow-lg shadow-teal-500/25 hover:from-teal-600 hover:to-cyan-600" :disabled="!file">Upload</button>
         </div>
       </form>
     </div>
@@ -63,12 +79,12 @@
 
   <!-- Ingest URL modal -->
   <div x-show="showIngest" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/40" @click.self="showIngest=false">
-    <div class="bg-white rounded-2xl p-6 w-full max-w-md shadow-xl">
-      <h3 class="font-semibold text-lg mb-4">Ingest URL</h3>
-      <input type="url" x-model="ingestUrl" placeholder="https://yourwebsite.com/help" class="w-full border rounded-lg px-4 py-3 text-sm mb-4 outline-none focus:ring-2 focus:ring-blue-500">
+    <div class="bg-white dark:bg-gray-800 rounded-2xl p-6 w-full max-w-md shadow-xl border border-gray-200 dark:border-gray-700">
+      <h3 class="font-semibold text-lg mb-4 text-gray-900 dark:text-white">Ingest URL</h3>
+      <input type="url" x-model="ingestUrl" placeholder="https://yourwebsite.com/help" class="vf-input w-full px-4 py-3 text-sm mb-4">
       <div class="flex justify-end gap-3">
-        <button @click="showIngest=false" class="px-4 py-2 border rounded-lg text-sm">Cancel</button>
-        <button @click="triggerIngest" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm" :disabled="!ingestUrl">Ingest</button>
+        <button @click="showIngest=false" class="vf-btn px-4 py-2 border border-gray-200 dark:border-gray-700 rounded-lg text-sm hover:bg-gray-50 dark:hover:bg-gray-800">Cancel</button>
+        <button @click="triggerIngest" class="vf-btn px-4 py-2 bg-gradient-to-r from-teal-500 to-cyan-500 text-white rounded-lg text-sm shadow-lg shadow-teal-500/25 hover:from-teal-600 hover:to-cyan-600" :disabled="!ingestUrl">Ingest</button>
       </div>
     </div>
   </div>

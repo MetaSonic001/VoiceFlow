@@ -1,25 +1,27 @@
 {% extends "base_dashboard.html" %}{% block title %}Integrations — VoiceFlow AI{% endblock %}
 {% block content %}
-<div class="mb-8"><h1 class="text-3xl font-bold vf-heading">Integrations</h1><p class="text-slate-500 text-sm mt-1">Connect third-party services and automate your workflow stack.</p></div>
-<div class="grid md:grid-cols-3 gap-6">
+<div class="space-y-6 fade-in-up">
+<div class="mb-8"><h1 class="text-3xl font-bold vf-heading bg-gradient-to-r from-gray-900 via-gray-700 to-gray-900 dark:from-white dark:via-gray-200 dark:to-white bg-clip-text text-transparent">Integrations</h1><p class="text-slate-500 dark:text-gray-400 text-sm mt-1">Connect third-party services and automate your workflow stack.</p></div>
+<div class="grid md:grid-cols-3 gap-6 stagger">
   {% for item in integrations %}
   <div class="vf-card p-5 flex flex-col {% if item.coming_soon %}opacity-80{% endif %}">
     <div class="flex items-center gap-3 mb-3">
       <div class="w-10 h-10 rounded-lg bg-{{ item.color|default:'gray' }}-100 flex items-center justify-center text-{{ item.color|default:'gray' }}-600 font-bold text-lg ring-1 ring-black/5">{{ item.name|make_list|first }}</div>
       <span class="font-semibold">{{ item.name }}</span>
-      {% if item.coming_soon %}<span class="ml-auto px-2 py-0.5 bg-amber-100 text-amber-700 text-xs font-semibold rounded-full">Coming Soon</span>{% endif %}
+      {% if item.coming_soon %}<span class="ml-auto px-2 py-0.5 vf-badge-warning text-xs font-semibold rounded-full">Coming Soon</span>{% endif %}
     </div>
-    <p class="text-sm text-slate-500 flex-1">{{ item.description|default:"Connect and configure." }}</p>
+    <p class="text-sm text-slate-500 dark:text-gray-400 flex-1">{{ item.description|default:"Connect and configure." }}</p>
     <div class="mt-4">
       {% if item.coming_soon %}
-        <span class="text-xs px-2 py-1 rounded-full bg-slate-100 text-slate-500">Not available yet</span>
+        <span class="text-xs px-2 py-1 rounded-full vf-badge-neutral">Not available yet</span>
       {% else %}
-        <span class="text-xs px-2 py-1 rounded-full {% if item.status == 'connected' %}bg-green-100 text-green-700{% else %}bg-gray-100 text-gray-500{% endif %}">{{ item.status|default:"Not connected" }}</span>
+        <span class="text-xs px-2 py-1 rounded-full {% if item.status == 'connected' %}vf-badge-success{% else %}vf-badge-neutral{% endif %}">{{ item.status|default:"Not connected" }}</span>
       {% endif %}
     </div>
   </div>
   {% empty %}
-  <div class="col-span-3 text-center py-8 text-slate-400 vf-card">No integrations available.</div>
+  <div class="col-span-3 text-center py-8 text-slate-400 dark:text-gray-500 vf-card">No integrations available.</div>
   {% endfor %}
+</div>
 </div>
 {% endblock %}

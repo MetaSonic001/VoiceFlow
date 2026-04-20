@@ -17,7 +17,7 @@ SHELL_EXE := powershell.exe
 
 VENV   := $(CURDIR)/../.venv
 PYTHON := $(VENV)/Scripts/python.exe
-UV     := $(VENV)/Scripts/uv.exe
+UV     := uv
 
 # ─── HELP ─────────────────────────────────────────────────────────
 
@@ -89,8 +89,8 @@ init: venv install env docker wait migrate seed ## One-time full setup
 	@Write-Host '  ═══════════════════════════════════════════════════' -ForegroundColor Cyan
 
 .PHONY: venv
-venv: ## Create Python virtual environment + install uv
-	@if (-not (Test-Path '$(VENV)/Scripts/activate.bat')) { Write-Host 'Creating virtual environment...' -ForegroundColor Yellow; python -m venv '$(VENV)'; & '$(PYTHON)' -m pip install --quiet --upgrade pip uv; Write-Host 'Virtual environment created at $(VENV)' -ForegroundColor Green } else { Write-Host 'Virtual environment already exists at $(VENV)' -ForegroundColor Gray }
+venv: ## Create Python virtual environment (Python 3.12 via uv)
+	@if (-not (Test-Path '$(VENV)/Scripts/activate.bat')) { Write-Host 'Creating virtual environment (Python 3.12)...' -ForegroundColor Yellow; uv venv '$(VENV)' --python cpython-3.12; Write-Host 'Virtual environment created at $(VENV)' -ForegroundColor Green } else { Write-Host 'Virtual environment already exists at $(VENV)' -ForegroundColor Gray }
 
 .PHONY: env
 env: ## Create .env from .env.example if missing
@@ -104,17 +104,19 @@ all: docker wait backend-bg frontend-bg ## Start everything
 	@Write-Host '  ═══════════════════════════════════════════════════' -ForegroundColor Cyan
 	@Write-Host '  All services started!' -ForegroundColor Green
 	@Write-Host ''
-	@Write-Host '  Frontend : http://localhost:8050'
-	@Write-Host '  Backend  : http://localhost:8040'
-	@Write-Host '  Postgres : localhost:8010'
-	@Write-Host '  MinIO    : localhost:9020'
-	@Write-Host '  ChromaDB : localhost:8030'
-	@Write-Host '  Redis    : localhost:8020'
+	@Write-Host '  Frontend   : http://localhost:8050'
+	@Write-Host '  Backend    : http://localhost:8040'
+	@Write-Host '  Postgres   : localhost:8010'
+	@Write-Host '  MinIO      : localhost:9020'
+	@Write-Host '  ChromaDB   : localhost:8030'
+	@Write-Host '  Redis      : localhost:8020'
+	@Write-Host '  Kokoro TTS : localhost:8880'
+	@Write-Host '  Piper TTS  : localhost:8890'
 	@Write-Host '  ═══════════════════════════════════════════════════' -ForegroundColor Cyan
 
 .PHONY: docker
-docker: ## Start Docker services (Postgres, MinIO, ChromaDB, Redis)
-	docker compose up -d postgres minio chroma redis
+docker: ## Start Docker services (Postgres, MinIO, ChromaDB, Redis, TTS)
+	docker compose up -d --remove-orphans postgres minio chroma redis kokoro-tts piper-tts
 	@Write-Host 'Docker services started.' -ForegroundColor Green
 
 .PHONY: wait
@@ -179,11 +181,11 @@ install: install-deps ## Install all Python dependencies from pyproject.toml
 
 .PHONY: install-deps
 install-deps: ## Sync Python dependencies from pyproject.toml via uv
-	@if (Test-Path '$(UV)') { & '$(UV)' sync } else { & '$(PYTHON)' -m pip install --upgrade pip uv; & '$(VENV)/Scripts/uv.exe' sync }
+	@uv sync
 
 .PHONY: lock
 lock: ## Resolve and write uv.lock from pyproject.toml
-	@if (Test-Path '$(UV)') { & '$(UV)' lock } else { & '$(PYTHON)' -m pip install --upgrade pip uv; & '$(VENV)/Scripts/uv.exe' lock }
+	@uv lock
 
 .PHONY: migrate
 migrate: ## Run Django makemigrations + migrate
@@ -273,8 +275,8 @@ demo-reset: ## Clear app data for a clean demo without full nuke
 	@Write-Host 'Preparing clean demo state...' -ForegroundColor Yellow
 	@Write-Host 'Stopping backend/frontend processes...' -ForegroundColor Yellow
 	@Get-Process -Name 'python' -ErrorAction SilentlyContinue | Where-Object { $$_.Path -like '*VoiceFlow*' -and ($$_.CommandLine -match 'uvicorn|runserver') } | Stop-Process -Force -ErrorAction SilentlyContinue
-	@Write-Host 'Ensuring Docker data services are running...' -ForegroundColor Yellow
-	@docker compose up -d postgres redis chroma minio
+	@Write-Host 'Ensuring Docker services are running...' -ForegroundColor Yellow
+	@docker compose up -d --remove-orphans postgres redis chroma minio kokoro-tts piper-tts
 	@Write-Host 'Flushing PostgreSQL data (preserves schema + migrations)...' -ForegroundColor Yellow
 	@Push-Location frontend; & '$(PYTHON)' manage.py flush --no-input; Pop-Location
 	@Write-Host 'Flushing Redis...' -ForegroundColor Yellow

@@ -270,6 +270,24 @@ def webhooks(request):
 
 
 @login_required
+def ab_testing(request):
+    """A/B Testing dashboard — compare agent variants."""
+    return render(request, "dashboard/ab_testing.html")
+
+
+@login_required
+def whatsapp(request):
+    """WhatsApp channel configuration page."""
+    return render(request, "dashboard/whatsapp.html")
+
+
+@login_required
+def dnd_registry(request):
+    """Do-Not-Disturb registry management."""
+    return render(request, "dashboard/dnd.html")
+
+
+@login_required
 def agent_builder(request):
     """Visual flow builder for an agent."""
     agent_id = request.GET.get("agent_id", "")

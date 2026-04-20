@@ -38,28 +38,170 @@
       --vf-brand-end: #0ea5a4;
     }
     [x-cloak] { display: none !important; }
-    .fade-in { animation: fadeIn .3s ease-in; }
-    @keyframes fadeIn { from { opacity:0; transform:translateY(8px) } to { opacity:1; transform:translateY(0) } }
+
+    /* ── Animations ─────────────────────────────────────────── */
+    .fade-in { animation: fadeIn .4s cubic-bezier(.22,1,.36,1); }
+    @keyframes fadeIn { from { opacity:0; transform:translateY(12px) } to { opacity:1; transform:translateY(0) } }
+
+    .fade-in-up { animation: fadeInUp .5s cubic-bezier(.22,1,.36,1) both; }
+    @keyframes fadeInUp { from { opacity:0; transform:translateY(20px) } to { opacity:1; transform:translateY(0) } }
+
+    .slide-in-right { animation: slideInRight .4s cubic-bezier(.22,1,.36,1) both; }
+    @keyframes slideInRight { from { opacity:0; transform:translateX(20px) } to { opacity:1; transform:translateX(0) } }
+
+    .scale-in { animation: scaleIn .3s cubic-bezier(.22,1,.36,1) both; }
+    @keyframes scaleIn { from { opacity:0; transform:scale(.95) } to { opacity:1; transform:scale(1) } }
+
     @keyframes pulse-ring { 0% { transform:scale(.8); opacity:1 } 100% { transform:scale(2.2); opacity:0 } }
     .pulse-ring::before { content:''; position:absolute; inset:-8px; border-radius:50%; border:3px solid currentColor; animation:pulse-ring 1.5s ease-out infinite; }
-    .glass { background: rgba(255,255,255,.7); backdrop-filter: blur(12px); }
+
+    @keyframes shimmer { 0% { background-position: -200% 0 } 100% { background-position: 200% 0 } }
+    .skeleton {
+      background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s ease-in-out infinite;
+      border-radius: 8px;
+    }
+
+    @keyframes float { 0%,100% { transform:translateY(0) } 50% { transform:translateY(-6px) } }
+    .float { animation: float 3s ease-in-out infinite; }
+
+    @keyframes glow { 0%,100% { box-shadow: 0 0 5px rgba(14,165,164,.3) } 50% { box-shadow: 0 0 20px rgba(14,165,164,.5) } }
+    .glow { animation: glow 2s ease-in-out infinite; }
+
+    /* ── Staggered list animations ──────────────────────────── */
+    .stagger > * { opacity: 0; animation: fadeInUp .4s cubic-bezier(.22,1,.36,1) both; }
+    .stagger > *:nth-child(1) { animation-delay: .05s }
+    .stagger > *:nth-child(2) { animation-delay: .1s }
+    .stagger > *:nth-child(3) { animation-delay: .15s }
+    .stagger > *:nth-child(4) { animation-delay: .2s }
+    .stagger > *:nth-child(5) { animation-delay: .25s }
+    .stagger > *:nth-child(6) { animation-delay: .3s }
+    .stagger > *:nth-child(7) { animation-delay: .35s }
+    .stagger > *:nth-child(8) { animation-delay: .4s }
+    .stagger > *:nth-child(9) { animation-delay: .45s }
+    .stagger > *:nth-child(10) { animation-delay: .5s }
+
+    /* ── Glass & Surface ────────────────────────────────────── */
+    .glass { background: rgba(255,255,255,.7); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+    .glass-dark { background: rgba(15,23,42,.75); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
+
     .vf-page-bg {
       background:
         radial-gradient(1200px 420px at 8% -10%, rgba(14, 165, 164, 0.18), transparent 60%),
         radial-gradient(1200px 420px at 92% 0%, rgba(14, 116, 144, 0.12), transparent 55%),
         var(--vf-bg);
     }
+
+    /* ── Cards (enhanced with hover + depth) ───────────────── */
     .vf-card {
       background: var(--vf-surface);
       border: 1px solid var(--vf-border);
-      border-radius: 14px;
-      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+      border-radius: 16px;
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04), 0 1px 2px rgba(15, 23, 42, 0.02);
+      transition: all .3s cubic-bezier(.22,1,.36,1);
     }
+    .vf-card:hover {
+      box-shadow: 0 10px 40px rgba(15, 23, 42, 0.08), 0 4px 12px rgba(15, 23, 42, 0.04);
+      transform: translateY(-2px);
+      border-color: rgba(14, 165, 164, 0.3);
+    }
+    .vf-card-static {
+      background: var(--vf-surface);
+      border: 1px solid var(--vf-border);
+      border-radius: 16px;
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+    }
+
     .vf-heading {
       font-family: 'Space Grotesk', 'Manrope', system-ui, sans-serif;
       letter-spacing: -0.02em;
     }
-    ::-webkit-scrollbar { width:6px } ::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:3px }
+
+    /* ── Buttons (micro-interactions) ──────────────────────── */
+    .vf-btn {
+      transition: all .2s cubic-bezier(.22,1,.36,1);
+      position: relative;
+      overflow: hidden;
+    }
+    .vf-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 16px rgba(14,165,164,.25); }
+    .vf-btn:active { transform: translateY(0) scale(.98); }
+    .vf-btn::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, rgba(255,255,255,.15) 0%, transparent 50%);
+      pointer-events: none;
+    }
+
+    /* ── Progress bars ─────────────────────────────────────── */
+    .vf-progress {
+      background: linear-gradient(90deg, var(--vf-brand-start), var(--vf-brand-end));
+      border-radius: 999px;
+      box-shadow: 0 0 12px rgba(14,165,164,.4);
+      transition: width .7s cubic-bezier(.22,1,.36,1);
+    }
+
+    /* ── Status indicators ─────────────────────────────────── */
+    .vf-status-dot { width: 8px; height: 8px; border-radius: 50%; position: relative; }
+    .vf-status-dot::after { content:''; position:absolute; inset:-3px; border-radius:50%; background:inherit; opacity:.3; animation: pulse-ring 2s ease infinite; }
+    .vf-status-online { background: #10b981; }
+    .vf-status-warning { background: #f59e0b; }
+    .vf-status-error { background: #ef4444; }
+
+    /* ── Inputs (modern focus ring) ────────────────────────── */
+    .vf-input {
+      transition: all .2s ease;
+      border: 1px solid var(--vf-border);
+      border-radius: 10px;
+      padding: 0.5rem 0.875rem;
+      outline: none;
+      font-size: 0.875rem;
+    }
+    .vf-input:focus {
+      border-color: var(--vf-brand-start);
+      box-shadow: 0 0 0 3px rgba(14,165,164,.12);
+    }
+
+    /* ── Badges ────────────────────────────────────────────── */
+    .vf-badge { padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; letter-spacing: .02em; }
+    .vf-badge-success { background: #d1fae5; color: #065f46; }
+    .vf-badge-warning { background: #fef3c7; color: #92400e; }
+    .vf-badge-danger { background: #fee2e2; color: #991b1b; }
+    .vf-badge-info { background: #e0f2fe; color: #0c4a6e; }
+    .vf-badge-neutral { background: #f1f5f9; color: #475569; }
+
+    /* ── Tooltips ──────────────────────────────────────────── */
+    [data-tooltip] { position: relative; }
+    [data-tooltip]::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      bottom: calc(100% + 6px);
+      left: 50%;
+      transform: translateX(-50%) translateY(4px);
+      background: #1e293b;
+      color: white;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      white-space: nowrap;
+      opacity: 0;
+      pointer-events: none;
+      transition: all .2s ease;
+    }
+    [data-tooltip]:hover::after { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    /* ── Dark mode overrides ───────────────────────────────── */
+    .dark .vf-card, .dark .vf-card-static { background: #1e293b; border-color: #334155; }
+    .dark .vf-card:hover { border-color: rgba(14,165,164,.4); box-shadow: 0 10px 40px rgba(0,0,0,.3); }
+    .dark .vf-input { background: #1e293b; border-color: #334155; color: #e2e8f0; }
+    .dark .vf-input:focus { border-color: #0ea5a4; box-shadow: 0 0 0 3px rgba(14,165,164,.2); }
+    .dark .skeleton { background: linear-gradient(90deg, #334155 25%, #475569 50%, #334155 75%); background-size: 200% 100%; animation: shimmer 1.5s ease-in-out infinite; }
+
+    ::-webkit-scrollbar { width:6px; height:6px } 
+    ::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:3px }
+    ::-webkit-scrollbar-thumb:hover { background:#94a3b8 }
+    .dark ::-webkit-scrollbar-thumb { background:#475569 }
   </style>
 </head>
 <body class="font-sans antialiased vf-page-bg text-gray-900">

@@ -4,7 +4,7 @@ version = "1.0.0"
 description = "Multi-tenant AI voice agent platform with RAG, document ingestion, and hybrid search"
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.11"
+requires-python = ">=3.12,<3.14"
 
 dependencies = [
     # ── FastAPI Backend ──────────────────────────────────

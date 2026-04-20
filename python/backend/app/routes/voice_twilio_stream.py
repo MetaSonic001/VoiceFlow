@@ -422,6 +422,66 @@ async def media_stream_ws(websocket: WebSocket, agent_id: str):
                 logger.info("[twilio_stream] stop agent=%s stream=%s", agent_id, stream_sid)
                 break
 
+            elif event == "dtmf":
+                # Twilio sends {"event": "dtmf", "dtmf": {"digit": "1"}} for DTMF tones
+                digit = msg.get("dtmf", {}).get("digit", "")
+                if digit:
+                    logger.info("[twilio_stream] DTMF digit=%s call=%s", digit, call_sid)
+                    # Convert DTMF digit to a text utterance for the RAG pipeline
+                    dtmf_text = f"[DTMF pressed: {digit}]"
+                    full_transcript.append({"role": "user", "content": dtmf_text})
+
+                    # Clear any current agent speech
+                    if agent_speaking_event.is_set():
+                        agent_speaking_event.clear()
+                        if stream_sid:
+                            await _send_clear(websocket, stream_sid)
+
+                    # Process DTMF as a query through the pipeline
+                    from app.services.rag_service import process_query_streaming
+
+                    dtmf_session_id = f"twilio-{call_sid}"
+                    dtmf_response_parts: list[str] = []
+
+                    async def _dtmf_token_gen():
+                        async with AsyncSessionLocal() as db:
+                            async for token in process_query_streaming(
+                                db, tenant_id, agent_id, dtmf_text, dtmf_session_id
+                            ):
+                                if isinstance(token, str):
+                                    dtmf_response_parts.append(token)
+                                    yield token
+
+                    agent_speaking_event.set()
+                    try:
+                        async for audio_chunk in _tts.synthesize_streaming(
+                            text_stream=_dtmf_token_gen(),
+                            engine=tts_engine,
+                            voice_id=voice_id,
+                        ):
+                            mulaw_chunk = _tts._wav_to_mulaw_8khz_mono(audio_chunk)
+                            for i in range(0, len(mulaw_chunk), _FRAME_BYTES):
+                                if not agent_speaking_event.is_set():
+                                    break
+                                frame = mulaw_chunk[i : i + _FRAME_BYTES]
+                                payload_b64 = base64.b64encode(frame).decode()
+                                await websocket.send_text(json.dumps({
+                                    "event": "media",
+                                    "streamSid": stream_sid,
+                                    "media": {"payload": payload_b64},
+                                }))
+                                await asyncio.sleep(0.02)
+                            if not agent_speaking_event.is_set():
+                                break
+                    except Exception:
+                        logger.exception("[twilio_stream] DTMF pipeline failed call=%s", call_sid)
+                    finally:
+                        agent_speaking_event.clear()
+
+                    dtmf_response = "".join(dtmf_response_parts)
+                    if dtmf_response:
+                        full_transcript.append({"role": "assistant", "content": dtmf_response})
+
     except WebSocketDisconnect:
         logger.info("[twilio_stream] WebSocket disconnected agent=%s", agent_id)
     except Exception:
@@ -472,7 +532,7 @@ async def _handle_utterance(
     full_transcript: list[dict],
     agent_speaking_event: asyncio.Event,
 ) -> None:
-    """STT → RAG → TTS → Twilio for a single utterance."""
+    """STT → streaming RAG → streaming TTS → Twilio (sub-500ms first-byte)."""
     # 1. STT
     transcript = await stt_service.transcribe_bytes(
         utterance,
@@ -486,37 +546,55 @@ async def _handle_utterance(
     full_transcript.append({"role": "user", "content": transcript})
     logger.info("[twilio_stream] transcript call=%s: %s", call_sid, transcript)
 
-    # 2. RAG
-    from app.services.rag_service import process_query
+    # 2. Streaming RAG → streaming TTS → Twilio chunks
+    from app.services.rag_service import process_query_streaming
 
     session_id = f"twilio-{call_sid}"
-    try:
+    full_response_parts: list[str] = []
+
+    async def _token_generator():
+        """Yield LLM tokens from the streaming RAG pipeline."""
         async with AsyncSessionLocal() as db:
-            rag_result = await process_query(db, tenant_id, agent_id, transcript, session_id)
-        response_text = rag_result.get("response", "I'm not sure how to help with that.")
-    except Exception:
-        logger.exception("[twilio_stream] RAG failed call=%s", call_sid)
-        response_text = "I encountered an error. Please try again."
+            async for token in process_query_streaming(
+                db, tenant_id, agent_id, transcript, session_id
+            ):
+                if isinstance(token, str):
+                    full_response_parts.append(token)
+                    yield token
 
-    full_transcript.append({"role": "assistant", "content": response_text})
-
-    # 3. TTS → μ-law
-    try:
-        mulaw_bytes = await _tts.synthesize_mulaw(
-            text=response_text,
-            engine=tts_engine,
-            voice_id=voice_id,
-        )
-    except Exception:
-        logger.exception("[twilio_stream] TTS failed call=%s", call_sid)
-        return
-
-    # 4. Stream μ-law back in 20ms chunks
+    # 3. Stream TTS audio as sentences complete
     agent_speaking_event.set()
     try:
-        await _stream_mulaw_to_twilio(websocket, stream_sid, mulaw_bytes, agent_speaking_event)
+        async for audio_chunk in _tts.synthesize_streaming(
+            text_stream=_token_generator(),
+            engine=tts_engine,
+            voice_id=voice_id,
+        ):
+            # Convert WAV audio chunk to μ-law 8kHz for Twilio
+            mulaw_chunk = _tts._wav_to_mulaw_8khz_mono(audio_chunk)
+            # Stream μ-law in 20ms frames
+            for i in range(0, len(mulaw_chunk), _FRAME_BYTES):
+                if not agent_speaking_event.is_set():
+                    break  # interrupted
+                frame = mulaw_chunk[i : i + _FRAME_BYTES]
+                payload_b64 = base64.b64encode(frame).decode()
+                await websocket.send_text(json.dumps({
+                    "event": "media",
+                    "streamSid": stream_sid,
+                    "media": {"payload": payload_b64},
+                }))
+                await asyncio.sleep(0.02)  # 20ms pacing
+            if not agent_speaking_event.is_set():
+                break  # interrupted mid-sentence
+    except Exception:
+        logger.exception("[twilio_stream] streaming pipeline failed call=%s", call_sid)
     finally:
         agent_speaking_event.clear()
+
+    # Save full response to transcript
+    full_response = "".join(full_response_parts)
+    if full_response:
+        full_transcript.append({"role": "assistant", "content": full_response})
 
 
 async def _stream_mulaw_to_twilio(
@@ -560,7 +638,7 @@ async def _save_call_log(
     started_at: datetime,
     transcript: list[dict],
 ) -> None:
-    """Persist call log and increment agent.totalCalls."""
+    """Persist call log, increment agent.totalCalls, and trigger post-call analytics."""
     ended_at = datetime.now(timezone.utc)
     duration = int((ended_at - started_at).total_seconds())
     try:
@@ -582,7 +660,15 @@ async def _save_call_log(
                 agent.totalCalls = (agent.totalCalls or 0) + 1
 
             await db.commit()
+            await db.refresh(log)
+            log_id = log.id
         logger.info("[twilio_stream] call log saved call=%s duration=%ds", call_sid, duration)
+
+        # Trigger post-call LLM analysis (same as Gather path)
+        if log_id and tenant_id:
+            from app.routes.voice_twilio_gather import analyze_call
+            asyncio.create_task(analyze_call(log_id, tenant_id))
+
     except Exception:
         logger.exception("[twilio_stream] failed to save call log call=%s", call_sid)
 

@@ -1,19 +1,21 @@
 {% extends "base_dashboard.html" %}
 {% block title %}API Documentation — VoiceFlow AI{% endblock %}
 {% block content %}
-<div class="mb-8">
-  <div class="flex items-center justify-between">
-    <div>
-      <h1 class="text-2xl font-bold">API Documentation</h1>
-      <p class="text-gray-500 text-sm mt-1">Interactive API reference powered by FastAPI's auto-generated OpenAPI docs</p>
+<div class="fade-in-up">
+  <div class="mb-8">
+    <div class="flex items-center justify-between">
+      <div>
+        <h1 class="text-2xl font-bold bg-gradient-to-r from-teal-600 to-cyan-600 bg-clip-text text-transparent dark:text-white">API Documentation</h1>
+        <p class="text-gray-500 dark:text-gray-400 text-sm mt-1">Interactive API reference powered by FastAPI's auto-generated OpenAPI docs</p>
+      </div>
+      <a href="{{ swagger_url }}" target="_blank" rel="noopener" class="vf-btn bg-gradient-to-r from-teal-500 to-cyan-500 text-white shadow-lg shadow-teal-500/25 inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+        Open in New Tab
+      </a>
     </div>
-    <a href="{{ swagger_url }}" target="_blank" rel="noopener" class="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition">
-      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
-      Open in New Tab
-    </a>
   </div>
-</div>
-<div class="bg-white rounded-xl border overflow-hidden" style="height:calc(100vh - 200px)">
-  <iframe src="{{ swagger_url }}" class="w-full h-full border-0" title="FastAPI Swagger UI"></iframe>
+  <div class="vf-card overflow-hidden" style="height:calc(100vh - 200px)">
+    <iframe src="{{ swagger_url }}" class="w-full h-full border-0" title="FastAPI Swagger UI"></iframe>
+  </div>
 </div>
 {% endblock %}

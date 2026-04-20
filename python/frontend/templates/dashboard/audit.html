@@ -1,9 +1,9 @@
 {% extends "base_dashboard.html" %}{% block title %}Audit Log — VoiceFlow AI{% endblock %}
 {% block content %}
-<div x-data="auditApp()" x-init="init()">
+<div x-data="auditApp()" x-init="init()" class="fade-in-up">
   <div class="mb-8 flex items-center justify-between">
-    <div><h1 class="text-2xl font-bold">Audit Log</h1><p class="text-gray-500 text-sm mt-1"><span x-text="total"></span> total entries</p></div>
-    <button @click="refresh()" class="text-sm text-indigo-600 hover:underline flex items-center gap-1">
+    <div><h1 class="text-2xl font-bold bg-gradient-to-r from-teal-400 to-cyan-400 bg-clip-text text-transparent">Audit Log</h1><p class="text-gray-500 dark:text-gray-400 text-sm mt-1"><span x-text="total"></span> total entries</p></div>
+    <button @click="refresh()" class="text-sm text-teal-600 dark:text-teal-400 hover:underline flex items-center gap-1">
       <svg class="w-4 h-4" :class="loading && 'animate-spin'" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
       Refresh
     </button>
@@ -21,9 +21,9 @@
     </select>
   </div>
 
-  <div class="bg-white rounded-xl border overflow-hidden">
+  <div class="vf-card overflow-hidden">
     <table class="w-full text-sm">
-      <thead class="bg-gray-50 border-b"><tr><th class="px-5 py-3 text-left font-medium text-gray-500">Time</th><th class="px-5 py-3 text-left font-medium text-gray-500">User</th><th class="px-5 py-3 text-left font-medium text-gray-500">Action</th><th class="px-5 py-3 text-left font-medium text-gray-500">Resource</th><th class="px-5 py-3 text-left font-medium text-gray-500">IP</th></tr></thead>
+      <thead class="bg-gray-50/80 dark:bg-gray-800/50 border-b dark:border-gray-700/50"><tr><th class="px-5 py-3 text-left font-medium text-gray-500 dark:text-gray-400">Time</th><th class="px-5 py-3 text-left font-medium text-gray-500 dark:text-gray-400">User</th><th class="px-5 py-3 text-left font-medium text-gray-500 dark:text-gray-400">Action</th><th class="px-5 py-3 text-left font-medium text-gray-500 dark:text-gray-400">Resource</th><th class="px-5 py-3 text-left font-medium text-gray-500 dark:text-gray-400">IP</th></tr></thead>
       <tbody class="divide-y">
         <template x-for="l in filtered" :key="l.id || l.createdAt">
           <tr class="hover:bg-gray-50">

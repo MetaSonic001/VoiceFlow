@@ -23,6 +23,16 @@ from app.services.credentials import decrypt_safe
 # Pre-compiled pattern for extracting JSON from LLM markdown code blocks
 _JSON_CODE_BLOCK_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 
+# Strip XML/SSML tags to prevent TwiML injection from LLM output
+_XML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _sanitize_for_twiml(text: str) -> str:
+    """Remove XML/SSML tags and escape special chars to prevent TwiML injection."""
+    text = _XML_TAG_RE.sub("", text)
+    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return text.strip() or "I'm sorry, I couldn't generate a response."
+
 logger = logging.getLogger("voiceflow.gather")
 router = APIRouter()
 
@@ -67,11 +77,12 @@ async def handle_inbound_call(agent: Agent, request: Request) -> Response:
     agent_name = agent.name or "your AI assistant"
     resp = VoiceResponse()
     gather = Gather(
-        input="speech",
+        input="dtmf speech",
         action=f"/api/voice/gather/{agent.id}",
         method="POST",
         speech_timeout="auto",
         language="en-US",
+        num_digits=1,
     )
     gather.say(
         f"Hello, you've reached {agent_name}. How can I help you today?",
@@ -130,8 +141,13 @@ async def voice_gather(
         return Response(content="Forbidden", status_code=403, media_type="text/plain")
 
     speech_result = form.get("SpeechResult", "")
+    digits = form.get("Digits", "")
     caller = form.get("From", "unknown")
     call_sid = form.get("CallSid", "")
+
+    # If DTMF digits received, map to a text command for the RAG pipeline
+    if digits and not speech_result:
+        speech_result = f"[DTMF pressed: {digits}]"
 
     result = await db.execute(select(Agent).where(Agent.id == agent_id))
     agent = result.scalar_one_or_none()
@@ -191,13 +207,14 @@ async def voice_gather(
 
     # Re-gather for multi-turn conversation
     gather = Gather(
-        input="speech",
+        input="dtmf speech",
         action=f"/api/voice/gather/{agent_id}",
         method="POST",
         speech_timeout="auto",
         language="en-US",
+        num_digits=1,
     )
-    gather.say(answer, voice="Polly.Joanna")
+    gather.say(_sanitize_for_twiml(answer), voice="Polly.Joanna")
     resp.append(gather)
     resp.say("Thank you for calling. Goodbye.", voice="Polly.Joanna")
     resp.hangup()

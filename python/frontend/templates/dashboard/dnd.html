@@ -1,0 +1,209 @@
+{% extends "base_dashboard.html" %}
+{% block title %}DND Registry — VoiceFlow AI{% endblock %}
+
+{% block content %}
+<div x-data="dndApp()" x-init="init()" class="space-y-6 fade-in">
+
+  <!-- Header -->
+  <div class="flex items-center justify-between">
+    <div>
+      <h1 class="text-2xl font-bold vf-heading bg-gradient-to-r from-slate-900 to-slate-600 dark:from-slate-100 dark:to-slate-400 bg-clip-text text-transparent">Do Not Disturb Registry</h1>
+      <p class="text-slate-500 dark:text-slate-400 text-sm mt-1">Manage numbers that should never be contacted by campaigns.</p>
+    </div>
+    <div class="flex items-center gap-2">
+      <button @click="showBulk=true"
+              class="px-4 py-2.5 border border-slate-200 dark:border-slate-600 rounded-xl text-sm hover:bg-slate-50 dark:hover:bg-slate-700 transition flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+        Bulk Import
+      </button>
+      <button @click="showAdd=true"
+              class="vf-btn px-5 py-2.5 bg-gradient-to-r from-red-600 to-rose-600 text-white text-sm font-medium rounded-xl">
+        <span class="flex items-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+          Add Number
+        </span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Stats Banner -->
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-4 stagger">
+    <div class="vf-card p-4 flex items-center gap-4">
+      <div class="w-10 h-10 rounded-xl bg-red-50 dark:bg-red-900/20 flex items-center justify-center">
+        <svg class="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
+      </div>
+      <div>
+        <p class="text-2xl font-bold text-slate-800 dark:text-slate-200" x-text="numbers.length"></p>
+        <p class="text-xs text-slate-500">Blocked Numbers</p>
+      </div>
+    </div>
+    <div class="vf-card p-4 flex items-center gap-4">
+      <div class="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-900/20 flex items-center justify-center">
+        <svg class="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
+      </div>
+      <div>
+        <p class="text-2xl font-bold text-slate-800 dark:text-slate-200" x-text="callsBlocked"></p>
+        <p class="text-xs text-slate-500">Calls Prevented</p>
+      </div>
+    </div>
+    <div class="vf-card p-4 flex items-center gap-4">
+      <div class="w-10 h-10 rounded-xl bg-green-50 dark:bg-green-900/20 flex items-center justify-center">
+        <svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+      </div>
+      <div>
+        <p class="text-2xl font-bold text-green-600">100%</p>
+        <p class="text-xs text-slate-500">Compliance Rate</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Number Modal -->
+  <div x-show="showAdd" x-cloak @click.self="showAdd=false"
+       x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+       class="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+    <div x-show="showAdd" x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0 scale-95" x-transition:enter-end="opacity-100 scale-100"
+         class="vf-card-static max-w-md w-full p-6 dark:bg-slate-800">
+      <h3 class="text-lg font-bold mb-4 vf-heading">Add to DND Registry</h3>
+      <form @submit.prevent="addNumber()" class="space-y-4">
+        <div>
+          <label class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">Phone Number</label>
+          <input x-model="addForm.phoneNumber" required placeholder="+91 9876543210" class="vf-input w-full">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">Reason (optional)</label>
+          <input x-model="addForm.reason" placeholder="Customer requested removal" class="vf-input w-full">
+        </div>
+        <div class="flex gap-3">
+          <button type="submit" class="vf-btn flex-1 py-2.5 bg-gradient-to-r from-red-600 to-rose-600 text-white rounded-xl text-sm font-medium">Add to DND</button>
+          <button type="button" @click="showAdd=false" class="flex-1 py-2.5 border border-slate-200 dark:border-slate-600 rounded-xl text-sm hover:bg-slate-50 dark:hover:bg-slate-700 transition">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Bulk Import Modal -->
+  <div x-show="showBulk" x-cloak @click.self="showBulk=false"
+       x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+       class="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+    <div x-show="showBulk" x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0 scale-95" x-transition:enter-end="opacity-100 scale-100"
+         class="vf-card-static max-w-md w-full p-6 dark:bg-slate-800">
+      <h3 class="text-lg font-bold mb-2 vf-heading">Bulk Import DND Numbers</h3>
+      <p class="text-xs text-slate-500 mb-4">Upload CSV with column: <code class="bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded text-xs">phone_number</code></p>
+      <label
+        @dragover.prevent="dragging=true" @dragleave="dragging=false" @drop.prevent="dragging=false; handleBulkDrop($event)"
+        :class="dragging ? 'border-red-400 bg-red-50 dark:bg-red-900/10' : 'border-slate-200 dark:border-slate-600 hover:border-red-300'"
+        class="block border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition">
+        <input type="file" accept=".csv" class="hidden" @change="handleBulkFile($event)">
+        <svg class="w-8 h-8 mx-auto mb-2 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+        <p class="text-sm text-slate-600 dark:text-slate-300" x-text="bulkFile ? bulkFile.name : 'Drop CSV here or click'"></p>
+      </label>
+      <div class="flex gap-3 mt-4">
+        <button @click="uploadBulk()" :disabled="!bulkFile" class="vf-btn flex-1 py-2.5 bg-gradient-to-r from-red-600 to-rose-600 text-white rounded-xl text-sm font-medium disabled:opacity-40">Upload</button>
+        <button @click="showBulk=false" class="flex-1 py-2.5 border border-slate-200 dark:border-slate-600 rounded-xl text-sm hover:bg-slate-50 dark:hover:bg-slate-700 transition">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Numbers Table -->
+  <div class="vf-card-static overflow-hidden">
+    <div class="px-5 py-4 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between">
+      <h3 class="font-semibold text-sm">Blocked Numbers</h3>
+      <input type="search" x-model="search" placeholder="Search numbers…" class="vf-input text-xs w-48">
+    </div>
+
+    <template x-if="filteredNumbers.length === 0 && !loading">
+      <div class="p-12 text-center">
+        <div class="w-14 h-14 mx-auto mb-3 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+          <svg class="w-7 h-7 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
+        </div>
+        <p class="text-sm text-slate-500">No numbers in DND registry.</p>
+      </div>
+    </template>
+
+    <div x-show="filteredNumbers.length > 0" class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="bg-slate-50 dark:bg-slate-800/50">
+          <tr class="text-xs text-slate-500 uppercase tracking-wide">
+            <th class="px-5 py-3 text-left">Phone Number</th>
+            <th class="px-5 py-3 text-left">Reason</th>
+            <th class="px-5 py-3 text-left">Added</th>
+            <th class="px-5 py-3 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-50 dark:divide-slate-700">
+          <template x-for="num in filteredNumbers" :key="num.id">
+            <tr class="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition">
+              <td class="px-5 py-3 font-mono text-xs" x-text="num.phoneNumber"></td>
+              <td class="px-5 py-3 text-xs text-slate-500" x-text="num.reason || '–'"></td>
+              <td class="px-5 py-3 text-xs text-slate-400" x-text="num.addedAt ? new Date(num.addedAt).toLocaleDateString() : '–'"></td>
+              <td class="px-5 py-3 text-right">
+                <button @click="removeNumber(num.id)" class="text-xs text-red-600 hover:text-red-800 transition">Remove</button>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+function dndApp() {
+  return {
+    numbers: [],
+    loading: true,
+    search: '',
+    showAdd: false,
+    showBulk: false,
+    dragging: false,
+    bulkFile: null,
+    callsBlocked: 0,
+    addForm: { phoneNumber: '', reason: '' },
+    get filteredNumbers() {
+      if (!this.search) return this.numbers;
+      const q = this.search.toLowerCase();
+      return this.numbers.filter(n => n.phoneNumber.includes(q) || (n.reason||'').toLowerCase().includes(q));
+    },
+    async init() {
+      try {
+        const res = await apiFetch('/api/dnd/');
+        this.numbers = res.numbers || res.entries || [];
+        this.callsBlocked = res.callsBlocked || 0;
+      } catch(e) { console.warn('DND load:', e); }
+      this.loading = false;
+    },
+    async addNumber() {
+      try {
+        await apiFetch('/api/dnd/', { method: 'POST', json: this.addForm });
+        this.showAdd = false;
+        this.addForm = { phoneNumber: '', reason: '' };
+        window.vfToast('Number added to DND', 'success');
+        await this.init();
+      } catch(e) { window.vfToast('Failed to add number', 'error'); }
+    },
+    async removeNumber(id) {
+      if (!confirm('Remove this number from DND?')) return;
+      try {
+        await apiFetch(`/api/dnd/${id}/`, { method: 'DELETE' });
+        this.numbers = this.numbers.filter(n => n.id !== id);
+        window.vfToast('Number removed', 'success');
+      } catch(e) { window.vfToast('Failed to remove', 'error'); }
+    },
+    handleBulkDrop(e) { this.bulkFile = e.dataTransfer.files[0]; },
+    handleBulkFile(e) { this.bulkFile = e.target.files[0]; },
+    async uploadBulk() {
+      if (!this.bulkFile) return;
+      const fd = new FormData();
+      fd.append('file', this.bulkFile);
+      try {
+        await fetch('/api/dnd/bulk/', { method: 'POST', headers: {'X-CSRFToken': CSRF}, body: fd });
+        this.showBulk = false;
+        this.bulkFile = null;
+        window.vfToast('Bulk import complete', 'success');
+        await this.init();
+      } catch(e) { window.vfToast('Bulk import failed', 'error'); }
+    }
+  };
+}
+</script>
+{% endblock %}

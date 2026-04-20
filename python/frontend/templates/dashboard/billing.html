@@ -1,37 +1,38 @@
 {% extends "base_dashboard.html" %}
 {% block title %}Billing & Usage — VoiceFlow AI{% endblock %}
 {% block content %}
-<div class="mb-8"><h1 class="text-2xl font-bold">Billing & Usage</h1><p class="text-gray-500 text-sm mt-1">Monitor your usage and plan details</p></div>
+<div class="space-y-8 fade-in-up">
+<div class="mb-8"><h1 class="text-2xl font-bold bg-gradient-to-r from-gray-900 via-gray-700 to-gray-900 dark:from-white dark:via-gray-200 dark:to-white bg-clip-text text-transparent">Billing & Usage</h1><p class="text-gray-500 dark:text-gray-400 text-sm mt-1">Monitor your usage and plan details</p></div>
 
-<div class="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-xl p-6 mb-8">
-  <div class="flex items-center gap-3"><span class="px-3 py-1 bg-blue-100 text-blue-700 text-xs font-bold rounded-full">FREE BETA</span></div>
-  <p class="text-sm text-gray-600 mt-3">You're currently on the free beta plan. All features are available during the beta period.</p>
+<div class="bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-950/30 dark:to-purple-950/30 border border-blue-200 dark:border-blue-800/50 rounded-xl p-6 mb-8">
+  <div class="flex items-center gap-3"><span class="px-3 py-1 vf-badge-info text-xs font-bold rounded-full">FREE BETA</span></div>
+  <p class="text-sm text-gray-600 dark:text-gray-400 mt-3">You're currently on the free beta plan. All features are available during the beta period.</p>
 </div>
 
-<div class="grid md:grid-cols-3 gap-6 mb-8">
-  <div class="bg-white rounded-xl border p-6 text-center">
-    <div class="text-3xl font-bold text-blue-600">{{ usage.agents|default:"0" }}</div>
-    <div class="text-sm text-gray-500 mt-2">Agents Created</div>
+<div class="grid md:grid-cols-3 gap-6 mb-8 stagger">
+  <div class="vf-card p-6 text-center">
+    <div class="text-3xl font-bold text-blue-600 dark:text-blue-400">{{ usage.agents|default:"0" }}</div>
+    <div class="text-sm text-gray-500 dark:text-gray-400 mt-2">Agents Created</div>
   </div>
-  <div class="bg-white rounded-xl border p-6 text-center">
-    <div class="text-3xl font-bold text-green-600">{{ usage.callLogs|default:"0" }}</div>
-    <div class="text-sm text-gray-500 mt-2">Conversations Logged</div>
+  <div class="vf-card p-6 text-center">
+    <div class="text-3xl font-bold text-green-600 dark:text-green-400">{{ usage.callLogs|default:"0" }}</div>
+    <div class="text-sm text-gray-500 dark:text-gray-400 mt-2">Conversations Logged</div>
   </div>
-  <div class="bg-white rounded-xl border p-6 text-center">
-    <div class="text-3xl font-bold text-purple-600">{{ usage.documents|default:"0" }}</div>
-    <div class="text-sm text-gray-500 mt-2">Documents Indexed</div>
+  <div class="vf-card p-6 text-center">
+    <div class="text-3xl font-bold text-purple-600 dark:text-purple-400">{{ usage.documents|default:"0" }}</div>
+    <div class="text-sm text-gray-500 dark:text-gray-400 mt-2">Documents Indexed</div>
   </div>
 </div>
 
-<div class="bg-white rounded-xl border p-6">
-  <h3 class="font-semibold mb-4">Plan Comparison</h3>
-  <div class="grid md:grid-cols-3 gap-6">
+<div class="vf-card p-6">
+  <h3 class="font-semibold mb-4 dark:text-white">Plan Comparison</h3>
+  <div class="grid md:grid-cols-3 gap-6 stagger">
     <!-- Free Beta -->
-    <div class="border-2 border-blue-500 rounded-xl p-6 relative">
-      <span class="absolute -top-3 left-4 px-2 py-0.5 bg-blue-600 text-white text-xs font-bold rounded-full">Current Plan</span>
-      <h4 class="text-lg font-bold mt-2">Free Beta</h4>
-      <div class="text-3xl font-bold mt-2">$0<span class="text-sm text-gray-400 font-normal">/mo</span></div>
-      <ul class="mt-4 space-y-2 text-sm text-gray-600">
+    <div class="border-2 border-blue-500 dark:border-blue-400/50 rounded-xl p-6 relative">
+      <span class="absolute -top-3 left-4 px-2 py-0.5 bg-gradient-to-r from-teal-500 to-cyan-500 text-white text-xs font-bold rounded-full">Current Plan</span>
+      <h4 class="text-lg font-bold mt-2 dark:text-white">Free Beta</h4>
+      <div class="text-3xl font-bold mt-2 dark:text-white">$0<span class="text-sm text-gray-400 dark:text-gray-500 font-normal">/mo</span></div>
+      <ul class="mt-4 space-y-2 text-sm text-gray-600 dark:text-gray-400">
         <li class="flex items-center gap-2"><svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Up to 5 agents</li>
         <li class="flex items-center gap-2"><svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> 100 conversations/mo</li>
         <li class="flex items-center gap-2"><svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> 50 MB document storage</li>
@@ -39,31 +40,32 @@
       </ul>
     </div>
     <!-- Pro -->
-    <div class="border rounded-xl p-6 opacity-80">
-      <h4 class="text-lg font-bold">Pro</h4>
-      <div class="text-3xl font-bold mt-2">$49<span class="text-sm text-gray-400 font-normal">/mo</span></div>
-      <ul class="mt-4 space-y-2 text-sm text-gray-600">
+    <div class="border dark:border-gray-700/50 rounded-xl p-6 opacity-80">
+      <h4 class="text-lg font-bold dark:text-white">Pro</h4>
+      <div class="text-3xl font-bold mt-2 dark:text-white">$49<span class="text-sm text-gray-400 dark:text-gray-500 font-normal">/mo</span></div>
+      <ul class="mt-4 space-y-2 text-sm text-gray-600 dark:text-gray-400">
         <li class="flex items-center gap-2"><svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Unlimited agents</li>
         <li class="flex items-center gap-2"><svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> 5,000 conversations/mo</li>
         <li class="flex items-center gap-2"><svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> 5 GB document storage</li>
         <li class="flex items-center gap-2"><svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Priority support</li>
         <li class="flex items-center gap-2"><svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Custom brand voices</li>
       </ul>
-      <button disabled class="w-full mt-6 px-4 py-2 border border-gray-300 text-gray-400 text-sm rounded-lg cursor-not-allowed">Coming Soon</button>
+      <button disabled class="vf-btn w-full mt-6 px-4 py-2 border border-gray-300 dark:border-gray-700/50 text-gray-400 dark:text-gray-500 text-sm rounded-lg cursor-not-allowed">Coming Soon</button>
     </div>
     <!-- Enterprise -->
-    <div class="border rounded-xl p-6 opacity-80">
-      <h4 class="text-lg font-bold">Enterprise</h4>
-      <div class="text-3xl font-bold mt-2">Custom</div>
-      <ul class="mt-4 space-y-2 text-sm text-gray-600">
+    <div class="border dark:border-gray-700/50 rounded-xl p-6 opacity-80">
+      <h4 class="text-lg font-bold dark:text-white">Enterprise</h4>
+      <div class="text-3xl font-bold mt-2 dark:text-white">Custom</div>
+      <ul class="mt-4 space-y-2 text-sm text-gray-600 dark:text-gray-400">
         <li class="flex items-center gap-2"><svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Everything in Pro</li>
         <li class="flex items-center gap-2"><svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Unlimited conversations</li>
         <li class="flex items-center gap-2"><svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Unlimited storage</li>
         <li class="flex items-center gap-2"><svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Dedicated support</li>
         <li class="flex items-center gap-2"><svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> SLA &amp; on-prem deploy</li>
       </ul>
-      <button disabled class="w-full mt-6 px-4 py-2 border border-gray-300 text-gray-400 text-sm rounded-lg cursor-not-allowed">Contact Sales</button>
+      <button disabled class="vf-btn w-full mt-6 px-4 py-2 border border-gray-300 dark:border-gray-700/50 text-gray-400 dark:text-gray-500 text-sm rounded-lg cursor-not-allowed">Contact Sales</button>
     </div>
   </div>
+</div>
 </div>
 {% endblock %}

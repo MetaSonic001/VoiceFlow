@@ -25,12 +25,13 @@ router = APIRouter()
 
 # ── Serialiser ────────────────────────────────────────────────────────────────
 
-def _endpoint_to_dict(ep: WebhookEndpoint) -> dict:
+def _endpoint_to_dict(ep: WebhookEndpoint, reveal_secret: bool = False) -> dict:
     return {
         "id": ep.id,
         "tenantId": ep.tenantId,
         "url": ep.url,
         "events": ep.events,
+        "secret": ep.secret if reveal_secret else (ep.secret[:4] + "••••" if ep.secret else None),
         "isActive": ep.isActive,
         "description": ep.description,
         "createdAt": ep.createdAt.isoformat() if ep.createdAt else None,
@@ -76,7 +77,7 @@ async def create_webhook(
     db.add(endpoint)
     await db.commit()
     await db.refresh(endpoint)
-    return _endpoint_to_dict(endpoint)
+    return _endpoint_to_dict(endpoint, reveal_secret=True)
 
 
 # ── List ──────────────────────────────────────────────────────────────────────

@@ -1,23 +1,23 @@
 {% extends "base_dashboard.html" %}{% block title %}Reports — VoiceFlow AI{% endblock %}
 {% block content %}
-<div x-data="reportsApp()" class="space-y-6">
-<div class="mb-8"><h1 class="text-3xl font-bold vf-heading">Reports</h1><p class="text-slate-500 text-sm mt-1">Generate and download analytics exports for your team.</p></div>
-<div class="grid md:grid-cols-3 gap-6 mb-8">
+<div x-data="reportsApp()" class="space-y-6 fade-in-up">
+<div class="mb-8"><h1 class="text-3xl font-bold vf-heading bg-gradient-to-r from-gray-900 via-gray-700 to-gray-900 dark:from-white dark:via-gray-200 dark:to-white bg-clip-text text-transparent">Reports</h1><p class="text-slate-500 dark:text-gray-400 text-sm mt-1">Generate and download analytics exports for your team.</p></div>
+<div class="grid md:grid-cols-3 gap-6 mb-8 stagger">
   <template x-for="r in reports" :key="r.name || r.id">
     <div class="vf-card p-5">
       <div class="font-semibold mb-1" x-text="r.name"></div>
-      <div class="text-xs text-slate-400 mb-3" x-text="(r.type || 'Summary') + ' • ' + (r.created_at || r.createdAt || 'N/A')"></div>
-      <button @click="downloadReport(r)" class="text-sm text-cyan-700 hover:underline">Download</button>
+      <div class="text-xs text-slate-400 dark:text-gray-500 mb-3" x-text="(r.type || 'Summary') + ' • ' + (r.created_at || r.createdAt || 'N/A')"></div>
+      <button @click="downloadReport(r)" class="vf-btn text-sm text-teal-600 dark:text-teal-400 hover:underline">Download</button>
     </div>
   </template>
-  <div x-show="reports.length===0" class="col-span-3 text-center py-8 text-slate-400 vf-card">No reports generated yet.</div>
+  <div x-show="reports.length===0" class="col-span-3 text-center py-8 text-slate-400 dark:text-gray-500 vf-card">No reports generated yet.</div>
 </div>
 <div class="vf-card p-6">
-  <h3 class="font-semibold mb-4">Generate Report</h3>
+  <h3 class="font-semibold mb-4 dark:text-white">Generate Report</h3>
   <div class="flex gap-4 items-end flex-wrap">
-    <div><label class="block text-xs text-slate-500 mb-1">Type</label><select x-model="reportType" class="border border-slate-200 rounded-lg px-3 py-2 text-sm"><option>Analytics Summary</option><option>Call Logs</option><option>Agent Performance</option></select></div>
-    <div><label class="block text-xs text-slate-500 mb-1">Period</label><select x-model="reportPeriod" class="border border-slate-200 rounded-lg px-3 py-2 text-sm"><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="90d">Last 90 days</option></select></div>
-    <button @click="generateReport()" :disabled="generating" class="px-4 py-2 bg-cyan-600 text-white rounded-lg text-sm hover:bg-cyan-700 disabled:opacity-50" x-text="generating ? 'Generating…' : 'Generate'"></button>
+    <div><label class="block text-xs text-slate-500 dark:text-gray-400 mb-1">Type</label><select x-model="reportType" class="vf-input border border-slate-200 dark:border-gray-700/50 rounded-lg px-3 py-2 text-sm"><option>Analytics Summary</option><option>Call Logs</option><option>Agent Performance</option></select></div>
+    <div><label class="block text-xs text-slate-500 dark:text-gray-400 mb-1">Period</label><select x-model="reportPeriod" class="vf-input border border-slate-200 dark:border-gray-700/50 rounded-lg px-3 py-2 text-sm"><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option><option value="90d">Last 90 days</option></select></div>
+    <button @click="generateReport()" :disabled="generating" class="vf-btn bg-gradient-to-r from-teal-500 to-cyan-500 text-white shadow-lg shadow-teal-500/25 hover:from-teal-600 hover:to-cyan-600 px-4 py-2 rounded-lg text-sm disabled:opacity-50" x-text="generating ? 'Generating…' : 'Generate'"></button>
   </div>
 </div>
 </div>

@@ -4,21 +4,22 @@
 {% block content %}
 {{ agent.systemPrompt|default:"Hello! How can I help you today?"|truncatechars:280|json_script:"vf-chat-first-msg" }}
 {{ agent.id|default:""|json_script:"vf-chat-agent-id" }}
-<div x-data="chatApp()" class="relative flex flex-col bg-gray-50 rounded-xl border border-gray-200 shadow-sm overflow-hidden" style="min-height: calc(100vh - 7rem); max-height: calc(100vh - 7rem);">
+<div x-data="chatApp()" class="relative flex flex-col bg-gray-50 dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700/50 shadow-sm overflow-hidden" style="min-height: calc(100vh - 7rem); max-height: calc(100vh - 7rem);">
   <!-- Header -->
-  <div class="bg-white border-b px-6 py-3 flex items-center justify-between flex-shrink-0">
+  <div class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700/50 px-6 py-3 flex items-center justify-between flex-shrink-0">
     <div class="flex items-center gap-3">
       {% if agent.id %}
-      <a href="{% url 'agent_detail' agent.id %}" class="text-gray-400 hover:text-gray-600"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg></a>
+      <a href="{% url 'agent_detail' agent.id %}" class="text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg></a>
       {% else %}
-      <a href="{% url 'dashboard' %}" class="text-gray-400 hover:text-gray-600"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg></a>
+      <a href="{% url 'dashboard' %}" class="text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg></a>
       {% endif %}
-      <div class="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-sm">{{ agent.name|default:"A"|make_list|first }}</div>
-      <div><div class="font-semibold text-sm">{{ agent.name|default:"Agent" }}</div><div class="text-xs text-green-500">Online</div></div>
+      <div class="w-8 h-8 rounded-full bg-gradient-to-br from-teal-100 to-cyan-100 dark:from-teal-900/50 dark:to-cyan-900/50 flex items-center justify-center text-teal-600 dark:text-teal-400 font-bold text-sm">{{ agent.name|default:"A"|make_list|first }}</div>
+      <div><div class="font-semibold text-sm text-gray-900 dark:text-white">{{ agent.name|default:"Agent" }}</div><div class="text-xs text-emerald-500 flex items-center gap-1"><span class="vf-status-dot bg-emerald-500"></span>Online</div></div>
     </div>
     <div class="flex items-center gap-2">
-      <button @click="toggleVoice()" :class="voiceMode ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-600'" class="p-2 rounded-lg hover:opacity-80" :title="voiceMode ? 'Switch to text' : 'Switch to voice'">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>
+      <button @click="toggleVoice()" :class="voiceMode ? 'bg-gradient-to-r from-teal-500 to-cyan-500 text-white shadow-lg shadow-teal-500/25' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'" class="px-3 py-1.5 rounded-lg hover:opacity-90 transition flex items-center gap-1.5" :title="voiceMode ? 'Exit live voice' : 'Start live voice'">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>
+        <span class="text-xs font-medium" x-text="voiceMode ? 'Exit Live' : 'Live'"></span>
       </button>
     </div>
   </div>
@@ -27,42 +28,115 @@
   <div class="flex-1 overflow-y-auto px-6 py-4 space-y-4" x-ref="messagesContainer">
     <!-- Welcome message -->
     <div class="flex justify-start">
-      <div class="bg-white border rounded-2xl rounded-bl-md px-4 py-3 max-w-md shadow-sm">
-        <p class="text-sm" x-text="firstMessage">Hello! How can I help you today?</p>
+      <div class="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700/50 rounded-2xl rounded-bl-md px-4 py-3 max-w-md shadow-sm">
+        <p class="text-sm text-gray-700 dark:text-gray-200" x-text="firstMessage">Hello! How can I help you today?</p>
       </div>
     </div>
     <template x-for="(msg, i) in messages" :key="i">
       <div :class="msg.role==='user' ? 'flex justify-end' : 'flex justify-start'">
-        <div :class="msg.role==='user' ? 'bg-blue-600 text-white rounded-2xl rounded-br-md' : 'bg-white border rounded-2xl rounded-bl-md shadow-sm'" class="px-4 py-3 max-w-md">
-          <p class="text-sm whitespace-pre-wrap" x-text="msg.text"></p>
+        <div :class="msg.role==='user' ? 'bg-gradient-to-r from-teal-500 to-cyan-500 text-white rounded-2xl rounded-br-md shadow-lg shadow-teal-500/20' : 'bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700/50 rounded-2xl rounded-bl-md shadow-sm'" class="px-4 py-3 max-w-md">
+          <p class="text-sm whitespace-pre-wrap" :class="msg.role==='user' ? '' : 'text-gray-700 dark:text-gray-200'" x-text="msg.text"></p>
           <div x-show="msg.audioUrl" class="mt-2"><audio :src="msg.audioUrl" controls class="h-8 w-full"></audio></div>
         </div>
       </div>
     </template>
     <div x-show="typing" class="flex justify-start">
-      <div class="bg-white border rounded-2xl px-4 py-3 shadow-sm"><div class="flex gap-1"><span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></span><span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay:.15s"></span><span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay:.3s"></span></div></div>
+      <div class="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700/50 rounded-2xl px-4 py-3 shadow-sm"><div class="flex gap-1"><span class="w-2 h-2 bg-teal-400 rounded-full animate-bounce"></span><span class="w-2 h-2 bg-teal-400 rounded-full animate-bounce" style="animation-delay:.15s"></span><span class="w-2 h-2 bg-teal-400 rounded-full animate-bounce" style="animation-delay:.3s"></span></div></div>
     </div>
   </div>
 
-  <!-- Voice mode overlay -->
-  <div x-show="voiceMode" x-transition class="absolute inset-0 top-[52px] bg-gray-50/95 z-10 flex flex-col items-center justify-center">
-    <div class="relative">
-      <div :class="recording ? 'scale-110 bg-red-100' : 'bg-gray-100'" class="w-32 h-32 rounded-full flex items-center justify-center transition-all duration-300">
-        <div x-show="recording" class="absolute inset-0 rounded-full bg-red-200 animate-ping opacity-30"></div>
-        <svg class="w-12 h-12" :class="recording ? 'text-red-500' : 'text-gray-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>
+  <!-- Voice mode overlay — Gemini Live style -->
+  <div x-show="voiceMode" x-transition class="absolute inset-0 top-[52px] bg-gradient-to-b from-gray-900 via-gray-900 to-gray-950 z-10 flex flex-col items-center overflow-hidden">
+    <!-- Close button -->
+    <button @click="endLiveSession()" class="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition z-20">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+    </button>
+
+    <!-- Animated orb -->
+    <div class="flex-1 flex items-center justify-center">
+      <div class="relative">
+        <!-- Outer glow rings -->
+        <div :class="{
+          'scale-150 opacity-20': liveState==='speaking',
+          'scale-125 opacity-15': liveState==='listening',
+          'scale-100 opacity-5': liveState==='thinking',
+          'scale-100 opacity-0': liveState==='idle'
+        }" class="absolute inset-[-40px] rounded-full bg-gradient-to-r from-teal-400 to-cyan-400 blur-2xl transition-all duration-700"></div>
+        <div :class="{
+          'scale-125 opacity-30': liveState==='speaking',
+          'scale-110 opacity-25': liveState==='listening',
+          'scale-100 opacity-10': liveState==='thinking'
+        }" class="absolute inset-[-20px] rounded-full bg-gradient-to-r from-teal-500 to-cyan-500 blur-xl transition-all duration-500"></div>
+
+        <!-- Main orb -->
+        <div :class="{
+          'scale-110 shadow-[0_0_80px_rgba(20,184,166,0.5)]': liveState==='speaking',
+          'scale-105 shadow-[0_0_60px_rgba(20,184,166,0.3)]': liveState==='listening',
+          'scale-100 shadow-[0_0_40px_rgba(168,85,247,0.3)]': liveState==='thinking',
+          'scale-100 shadow-[0_0_20px_rgba(20,184,166,0.1)]': liveState==='idle'
+        }" class="w-32 h-32 rounded-full flex items-center justify-center transition-all duration-500 relative overflow-hidden"
+           :style="liveState==='thinking' ? 'background: conic-gradient(from ' + (orbAngle) + 'deg, #14b8a6, #a855f7, #06b6d4, #14b8a6)' : liveState==='speaking' ? 'background: linear-gradient(135deg, #14b8a6, #06b6d4)' : liveState==='listening' ? 'background: linear-gradient(135deg, #0f766e, #0e7490)' : 'background: linear-gradient(135deg, #1f2937, #374151)'">
+
+          <!-- Inner shimmer -->
+          <div class="absolute inset-2 rounded-full bg-gray-900/40 backdrop-blur-sm"></div>
+
+          <!-- Icon -->
+          <div class="relative z-10">
+            <svg x-show="liveState==='idle'" class="w-10 h-10 text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>
+            <svg x-show="liveState==='listening'" class="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>
+            <div x-show="liveState==='thinking'" class="flex gap-1 items-center">
+              <span class="w-2 h-2 bg-white rounded-full animate-bounce"></span>
+              <span class="w-2 h-2 bg-white rounded-full animate-bounce" style="animation-delay:.15s"></span>
+              <span class="w-2 h-2 bg-white rounded-full animate-bounce" style="animation-delay:.3s"></span>
+            </div>
+            <svg x-show="liveState==='speaking'" class="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/></svg>
+          </div>
+        </div>
       </div>
     </div>
-    <p class="mt-6 text-gray-500 text-sm" x-text="recording ? 'Listening…' : 'Tap to speak'"></p>
-    <button @mousedown="startRecording()" @mouseup="stopRecording()" @touchstart.prevent="startRecording()" @touchend.prevent="stopRecording()" class="mt-4 px-8 py-3 rounded-full text-white font-medium" :class="recording ? 'bg-red-500' : 'bg-blue-600 hover:bg-blue-700'">
-      <span x-text="recording ? 'Release to send' : 'Hold to talk'"></span>
-    </button>
+
+    <!-- State label -->
+    <div class="text-center mb-4">
+      <p class="text-white/80 text-sm font-medium" x-text="{idle:'Tap to start',listening:'Listening…',thinking:'Thinking…',speaking:'Speaking…'}[liveState] || 'Ready'"></p>
+    </div>
+
+    <!-- Live transcript -->
+    <div class="w-full max-w-lg px-6 mb-6" x-show="liveText" x-transition>
+      <div class="bg-white/5 backdrop-blur-lg border border-white/10 rounded-2xl px-5 py-3">
+        <p class="text-white/70 text-sm text-center leading-relaxed" x-text="liveText"></p>
+      </div>
+    </div>
+
+    <!-- Scrollable mini transcript -->
+    <div class="w-full max-w-lg px-6 mb-4 max-h-24 overflow-y-auto" x-ref="liveTranscriptScroll" x-show="liveMessages.length > 0">
+      <template x-for="(m, i) in liveMessages.slice(-4)" :key="i">
+        <div class="flex items-start gap-2 mb-1.5">
+          <span :class="m.role==='user' ? 'text-teal-400' : 'text-cyan-400'" class="text-[10px] font-bold uppercase tracking-wide mt-0.5" x-text="m.role==='user' ? 'You' : 'AI'"></span>
+          <span class="text-white/50 text-xs leading-relaxed" x-text="m.text.length > 80 ? m.text.slice(0, 80) + '…' : m.text"></span>
+        </div>
+      </template>
+    </div>
+
+    <!-- Controls bar -->
+    <div class="w-full bg-white/5 backdrop-blur border-t border-white/10 px-6 py-4 flex items-center justify-center gap-6">
+      <button @click="liveInterrupt()" x-show="liveState==='speaking'" class="p-3 rounded-full bg-white/10 hover:bg-white/20 text-white transition" title="Interrupt">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      </button>
+      <button @click="toggleLiveSession()" :class="liveState==='idle' ? 'bg-gradient-to-r from-teal-500 to-cyan-500 shadow-lg shadow-teal-500/30 hover:from-teal-600 hover:to-cyan-600' : 'bg-red-500 hover:bg-red-600 shadow-lg shadow-red-500/30'" class="w-16 h-16 rounded-full text-white flex items-center justify-center transition-all">
+        <svg x-show="liveState==='idle'" class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>
+        <svg x-show="liveState!=='idle'" class="w-7 h-7" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+      </button>
+      <button @click="endLiveSession()" class="p-3 rounded-full bg-white/10 hover:bg-red-500/30 text-white/70 hover:text-red-400 transition" title="End session">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M5 3a2 2 0 00-2 2v1c0 8.284 6.716 15 15 15h1a2 2 0 002-2v-3.28a1 1 0 00-.684-.948l-4.493-1.498a1 1 0 00-1.21.502l-1.13 2.257a11.042 11.042 0 01-5.516-5.517l2.257-1.128a1 1 0 00.502-1.21L9.228 3.683A1 1 0 008.279 3H5z"/></svg>
+      </button>
+    </div>
   </div>
 
   <!-- Text input -->
-  <div x-show="!voiceMode" class="border-t bg-white px-6 py-3 flex-shrink-0">
+  <div x-show="!voiceMode" class="border-t border-gray-200 dark:border-gray-700/50 bg-white dark:bg-gray-800 px-6 py-3 flex-shrink-0">
     <div class="flex gap-3 max-w-3xl mx-auto">
-      <input x-model="input" @keydown.enter="sendText()" type="text" class="flex-1 border rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-200 focus:border-blue-400 outline-none" placeholder="Type a message…" :disabled="typing">
-      <button @click="sendText()" :disabled="!input.trim() || typing" class="px-5 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 disabled:opacity-50">Send</button>
+      <input x-model="input" @keydown.enter="sendText()" type="text" class="flex-1 border border-gray-200 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-teal-200 dark:focus:ring-teal-800 focus:border-teal-400 dark:focus:border-teal-600 outline-none transition" placeholder="Type a message…" :disabled="typing">
+      <button @click="sendText()" :disabled="!input.trim() || typing" class="vf-btn px-5 py-2.5 bg-gradient-to-r from-teal-500 to-cyan-500 text-white rounded-xl text-sm font-medium shadow-lg shadow-teal-500/25 hover:from-teal-600 hover:to-cyan-600 disabled:opacity-50 transition">Send</button>
     </div>
   </div>
 </div>
@@ -86,7 +160,213 @@ function chatApp() {
     agentId: _parseJsonScript('vf-chat-agent-id', ''),
     firstMessage: _parseJsonScript('vf-chat-first-msg', 'Hello! How can I help you today?'),
 
-    toggleVoice() { this.voiceMode = !this.voiceMode; },
+    // Gemini Live state
+    liveState: 'idle', // idle | listening | thinking | speaking
+    liveText: '',
+    liveMessages: [],
+    liveWs: null,
+    _liveStream: null,
+    _liveAudioCtx: null,
+    _liveProcessor: null,
+    _liveAudioQueue: [],
+    _livePlayingAudio: null,
+    orbAngle: 0,
+    _orbInterval: null,
+
+    toggleVoice() {
+      this.voiceMode = !this.voiceMode;
+      if (this.voiceMode) {
+        this._startOrbAnimation();
+      } else {
+        this.endLiveSession();
+      }
+    },
+
+    _startOrbAnimation() {
+      if (this._orbInterval) return;
+      this._orbInterval = setInterval(() => { this.orbAngle = (this.orbAngle + 3) % 360; }, 50);
+    },
+
+    _stopOrbAnimation() {
+      if (this._orbInterval) { clearInterval(this._orbInterval); this._orbInterval = null; }
+    },
+
+    // ── Live session management ──────────────────────────
+
+    toggleLiveSession() {
+      if (this.liveState === 'idle') {
+        this._startLiveSession();
+      } else {
+        this._stopLiveMic();
+        this.liveState = 'idle';
+        this.liveText = '';
+      }
+    },
+
+    async _startLiveSession() {
+      // Connect WebSocket to /api/voice/live/{agentId}
+      if (!this.agentId) { typeof showToast==='function' && showToast('No agent selected','error'); return; }
+
+      try {
+        // Get auth token
+        const tokenResp = await apiFetch('/api/voice/token/?agentId=' + this.agentId);
+        const token = tokenResp.token || tokenResp;
+
+        const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+        const backendHost = location.hostname + ':8040';
+        const wsUrl = `${proto}://${backendHost}/api/voice/live/${this.agentId}?token=${token}`;
+
+        this.liveWs = new WebSocket(wsUrl);
+        this.liveWs.onopen = () => {
+          console.log('[live] connected');
+          this._startLiveMic();
+        };
+        this.liveWs.onmessage = (e) => this._handleLiveMessage(JSON.parse(e.data));
+        this.liveWs.onclose = () => {
+          console.log('[live] disconnected');
+          this._stopLiveMic();
+          this.liveState = 'idle';
+        };
+        this.liveWs.onerror = () => {
+          typeof showToast==='function' && showToast('Connection failed','error');
+          this.liveState = 'idle';
+        };
+      } catch(e) {
+        console.error('[live] failed to start:', e);
+        typeof showToast==='function' && showToast('Failed to connect','error');
+      }
+    },
+
+    _handleLiveMessage(msg) {
+      switch (msg.type) {
+        case 'state':
+          this.liveState = msg.state;
+          break;
+        case 'transcript':
+          this.liveText = msg.text;
+          this.liveMessages.push({role: 'user', text: msg.text});
+          // Also add to main chat
+          this.messages.push({role: 'user', text: msg.text});
+          this.$nextTick(() => this.scrollToBottom());
+          break;
+        case 'response':
+          this.liveText = msg.text;
+          this.liveMessages.push({role: 'agent', text: msg.text});
+          this.messages.push({role: 'agent', text: msg.text});
+          this.$nextTick(() => this.scrollToBottom());
+          break;
+        case 'audio':
+          this._queueLiveAudio(msg.data);
+          break;
+        case 'audio_end':
+          // All audio for this turn sent
+          break;
+        case 'error':
+          this.liveText = msg.message;
+          setTimeout(() => { this.liveText = ''; }, 3000);
+          break;
+      }
+    },
+
+    _queueLiveAudio(b64Data) {
+      // Queue WAV audio chunks for sequential playback
+      const audioBlob = new Blob(
+        [Uint8Array.from(atob(b64Data), c => c.charCodeAt(0))],
+        {type: 'audio/wav'}
+      );
+      const audioUrl = URL.createObjectURL(audioBlob);
+      this._liveAudioQueue.push(audioUrl);
+      this._playNextLiveAudio();
+    },
+
+    _playNextLiveAudio() {
+      if (this._livePlayingAudio || this._liveAudioQueue.length === 0) return;
+      const url = this._liveAudioQueue.shift();
+      this._livePlayingAudio = new Audio(url);
+      this._livePlayingAudio.onended = () => {
+        URL.revokeObjectURL(url);
+        this._livePlayingAudio = null;
+        if (this._liveAudioQueue.length > 0) {
+          this._playNextLiveAudio();
+        }
+      };
+      this._livePlayingAudio.onerror = () => {
+        URL.revokeObjectURL(url);
+        this._livePlayingAudio = null;
+        this._playNextLiveAudio();
+      };
+      this._livePlayingAudio.play().catch(() => {
+        this._livePlayingAudio = null;
+        this._playNextLiveAudio();
+      });
+    },
+
+    liveInterrupt() {
+      // Stop audio and send interrupt
+      if (this._livePlayingAudio) {
+        this._livePlayingAudio.pause();
+        this._livePlayingAudio = null;
+      }
+      this._liveAudioQueue = [];
+      if (this.liveWs && this.liveWs.readyState === 1) {
+        this.liveWs.send(JSON.stringify({type: 'interrupt'}));
+      }
+    },
+
+    async _startLiveMic() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({audio: {sampleRate: 16000, channelCount: 1}});
+        const audioCtx = new AudioContext({sampleRate: 16000});
+        const source = audioCtx.createMediaStreamSource(stream);
+        const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+
+        this._liveStream = stream;
+        this._liveAudioCtx = audioCtx;
+        this._liveProcessor = processor;
+
+        processor.onaudioprocess = (e) => {
+          if (!this.liveWs || this.liveWs.readyState !== 1) return;
+          if (this.liveState === 'idle') return;
+          const f32 = e.inputBuffer.getChannelData(0);
+          const i16 = new Int16Array(f32.length);
+          for (let i = 0; i < f32.length; i++) {
+            i16[i] = Math.max(-32768, Math.min(32767, Math.round(f32[i] * 32767)));
+          }
+          const bytes = new Uint8Array(i16.buffer);
+          let b64 = '';
+          for (let i = 0; i < bytes.length; i += 8192) {
+            b64 += String.fromCharCode(...bytes.subarray(i, i + 8192));
+          }
+          this.liveWs.send(JSON.stringify({type: 'audio', data: btoa(b64)}));
+        };
+
+        source.connect(processor);
+        processor.connect(audioCtx.destination);
+        this.liveState = 'listening';
+      } catch(e) {
+        typeof showToast==='function' && showToast('Microphone access denied','error');
+        this.liveState = 'idle';
+      }
+    },
+
+    _stopLiveMic() {
+      if (this._liveProcessor) { try { this._liveProcessor.disconnect(); } catch(e){} this._liveProcessor = null; }
+      if (this._liveStream) { this._liveStream.getTracks().forEach(t => t.stop()); this._liveStream = null; }
+      if (this._liveAudioCtx) { try { this._liveAudioCtx.close(); } catch(e){} this._liveAudioCtx = null; }
+    },
+
+    endLiveSession() {
+      this._stopLiveMic();
+      this._stopOrbAnimation();
+      if (this._livePlayingAudio) { this._livePlayingAudio.pause(); this._livePlayingAudio = null; }
+      this._liveAudioQueue = [];
+      if (this.liveWs) { this.liveWs.close(); this.liveWs = null; }
+      this.liveState = 'idle';
+      this.liveText = '';
+      this.voiceMode = false;
+    },
+
+    // ── Text chat ────────────────────────────────────────
 
     async sendText() {
       const text = this.input.trim();
@@ -103,89 +383,8 @@ function chatApp() {
         });
         const reply = d.response || d.reply || d.message || 'No response';
         this.messages.push({role:'agent', text:reply});
-        // Auto TTS for agent responses
-        this.speakResponse(reply);
       } catch(e) {
         this.messages.push({role:'agent', text:'Error connecting to agent'});
-      }
-      this.typing = false;
-      this.$nextTick(()=>this.scrollToBottom());
-    },
-
-    async speakResponse(text) {
-      try {
-        const r = await fetch('/api/tts/', {
-          method:'POST',
-          headers:{'Content-Type':'application/json','X-CSRFToken':getCookie('csrftoken')},
-          body:JSON.stringify({text, voiceId:''}),
-        });
-        if (r.ok) {
-          const data = await r.json();
-          if (data.audioUrl) {
-            const audio = new Audio(data.audioUrl);
-            audio.play();
-            const lastAgent = [...this.messages].reverse().find(m=>m.role==='agent');
-            if (lastAgent) lastAgent.audioUrl = data.audioUrl;
-          } else { this._browserSpeak(text); }
-        } else { this._browserSpeak(text); }
-      } catch(e) { this._browserSpeak(text); }
-    },
-
-    _browserSpeak(text) {
-      if ('speechSynthesis' in window) {
-        const u = new SpeechSynthesisUtterance(text);
-        speechSynthesis.speak(u);
-      }
-    },
-
-    async startRecording() {
-      if (this.recording) return;
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({audio:true});
-        this.mediaRecorder = new MediaRecorder(stream, {mimeType:'audio/webm'});
-        this.audioChunks = [];
-        this.mediaRecorder.ondataavailable = e => { if(e.data.size>0) this.audioChunks.push(e.data); };
-        this.mediaRecorder.onstop = () => {
-          stream.getTracks().forEach(t=>t.stop());
-          const blob = new Blob(this.audioChunks, {type:'audio/webm'});
-          this.sendAudio(blob);
-        };
-        this.mediaRecorder.start();
-        this.recording = true;
-      } catch(e) { showToast('Microphone access denied','error'); }
-    },
-
-    stopRecording() {
-      if (this.mediaRecorder && this.recording) {
-        this.mediaRecorder.stop();
-        this.recording = false;
-      }
-    },
-
-    async sendAudio(blob) {
-      this.messages.push({role:'user', text:'🎙️ Voice message'});
-      this.typing = true;
-      this.$nextTick(()=>this.scrollToBottom());
-      try {
-        const fd = new FormData();
-        fd.append('audio', blob, 'recording.webm');
-        fd.append('agentId', this.agentId);
-        fd.append('sessionId', this.sessionId);
-        const r = await fetch('/api/audio/', {
-          method:'POST', body:fd, headers:{'X-CSRFToken':getCookie('csrftoken')},
-        });
-        const d = await r.json();
-        const transcript = d.transcript || '';
-        const reply = d.response || d.reply || 'No response';
-        if (transcript) {
-          // Update user message with transcript
-          const lastUser = [...this.messages].reverse().find(m=>m.role==='user');
-          if (lastUser) lastUser.text = transcript;
-        }
-        this.messages.push({role:'agent', text:reply});
-        this.speakResponse(reply);
-      } catch(e) {
-        this.messages.push({role:'agent', text:'Error processing audio'});
       }
       this.typing = false;
       this.$nextTick(()=>this.scrollToBottom());

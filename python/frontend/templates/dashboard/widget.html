@@ -1,36 +1,36 @@
 {% extends "base_dashboard.html" %}
 {% block title %}Call Widget — VoiceFlow AI{% endblock %}
 {% block content %}
-<div class="mb-8"><h1 class="text-2xl font-bold">Embeddable Widget</h1><p class="text-gray-500 text-sm mt-1">Embed your AI agent on any website</p></div>
+<div class="mb-8 fade-in-up"><h1 class="text-2xl font-bold bg-gradient-to-r from-gray-900 via-gray-700 to-gray-900 dark:from-white dark:via-gray-200 dark:to-white bg-clip-text text-transparent">Embeddable Widget</h1><p class="text-gray-500 dark:text-gray-400 text-sm mt-1">Embed your AI agent on any website</p></div>
 
-<div class="bg-white rounded-xl border p-6 mb-6">
-  <h3 class="font-semibold mb-3">How it works</h3>
+<div class="vf-card p-6 mb-6">
+  <h3 class="font-semibold mb-3 dark:text-white">How it works</h3>
   <div class="grid md:grid-cols-3 gap-6 text-sm text-gray-600">
-    <div class="flex items-start gap-3"><div class="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold flex-shrink-0">1</div><div>Copy the embed code for your agent</div></div>
-    <div class="flex items-start gap-3"><div class="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold flex-shrink-0">2</div><div>Paste it into your website HTML</div></div>
-    <div class="flex items-start gap-3"><div class="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold flex-shrink-0">3</div><div>Your visitors can chat with the agent</div></div>
+    <div class="flex items-start gap-3"><div class="w-8 h-8 rounded-full bg-teal-100 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400 flex items-center justify-center font-bold flex-shrink-0">1</div><div>Copy the embed code for your agent</div></div>
+    <div class="flex items-start gap-3"><div class="w-8 h-8 rounded-full bg-teal-100 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400 flex items-center justify-center font-bold flex-shrink-0">2</div><div>Paste it into your website HTML</div></div>
+    <div class="flex items-start gap-3"><div class="w-8 h-8 rounded-full bg-teal-100 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400 flex items-center justify-center font-bold flex-shrink-0">3</div><div>Your visitors can chat with the agent</div></div>
   </div>
 </div>
 
 {% for agent in agents %}
-<div class="bg-white rounded-xl border p-5 mb-4" x-data="{copied:false}">
+<div class="vf-card p-5 mb-4" x-data="{copied:false}">
   <div class="flex items-center justify-between">
-    <div><span class="font-semibold">{{ agent.name }}</span> <span class="text-xs px-2 py-1 rounded-full {% if agent.status == 'active' %}bg-green-100 text-green-700{% else %}bg-gray-100 text-gray-600{% endif %} ml-2">{{ agent.status }}</span></div>
-    <button @click="navigator.clipboard.writeText('<script src=\'' + location.origin + '/widget/{{ agent.id }}/embed.js\'><\/script>'); copied=true; setTimeout(()=>copied=false,2000)" class="px-3 py-1.5 border rounded-lg text-sm hover:bg-gray-50" x-text="copied?'Copied!':'Copy Code'">Copy Code</button>
+    <div><span class="font-semibold dark:text-white">{{ agent.name }}</span> <span class="text-xs px-2 py-1 rounded-full {% if agent.status == 'active' %}bg-green-100 text-green-700{% else %}bg-gray-100 text-gray-600{% endif %} ml-2">{{ agent.status }}</span></div>
+    <button @click="navigator.clipboard.writeText('<script src=\'' + location.origin + '/widget/{{ agent.id }}/embed.js\'><\/script>'); copied=true; setTimeout(()=>copied=false,2000)" class="vf-btn px-3 py-1.5 border dark:border-gray-700/50 rounded-lg text-sm hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700" x-text="copied?'Copied!':'Copy Code'">Copy Code</button>
   </div>
-  <code class="block mt-3 p-3 bg-gray-50 rounded-lg text-xs font-mono text-gray-600" x-text="'<script src=\"' + location.origin + '/widget/{{ agent.id }}/embed.js\"><\/script>'"></code>
+  <code class="block mt-3 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg text-xs font-mono text-gray-600 dark:text-gray-400" x-text="'<script src=\"' + location.origin + '/widget/{{ agent.id }}/embed.js\"><\/script>'"></code>
 </div>
 {% empty %}
-<div class="bg-white rounded-xl border p-12 text-center text-gray-400">No agents yet. Create an agent first.</div>
+<div class="vf-card p-12 text-center text-gray-400">No agents yet. Create an agent first.</div>
 {% endfor %}
 
-<div class="bg-white rounded-xl border p-6 mt-6">
-  <h3 class="font-semibold mb-4">REST API</h3>
+<div class="vf-card p-6 mt-6">
+  <h3 class="font-semibold mb-4 dark:text-white">REST API</h3>
   <div class="space-y-3 text-sm">
     <div class="flex items-center gap-3"><span class="px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-mono">POST</span><code class="text-gray-600">/api/runner/chat</code><span class="text-gray-400 ml-auto">Send a message</span></div>
     <div class="flex items-center gap-3"><span class="px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-mono">POST</span><code class="text-gray-600">/api/runner/audio</code><span class="text-gray-400 ml-auto">Send audio</span></div>
-    <div class="flex items-center gap-3"><span class="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-mono">GET</span><code class="text-gray-600">/api/agents/</code><span class="text-gray-400 ml-auto">List agents</span></div>
-    <div class="flex items-center gap-3"><span class="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-mono">WS</span><code class="text-gray-600">/ws/{'{'}session_id{'}'}</code><span class="text-gray-400 ml-auto">WebSocket stream</span></div>
+    <div class="flex items-center gap-3"><span class="px-2 py-1 bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-400 rounded text-xs font-mono">GET</span><code class="text-gray-600">/api/agents/</code><span class="text-gray-400 ml-auto">List agents</span></div>
+    <div class="flex items-center gap-3"><span class="px-2 py-1 bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-400 rounded text-xs font-mono">WS</span><code class="text-gray-600">/ws/{'{'}session_id{'}'}</code><span class="text-gray-400 ml-auto">WebSocket stream</span></div>
   </div>
 </div>
 {% endblock %}

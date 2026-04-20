@@ -2,36 +2,36 @@
 {% block title %}Analytics — VoiceFlow AI{% endblock %}
 {% block content %}
 {% load json_tags %}
-<div x-data="analyticsPage()" x-init="loadChart()">
+<div x-data="analyticsPage()" x-init="loadChart()" class="fade-in-up">
   <div class="flex items-center justify-between mb-8">
-    <div><h1 class="text-2xl font-bold">Analytics</h1><p class="text-gray-500 text-sm mt-1">Performance overview and trends</p></div>
+    <div><h1 class="text-2xl font-bold bg-gradient-to-r from-gray-900 via-gray-700 to-gray-900 dark:from-white dark:via-gray-200 dark:to-white bg-clip-text text-transparent">Analytics</h1><p class="text-gray-500 dark:text-gray-400 text-sm mt-1">Performance overview and trends</p></div>
     <div class="flex gap-2">
       <template x-for="r in ['7d','30d','90d']">
-        <button @click="range=r;loadChart()" :class="range===r?'bg-blue-600 text-white':'bg-white border border-gray-200 text-gray-600'" class="px-4 py-2 rounded-lg text-sm font-medium transition" x-text="r"></button>
+        <button @click="range=r;loadChart()" :class="range===r?'bg-teal-600 text-white shadow-lg shadow-teal-500/25':'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300'" class="vf-btn px-4 py-2 rounded-lg text-sm font-medium transition" x-text="r"></button>
       </template>
     </div>
   </div>
-  <div class="grid md:grid-cols-4 gap-6 mb-8">
-    <div class="bg-white rounded-xl border p-5"><div class="text-sm text-gray-500">Total Interactions</div><div class="text-2xl font-bold mt-1">{{ overview.totalInteractions|default:"0" }}</div></div>
-    <div class="bg-white rounded-xl border p-5"><div class="text-sm text-gray-500">Success Rate</div><div class="text-2xl font-bold mt-1">{{ overview.successRate|default:"0" }}%</div></div>
-    <div class="bg-white rounded-xl border p-5"><div class="text-sm text-gray-500">Avg Response Time</div><div class="text-2xl font-bold mt-1">{{ overview.avgResponseTime|default:"—" }}</div></div>
-    <div class="bg-white rounded-xl border p-5"><div class="text-sm text-gray-500">Active Agents</div><div class="text-2xl font-bold mt-1">{{ overview.activeAgents|default:"0" }}</div></div>
+  <div class="grid md:grid-cols-4 gap-6 mb-8 stagger">
+    <div class="vf-card p-5"><div class="text-sm text-gray-500 dark:text-gray-400">Total Interactions</div><div class="text-2xl font-bold mt-1 dark:text-white">{{ overview.totalInteractions|default:"0" }}</div></div>
+    <div class="vf-card p-5"><div class="text-sm text-gray-500 dark:text-gray-400">Success Rate</div><div class="text-2xl font-bold mt-1 dark:text-white">{{ overview.successRate|default:"0" }}%</div></div>
+    <div class="vf-card p-5"><div class="text-sm text-gray-500 dark:text-gray-400">Avg Response Time</div><div class="text-2xl font-bold mt-1 dark:text-white">{{ overview.avgResponseTime|default:"—" }}</div></div>
+    <div class="vf-card p-5"><div class="text-sm text-gray-500 dark:text-gray-400">Active Agents</div><div class="text-2xl font-bold mt-1 dark:text-white">{{ overview.activeAgents|default:"0" }}</div></div>
   </div>
   <div class="grid md:grid-cols-2 gap-6">
-    <div class="bg-white rounded-xl border p-6">
-      <h3 class="font-semibold mb-4">Interactions Over Time</h3>
+    <div class="vf-card p-6">
+      <h3 class="font-semibold mb-4 dark:text-white">Interactions Over Time</h3>
       <canvas id="analyticsChart" height="120"></canvas>
     </div>
-    <div class="bg-white rounded-xl border p-6">
-      <h3 class="font-semibold mb-4">Agent Performance</h3>
+    <div class="vf-card p-6">
+      <h3 class="font-semibold mb-4 dark:text-white">Agent Performance</h3>
       <div class="space-y-3">
         {% for a in agents %}
-        <div class="flex items-center justify-between p-3 rounded-lg border">
-          <div><span class="font-medium text-sm">{{ a.name }}</span> <span class="text-xs text-gray-400 ml-2">{{ a.status|default:"active" }}</span></div>
-          <div class="text-right"><span class="text-sm font-bold">{{ a.totalCalls|default:0 }}</span><span class="text-xs text-gray-400 ml-1">calls</span> <span class="text-sm font-bold ml-3">{{ a.totalChats|default:0 }}</span><span class="text-xs text-gray-400 ml-1">chats</span></div>
+        <div class="flex items-center justify-between p-3 rounded-lg border border-gray-200 dark:border-gray-700 dark:bg-gray-800/50">
+          <div><span class="font-medium text-sm dark:text-white">{{ a.name }}</span> <span class="vf-badge-success text-xs ml-2">{{ a.status|default:"active" }}</span></div>
+          <div class="text-right"><span class="text-sm font-bold dark:text-white">{{ a.totalCalls|default:0 }}</span><span class="text-xs text-gray-400 dark:text-gray-500 ml-1">calls</span> <span class="text-sm font-bold ml-3 dark:text-white">{{ a.totalChats|default:0 }}</span><span class="text-xs text-gray-400 dark:text-gray-500 ml-1">chats</span></div>
         </div>
         {% empty %}
-        <p class="text-gray-400 text-sm text-center py-6">No agents yet</p>
+        <p class="text-gray-400 dark:text-gray-500 text-sm text-center py-6">No agents yet</p>
         {% endfor %}
       </div>
     </div>
@@ -51,7 +51,7 @@ function analyticsPage(){return{range:'7d',chart:null,
       if(!ctx)return;
       if(this.chart)this.chart.destroy();
       this.chart=new Chart(ctx,{type:'line',data:{labels:labels.length?labels:['No data'],
-        datasets:[{label:'Interactions',data:values.length?values:[0],borderColor:'#3b82f6',backgroundColor:'rgba(59,130,246,0.1)',tension:.3,fill:true}]
+        datasets:[{label:'Interactions',data:values.length?values:[0],borderColor:'#14b8a6',backgroundColor:'rgba(20,184,166,0.1)',tension:.3,fill:true}]
       },options:{responsive:true,plugins:{legend:{position:'bottom'}},scales:{y:{beginAtZero:true}}}});
     }catch(e){console.warn('Chart load failed',e)}
   }

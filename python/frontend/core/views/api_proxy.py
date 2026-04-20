@@ -154,6 +154,27 @@ def voice_presets(request):
 
 
 @login_required
+def voice_token(request):
+    """Generate a short-lived JWT for the WebSocket voice live endpoint."""
+    import jwt as pyjwt
+    from datetime import datetime, timezone, timedelta
+    from django.conf import settings as django_settings
+
+    tenant_id = getattr(request, "tenant_id", "")
+    user_id = str(request.user.id) if request.user.is_authenticated else ""
+
+    # Use the same JWT secret the backend uses
+    jwt_secret = getattr(django_settings, "BACKEND_JWT_SECRET", "dev-secret")
+    payload = {
+        "userId": user_id,
+        "tenantId": tenant_id,
+        "exp": datetime.now(timezone.utc) + timedelta(hours=1),
+    }
+    token = pyjwt.encode(payload, jwt_secret, algorithm="HS256")
+    return JsonResponse({"token": token})
+
+
+@login_required
 @csrf_exempt
 @require_http_methods(["POST"])
 def voice_clone(request):
@@ -593,5 +614,176 @@ def brand_detail_api(request, brand_id):
             client.delete_brand(brand_id)
             return JsonResponse({"ok": True})
         return JsonResponse(client.get_brand(brand_id))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+# ── Campaigns ──────────────────────────────────────────────────────────
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def campaigns_api(request):
+    client = get_client(request)
+    try:
+        if request.method == "POST":
+            return JsonResponse(client._post("/api/campaigns/", json=_json_body(request)), status=201)
+        return JsonResponse(client._get("/api/campaigns/"))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
+@require_http_methods(["GET", "DELETE"])
+def campaign_detail_api(request, campaign_id):
+    client = get_client(request)
+    try:
+        if request.method == "DELETE":
+            client._delete(f"/api/campaigns/{campaign_id}")
+            return JsonResponse({"ok": True})
+        return JsonResponse(client._get(f"/api/campaigns/{campaign_id}"))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@csrf_exempt
+@require_http_methods(["POST"])
+def campaign_upload_contacts(request, campaign_id):
+    f = request.FILES.get("file")
+    if not f:
+        return JsonResponse({"error": "No CSV file"}, status=400)
+    client = get_client(request)
+    try:
+        result = client._post(
+            f"/api/campaigns/{campaign_id}/contacts/upload",
+            files={"file": (f.name, f.read(), "text/csv")},
+        )
+        return JsonResponse(result)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@require_http_methods(["POST"])
+def campaign_start(request, campaign_id):
+    try:
+        return JsonResponse(get_client(request)._post(f"/api/campaigns/{campaign_id}/start"))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@require_http_methods(["POST"])
+def campaign_pause(request, campaign_id):
+    try:
+        return JsonResponse(get_client(request)._post(f"/api/campaigns/{campaign_id}/pause"))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@require_http_methods(["GET"])
+def campaign_stats(request, campaign_id):
+    try:
+        return JsonResponse(get_client(request)._get(f"/api/campaigns/{campaign_id}/stats"))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+# ── Webhooks ───────────────────────────────────────────────────────────
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def webhooks_api(request):
+    client = get_client(request)
+    try:
+        if request.method == "POST":
+            return JsonResponse(client._post("/api/webhooks/", json=_json_body(request)), status=201)
+        return JsonResponse(client._get("/api/webhooks/"))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
+@require_http_methods(["DELETE"])
+def webhook_detail_api(request, webhook_id):
+    try:
+        get_client(request)._delete(f"/api/webhooks/{webhook_id}")
+        return JsonResponse({"ok": True})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+# ── A/B Testing ────────────────────────────────────────────────────────
+
+@login_required
+@require_http_methods(["GET"])
+def ab_variants_api(request):
+    try:
+        return JsonResponse(get_client(request)._get("/api/ab-testing/variants"))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
+@require_http_methods(["POST"])
+def ab_create_variant(request, agent_id):
+    try:
+        data = _json_body(request)
+        return JsonResponse(
+            get_client(request)._post(f"/api/ab-testing/{agent_id}/variant", json=data),
+            status=201,
+        )
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@require_http_methods(["GET"])
+def ab_results(request, test_id):
+    try:
+        return JsonResponse(get_client(request)._get(f"/api/ab-testing/{test_id}/results"))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+# ── DND Registry ──────────────────────────────────────────────────────
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def dnd_api(request):
+    client = get_client(request)
+    try:
+        if request.method == "POST":
+            return JsonResponse(client._post("/api/dnd/", json=_json_body(request)), status=201)
+        return JsonResponse(client._get("/api/dnd/"))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
+@require_http_methods(["DELETE"])
+def dnd_delete(request, number_id):
+    try:
+        get_client(request)._delete(f"/api/dnd/{number_id}")
+        return JsonResponse({"ok": True})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@csrf_exempt
+@require_http_methods(["POST"])
+def dnd_bulk(request):
+    f = request.FILES.get("file")
+    if not f:
+        return JsonResponse({"error": "No file"}, status=400)
+    client = get_client(request)
+    try:
+        result = client._post(
+            "/api/dnd/bulk",
+            files={"file": (f.name, f.read(), "text/csv")},
+        )
+        return JsonResponse(result)
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)

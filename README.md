@@ -2,7 +2,7 @@
 
 A multi-tenant SaaS platform for building, deploying, and managing AI-powered voice and chat agents. Businesses onboard through a guided wizard, upload their knowledge base, and receive a domain-specific AI agent that answers customer queries over phone (Twilio), browser-based WebSocket voice calls, or a web chat interface — using Retrieval-Augmented Generation (RAG) over their own documents with hierarchical context injection and policy-based retrieval scoring.
 
-> **Status (April 2026):** The full pipeline is functional end-to-end: 7-step onboarding → document ingestion → per-tenant vector isolation → 5-layer context injection → policy-scored retrieval → dynamic 7-section prompt assembly → Groq LLM generation (per-tenant model selection, conversation history in all code paths) → TTS → multi-channel delivery (Twilio voice, **real WebSocket audio** with local `faster-whisper` or Groq Whisper STT + Edge/Kokoro TTS, web chat, embeddable widget, **per-agent REST API for third-party integration**). Analytics use real DB queries. A retraining pipeline captures bad calls and injects learned corrections as few-shot examples. Admin pipeline management with real CRUD. Data Explorer dashboard to visualise Postgres, ChromaDB & Redis contents. Interactive API docs via FastAPI at `/docs`. **Stack: Django 6 (HTMX + Alpine.js) frontend + FastAPI backend + Docker services (Postgres, Redis, ChromaDB, MinIO).** See [Implementation Status](#implementation-status) for the full breakdown.
+> **Status (April 2026):** The full pipeline is functional end-to-end: 7-step onboarding → document ingestion → per-tenant vector isolation → 5-layer context injection → policy-scored retrieval → dynamic 7-section prompt assembly → Groq LLM generation (per-tenant model selection, conversation history in all code paths) → TTS → multi-channel delivery (Twilio voice, **real WebSocket audio** with local `faster-whisper` or Groq Whisper STT + Edge/Kokoro/Piper TTS, web chat, embeddable widget, WhatsApp, **per-agent REST API for third-party integration**). Outbound campaigns with CSV upload, AMD detection, DND compliance, and real-time progress tracking. HMAC-SHA256 signed webhook dispatch with retry. A/B testing with traffic splitting. Analytics use real DB queries. A retraining pipeline captures bad calls and injects learned corrections as few-shot examples. Visual flow builder for conversation design. 29 route files (~142 endpoints), 13 services, 17 models. **Modern UI: glassmorphism, micro-interactions, 15+ CSS animations, dark mode on all 25 pages. Stack: Django 6 (HTMX + Alpine.js) frontend + FastAPI backend + Docker services (Postgres, Redis, ChromaDB, MinIO).** See [Implementation Status](#implementation-status) for the full breakdown.
 
 ---
 
@@ -66,7 +66,7 @@ The primary market is Indian SMBs. Every tenant and agent is logically isolated 
 │                     FASTAPI BACKEND  (Port 8040)                     │
 │                                                                      │
 │   ┌──────────────┐  ┌───────────────┐  ┌────────────────────────┐   │
-│   │  Header Auth │  │  Rate Limiter │  │    22 Route Files      │   │
+│   │  Header Auth │  │  Rate Limiter │  │    29 Route Files      │   │
 │   │  (Demo mode) │  │  (SlowAPI +   │  │                        │   │
 │   │              │  │   Redis)      │  │  /auth    /agents       │   │
 │   │  x-tenant-id │  │              │  │  /onboarding /rag       │   │
@@ -122,7 +122,7 @@ The primary market is Indian SMBs. Every tenant and agent is logically isolated 
 │   │  PostgreSQL   │  │   ChromaDB   │  │    Redis     │            │
 │   │  (Port 8010)  │  │  (Port 8030) │  │  (Port 8020) │            │
 │   │               │  │              │  │              │            │
-│   │  12 models    │  │  Per-tenant  │  │  Conv hist   │            │
+│   │  17 models    │  │  Per-tenant  │  │  Conv hist   │            │
 │   │               │  │  collections │  │  BM25 index  │            │
 │   │  Tenants      │  │              │  │  Rate limit  │            │
 │   │  Agents       │  │  tenant_{id} │  │  Call sesh   │            │
@@ -164,11 +164,13 @@ VoiceFlow/
 │   │   │   ├── config.py          ← Settings (env vars)
 │   │   │   ├── database.py        ← SQLAlchemy async engine + session
 │   │   │   ├── models.py          ← 12 SQLAlchemy ORM models
-│   │   │   ├── routes/            ← 22 route files
+│   │   │   ├── routes/            ← 29 route files
 │   │   │   │   ├── agents.py      ← Agent CRUD + activate/pause
 │   │   │   │   ├── analytics.py   ← Real DB-based analytics
 │   │   │   │   ├── auth.py        ← Login/signup/user-sync
 │   │   │   │   ├── brands.py      ← Brand CRUD (voice, topics, policies)
+│   │   │   │   ├── campaigns.py   ← Campaign CRUD + contacts + AMD
+│   │   │   │   ├── dnd.py         ← DND registry management
 │   │   │   │   ├── documents.py   ← Document CRUD + upload
 │   │   │   │   ├── ingestion.py   ← Ingestion job start/status
 │   │   │   │   ├── logs.py        ← Call log CRUD + flagging
@@ -179,18 +181,30 @@ VoiceFlow/
 │   │   │   │   ├── settings.py    ← Twilio/Groq creds (AES-256-GCM)
 │   │   │   │   ├── templates.py   ← Agent template CRUD
 │   │   │   │   ├── tts.py         ← TTS preset voices, preview, clone
-│   │   │   │   ├── voice.py       ← Twilio TwiML Gather loop
-│   │   │   │   ├── voice_ws.py    ← WebSocket voice (Whisper STT)
+│   │   │   │   ├── voice_inbound_router.py ← Inbound call dispatcher
+│   │   │   │   ├── voice_twilio_gather.py  ← Twilio TwiML Gather loop
+│   │   │   │   ├── voice_twilio_stream.py  ← Twilio Media Streams (WebSocket)
+│   │   │   │   ├── voice_ws.py    ← WebSocket voice (browser calls)
+│   │   │   │   ├── webhooks.py    ← Webhook CRUD + HMAC-signed dispatch
+│   │   │   │   ├── whatsapp.py    ← WhatsApp inbound handler
 │   │   │   │   ├── widget.py      ← Embeddable JS widget (public)
+│   │   │   │   ├── ab_testing.py  ← A/B test variant management
 │   │   │   │   ├── admin.py       ← Pipeline CRUD + trigger
 │   │   │   │   ├── platform.py    ← Audit, notifications, health
 │   │   │   │   ├── data_explorer.py ← Postgres/ChromaDB/Redis viewer
 │   │   │   │   └── users.py       ← User management
-│   │   │   └── services/          ← Core service modules
+│   │   │   └── services/          ← 13 service modules
 │   │   │       ├── rag_service.py         ← 5-layer context injection +
 │   │   │       │                            policy scoring + 7-section
-│   │   │       │                            prompt assembly + Groq LLM
+│   │   │       │                            prompt assembly + multi-LLM
 │   │   │       ├── ingestion_service.py   ← Docling + PaddleOCR + scraping
+│   │   │       ├── streaming_orchestrator.py ← Real-time voice pipeline
+│   │   │       ├── tts_router.py          ← Multi-engine TTS (Kokoro/Piper/Edge)
+│   │   │       ├── stt_service.py         ← STT (Vosk/faster-whisper/Groq)
+│   │   │       ├── campaign_worker.py     ← Outbound campaign execution
+│   │   │       ├── compliance_service.py  ← DND/hours/retry compliance
+│   │   │       ├── webhook_service.py     ← HMAC-SHA256 event dispatch
+│   │   │       ├── flow_engine.py         ← Conversation flow execution
 │   │   │       ├── credentials.py         ← AES-256-GCM encryption
 │   │   │       └── scheduler.py           ← APScheduler nightly cron
 │   │
@@ -202,7 +216,7 @@ VoiceFlow/
 │       │   └── views/
 │       │       ├── dashboard.py   ← Agent list + detail views
 │       │       ├── pages.py       ← All dashboard page views
-│       │       ├── api_proxy.py   ← 25+ proxy endpoints for JS/HTMX
+│       │       ├── api_proxy.py   ← 55 proxy endpoints for JS/HTMX
 │       │       ├── onboarding.py  ← 7-step wizard view
 │       │       ├── auth.py        ← Login/register/logout
 │       │       └── chat.py        ← Chat + voice agent views
@@ -211,15 +225,27 @@ VoiceFlow/
 │           ├── partials/sidebar.html
 │           ├── onboarding/flow.html   ← 7-step wizard (Alpine.js)
 │           ├── agents/detail.html     ← Agent detail + chat
-│           └── dashboard/             ← 18 dashboard pages
+│           └── dashboard/             ← 25 dashboard pages
 │               ├── analytics.html     ← Charts + metrics
+│               ├── ab_testing.html    ← A/B test management
 │               ├── audit.html         ← Filterable audit log
+│               ├── brands.html        ← Brand voice config
+│               ├── billing.html       ← Usage & plans
 │               ├── calls.html         ← Call log viewer
-│               ├── data_explorer.html ← DB visualiser (Postgres/Chroma/Redis)
+│               ├── campaigns.html     ← Outbound campaigns
+│               ├── data_explorer.html ← DB visualiser
+│               ├── dnd.html           ← DND registry
+│               ├── integrations.html  ← Integration status
 │               ├── knowledge.html     ← Knowledge base management
+│               ├── notifications.html ← Notification center
+│               ├── pipelines.html     ← Admin pipelines
+│               ├── reports.html       ← Generated reports
 │               ├── retraining.html    ← Retraining queue admin
 │               ├── settings.html      ← Twilio/Groq/voice config
 │               ├── system.html        ← System health monitor
+│               ├── voice_agent.html   ← Real-time voice testing
+│               ├── webhooks.html      ← Webhook endpoint management
+│               ├── whatsapp.html      ← WhatsApp config
 │               ├── widget.html        ← Embed code manager
 │               └── ...
 │
@@ -900,7 +926,7 @@ A complete breakdown of what works versus what needs attention.
 | Per-tenant Twilio credentials | AES-256-GCM encrypted, stored in tenant settings, client cache with 5-min TTL |
 | Twilio onboarding deploy | Demo-mode deploy endpoint activates agent and returns mock number (`+1-555-DEMO`) |
 | Twilio webhook endpoints | Inbound/gather/status webhooks implemented at `/api/voice/*` |
-| Agent template system | 6 seeded templates (Customer Support, Cold Calling, Lead Qualification, Technical Support, Receptionist, Survey Agent) |
+| Agent template system | 10 seeded templates (Customer Support, Cold Calling, Lead Qualification, Technical Support, Receptionist, Survey Agent, Debt Collection, Appointment Reminder, Order Status, Customer Onboarding) |
 | Voice selector UI | Edge + Kokoro voices with real-time preview and cloned voice selection |
 | TTS | Edge TTS (primary) + Kokoro local fallback, with voice cloning and custom clone preview |
 | Call logging | CallLog records with duration, transcript, caller phone, rating, flagging |
@@ -923,6 +949,18 @@ A complete breakdown of what works versus what needs attention.
 | **Agent template CRUD** | Full create/read/update/delete for agent templates via `/api/templates` |
 | **Integrations page** | Real-time Twilio/Groq credential status from backend API |
 | **Audit log with filtering** | Client-side search + action filter + API refresh |
+| **Outbound campaigns** | Full campaign management: create → upload CSV contacts → start/pause → real-time stats with progress bars → AMD (answering machine detection) callback |
+| **Webhook event dispatch** | HMAC-SHA256 signed event delivery to external URLs with 3 retries + exponential backoff. Events: `call.completed`, `campaign.finished`, `escalation.triggered`, `retraining.flagged` |
+| **A/B Testing** | Create test variants (prompt, voice, model, temperature), split traffic, track conversion rates with confidence calculation |
+| **DND (Do Not Disturb) Registry** | Compliance-first — add/bulk-import blocked numbers, automatic pre-dial check via `ComplianceService.is_dnd()` |
+| **WhatsApp channel** | Per-agent WhatsApp configuration with Twilio integration, webhook URL generation, text + voice note handling |
+| **Visual Flow Builder** | Drag-and-drop conversation flow designer with Mermaid.js visualization — greeting/knowledge/condition/API call/transfer nodes |
+| **Modern UI system** | Production-grade design system: glassmorphism cards, micro-interactions, 15+ CSS animations (fade-in-up, scale-in, shimmer skeletons, stagger), dark mode support on all 25 dashboard pages |
+| **TwiML injection prevention** | LLM output sanitized before TwiML `<Say>` — strips XML/SSML tags, escapes special characters |
+| **Webhook secret masking** | Secrets revealed only at creation time; masked (first 4 chars + dots) on subsequent reads |
+| **Streaming voice orchestrator** | Real-time audio pipeline: STT → RAG → TTS with barge-in/interruption support via Twilio Media Streams WebSocket |
+| **Multi-TTS router** | Kokoro (CPU, natural), Piper (CPU, fast ONNX), Edge TTS (cloud, 300+ voices), Orpheus — per-agent configurable |
+| **Campaign compliance** | Pre-dial checks: DND registry, calling hours (local timezone), retry limits — all enforced by `ComplianceService` |
 
 ### Partially Implemented
 
@@ -950,7 +988,7 @@ A complete breakdown of what works versus what needs attention.
 
 ### PostgreSQL — SQLAlchemy ORM (`python/backend/app/models.py`)
 
-12 models:
+17 models (Tenant, User, Brand, Agent, AgentConfiguration, AgentTemplate, OnboardingProgress, Document, CallLog, RetrainingExample, Pipeline, AuditLog, Notification, Campaign, CampaignContact, DNDRegistry, WebhookEndpoint):
 
 ```
 Tenant
@@ -1029,6 +1067,24 @@ AuditLog
 Notification
   id (uuid), tenantId, userId?, type, title, message,
   isRead (Boolean), link?, createdAt
+
+Campaign
+  id (uuid), tenantId, agentId, name, status (draft|running|paused|completed),
+  totalContacts, completedContacts, successfulContacts,
+  scheduledAt?, startedAt?, completedAt?, createdAt, updatedAt
+  → has many: CampaignContacts
+
+CampaignContact
+  id (uuid), campaignId, phoneNumber, name?, status (pending|calling|completed|failed|dnd),
+  callSid?, callDuration?, callResult?, retryCount, calledAt?, createdAt
+
+DNDRegistry
+  id (uuid), tenantId, phoneNumber (unique per tenant), reason?,
+  addedBy?, createdAt
+
+WebhookEndpoint
+  id (uuid), tenantId, url, events (JSON array), secret (auto-generated),
+  description?, isActive (Boolean), createdAt, updatedAt
 ```
 
 ### ChromaDB

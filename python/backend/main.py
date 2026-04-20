@@ -89,6 +89,42 @@ async def seed_defaults():
                         defaultTools=["search_knowledge", "record_response"],
                         icon="clipboard",
                     ),
+                    AgentTemplate(
+                        id="debt-collection", name="Debt Collection",
+                        description="Professional debt recovery calls with compliance and empathy",
+                        baseSystemPrompt="You are a professional debt collection agent. Follow FDCPA guidelines strictly. Be firm but empathetic. Verify identity before disclosing debt details. Offer payment plans and document all interactions.",
+                        defaultCapabilities=["payment_negotiation", "compliance", "escalation", "payment_plan"],
+                        suggestedKnowledgeCategories=["debt_policies", "compliance_rules", "payment_options"],
+                        defaultTools=["search_knowledge", "record_payment", "schedule_callback"],
+                        icon="banknotes",
+                    ),
+                    AgentTemplate(
+                        id="appointment-reminder", name="Appointment Reminder",
+                        description="Automated appointment reminders with rescheduling capability",
+                        baseSystemPrompt="You are a friendly appointment reminder assistant. Confirm upcoming appointments, offer rescheduling options, and handle cancellations gracefully. Always confirm the new time.",
+                        defaultCapabilities=["scheduling", "confirmation", "rescheduling", "cancellation"],
+                        suggestedKnowledgeCategories=["scheduling_rules", "availability", "policies"],
+                        defaultTools=["search_knowledge", "book_appointment", "cancel_appointment"],
+                        icon="calendar",
+                    ),
+                    AgentTemplate(
+                        id="order-status", name="Order Status",
+                        description="Check and communicate order status, tracking, and delivery updates",
+                        baseSystemPrompt="You are a helpful order status assistant. Look up orders by ID or customer info, provide tracking details, estimated delivery dates, and handle basic order modifications.",
+                        defaultCapabilities=["order_lookup", "tracking", "modification", "refund_request"],
+                        suggestedKnowledgeCategories=["shipping_policies", "return_policies", "order_faq"],
+                        defaultTools=["search_knowledge", "lookup_order", "create_ticket"],
+                        icon="truck",
+                    ),
+                    AgentTemplate(
+                        id="customer-onboarding", name="Customer Onboarding",
+                        description="Guide new customers through product setup and first steps",
+                        baseSystemPrompt="You are a patient and enthusiastic onboarding specialist. Walk new customers through account setup, key features, and best practices. Celebrate their progress and offer help proactively.",
+                        defaultCapabilities=["guided_setup", "feature_tour", "data_collection", "faq"],
+                        suggestedKnowledgeCategories=["onboarding_guide", "feature_docs", "best_practices"],
+                        defaultTools=["search_knowledge", "update_crm", "send_email"],
+                        icon="rocket",
+                    ),
                 ]
                 for t in templates:
                     db.add(t)
@@ -201,6 +237,7 @@ from app.routes import analytics, logs, brands, settings as settings_routes
 from app.routes import ingestion, users, retraining, admin, tts, rag
 from app.routes import widget, voice_ws, platform, data_explorer
 from app.routes import voice_twilio_stream, voice_twilio_gather, voice_inbound_router
+from app.routes import voice_live
 from app.routes import campaigns, whatsapp, webhooks
 from app.routes import ab_testing
 from app.routes import dnd
@@ -227,6 +264,7 @@ app.include_router(brands.router, prefix="/api/brands", tags=["Brands"])
 app.include_router(tts.router, prefix="/api/tts", tags=["TTS"])
 app.include_router(widget.router, prefix="/api/widget", tags=["Widget"])
 app.include_router(voice_ws.router, prefix="/api/voice", tags=["VoiceWS"])
+app.include_router(voice_live.router, prefix="/api/voice", tags=["VoiceLive"])
 app.include_router(voice_twilio_gather.router, prefix="/api/voice", tags=["VoiceTwilioGather"])
 app.include_router(voice_twilio_stream.router, prefix="/api/voice", tags=["VoiceTwilioStream"])
 app.include_router(voice_inbound_router.router, prefix="/api/voice", tags=["VoiceInboundRouter"])
