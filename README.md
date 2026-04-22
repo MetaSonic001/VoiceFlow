@@ -13,14 +13,21 @@ A multi-tenant SaaS platform for building, deploying, and managing AI-powered vo
 3. [Repository Structure](#repository-structure)
 4. [Tech Stack](#tech-stack)
 5. [How It Works — End to End](#how-it-works--end-to-end)
-6. [Running the Project](#running-the-project)
-7. [Environment Variables](#environment-variables)
-8. [Services & Ports](#services--ports)
-9. [API Reference](#api-reference)
-10. [Implementation Status](#implementation-status)
-11. [Data Models](#data-models)
-12. [Patent — Multi-Tenant RAG Voice Agent System](#patent--multi-tenant-rag-voice-agent-system)
-13. [What Remains — Startup Readiness Checklist](#what-remains--startup-readiness-checklist)
+6. [Voice Pipeline Architecture](#voice-pipeline-architecture)
+7. [RAG Engine Deep Dive](#rag-engine-deep-dive)
+8. [LLM & AI Architecture](#llm--ai-architecture)
+9. [Running the Project](#running-the-project)
+10. [Environment Variables](#environment-variables)
+11. [Services & Ports](#services--ports)
+12. [Service Inventory](#service-inventory)
+13. [API Reference](#api-reference)
+14. [Security Architecture](#security-architecture)
+15. [Implementation Status](#implementation-status)
+16. [Data Models](#data-models)
+17. [Testing](#testing)
+18. [Known Limitations & Technical Debt](#known-limitations--technical-debt)
+19. [Patent — Multi-Tenant RAG Voice Agent System](#patent--multi-tenant-rag-voice-agent-system)
+20. [What Remains — Startup Readiness Checklist](#what-remains--startup-readiness-checklist)
 
 ---
 
@@ -532,6 +539,423 @@ On next query, assemble_context() loads approved examples:
 
 ---
 
+## Voice Pipeline Architecture
+
+VoiceFlow supports **four distinct voice paths**, each optimized for different use cases. All paths share the same RAG engine (`rag_service.py`) for response generation.
+
+### Voice Path Overview
+
+| Path | Protocol | Duplex | Latency | Use Case |
+|---|---|---|---|---|
+| **Twilio Gather** | HTTP (TwiML) | Half | ~3-5s | Simple IVR replacement, no WebSocket needed |
+| **Twilio Media Streams** | WebSocket (μ-law) | Full | ~1-2s | Production calls with barge-in |
+| **Browser Live** | WebSocket (PCM) | Full | ~1-2s | Gemini-live-style browser voice |
+| **Browser Simple** | WebSocket (binary) | Half | ~3-5s | Legacy fallback, batch processing |
+
+### Routing Diagram
+
+```
+                    ┌───────────────────────────────────┐
+                    │    voice_inbound_router.py         │
+                    │   POST /inbound/{agent_id}         │
+                    └──────┬──────────────┬──────────────┘
+                           │              │
+              telephony_provider     telephony_provider
+              == "twilio-gather"     == "twilio-stream"
+                           │              │
+            ┌──────────────▼──┐    ┌──────▼───────────────┐
+            │ voice_twilio_   │    │ voice_twilio_stream.py│
+            │ gather.py       │    │  WS /media-stream/    │
+            │ <Gather> TwiML  │    │  <Connect><Stream>    │
+            └────────┬────────┘    └───────┬──────────────┘
+                     │                     │
+                     ▼                     ▼
+             process_query()      streaming orchestration
+             (non-streaming)      STT → RAG → TTS (streaming)
+                                           │
+          ┌────────────────────────────────┼────────────────────┐
+          ▼                                ▼                    ▼
+   ┌─────────────┐              ┌──────────────┐     ┌─────────────────┐
+   │ stt_service  │              │ rag_service   │     │  tts_router     │
+   │ faster-      │              │ process_query │     │  kokoro/piper/  │
+   │ whisper/vosk │              │ _streaming    │     │  edge/orpheus   │
+   │ /groq        │              └──────────────┘     └─────────────────┘
+   └─────────────┘
+
+   Browser paths (no Twilio):
+   ┌─────────────────┐    ┌──────────────────┐
+   │ voice_ws.py      │    │ voice_live.py     │
+   │ WS /ws/{id}      │    │ WS /live/{id}     │
+   │ half-duplex      │    │ full-duplex       │
+   │ batch processing │    │ Gemini-live-style │
+   │ (legacy)         │    │ VAD + barge-in    │
+   └─────────────────┘    └──────────────────┘
+```
+
+### Path 1 — Twilio TwiML Gather Loop (Half-Duplex)
+
+```mermaid
+sequenceDiagram
+  participant C as Caller
+  participant T as Twilio
+  participant V as VoiceFlow API
+  participant R as RAG Engine
+  C->>T: Dials phone number
+  T->>V: POST /api/voice/inbound/{agent_id}
+  V-->>T: TwiML <Gather input="dtmf speech"><Say>Greeting</Say></Gather>
+  T-->>C: Plays greeting, listens for speech
+  C->>T: Speaks
+  T->>V: POST /api/voice/gather/{agent_id} (SpeechResult)
+  V->>R: process_query(transcript, session)
+  R-->>V: AI response text
+  V-->>T: TwiML <Say>Response</Say><Gather>...
+  T-->>C: Reads response, waits for next input
+  Note over T,V: Loop continues until hangup
+  T->>V: POST /api/voice/status/{agent_id} (completed)
+  V->>V: Save CallLog + async post-call analysis
+```
+
+**How it works:** Twilio handles STT. Each turn is a full HTTP request/response cycle. LLM output is sanitized for TwiML injection before being placed in `<Say>` tags.
+
+### Path 2 — Twilio Media Streams (Full-Duplex, Production)
+
+```mermaid
+sequenceDiagram
+  participant C as Caller
+  participant T as Twilio
+  participant WS as WebSocket Handler
+  participant STT as STT Service
+  participant RAG as RAG Engine
+  participant TTS as TTS Router
+  C->>T: Dials phone number
+  T->>WS: POST /inbound → TwiML <Connect><Stream>
+  T->>WS: WebSocket opened (μ-law 8kHz)
+  loop Real-time audio
+    T->>WS: media event (base64 μ-law)
+    WS->>WS: Decode → PCM 16kHz → VAD (RMS energy)
+    Note over WS: Silence detected (24 frames / ~480ms)
+    WS->>STT: transcribe_bytes(pcm_buffer)
+    STT-->>WS: transcript
+    WS->>RAG: process_query_streaming()
+    loop Token streaming
+      RAG-->>WS: token
+      WS->>TTS: synthesize_streaming(tokens)
+      TTS-->>WS: WAV chunk
+      WS->>WS: WAV → μ-law 8kHz → 160-byte frames
+      WS->>T: media event (20ms pacing)
+    end
+    Note over WS: During playback: monitor for barge-in (RMS > 300)
+    WS->>T: clear event (if barge-in detected)
+  end
+```
+
+**Key features:** Server-side VAD (Voice Activity Detection) using RMS energy thresholds, barge-in/interruption detection, streaming TTS with sentence-boundary chunking, 20ms frame pacing for smooth audio playback.
+
+### Path 3 — Browser Live Voice (Gemini-Live Style)
+
+```mermaid
+sequenceDiagram
+  participant B as Browser (MediaRecorder)
+  participant WS as /api/voice/live/{agent_id}
+  participant STT as faster-whisper
+  participant RAG as RAG Streaming
+  participant TTS as TTS Router
+  B->>WS: WebSocket connect + JWT auth
+  WS-->>B: {"type":"state","state":"listening"}
+  loop Full-duplex voice
+    B->>WS: {"type":"audio","data":"base64 PCM"}
+    WS->>WS: Decode → RMS check → buffer
+    Note over WS: Silence detected (20 frames / ~400ms)
+    WS-->>B: {"type":"state","state":"thinking"}
+    WS->>STT: transcribe_bytes(buffer)
+    STT-->>WS: transcript
+    WS-->>B: {"type":"transcript","text":"..."}
+    WS->>RAG: process_query_streaming()
+    WS-->>B: {"type":"state","state":"speaking"}
+    loop Token → TTS → Audio
+      RAG-->>WS: token
+      WS-->>B: {"type":"response","text":"token"}
+      WS->>TTS: synthesize(sentence)
+      TTS-->>WS: WAV bytes
+      WS-->>B: {"type":"audio","data":"base64 WAV"}
+    end
+    WS-->>B: {"type":"audio_end"}
+    Note over B,WS: Barge-in: if user speaks during<br/>playback with RMS > 200 → interrupt
+  end
+```
+
+**Protocol messages:**
+| Direction | Type | Payload |
+|---|---|---|
+| Client → Server | `audio` | base64 PCM 16kHz mono |
+| Client → Server | `config` | Voice ID selection |
+| Client → Server | `interrupt` | Explicit barge-in |
+| Server → Client | `state` | `listening` / `thinking` / `speaking` |
+| Server → Client | `transcript` | STT result |
+| Server → Client | `response` | LLM token |
+| Server → Client | `audio` | base64 WAV chunk |
+| Server → Client | `audio_end` | TTS complete |
+
+### Outbound Campaign Call Flow
+
+```mermaid
+sequenceDiagram
+  participant A as Admin UI
+  participant API as Campaign API
+  participant Q as Redis Queue
+  participant W as Campaign Worker
+  participant CS as Compliance Service
+  participant TW as Twilio REST API
+  participant AG as Voice Agent
+  A->>API: POST /api/campaigns (create draft)
+  A->>API: POST /api/campaigns/{id}/contacts/upload (CSV)
+  A->>API: POST /api/campaigns/{id}/start
+  API->>Q: Push contact IDs to Redis list
+  API->>W: Launch campaign worker (async)
+  loop For each contact
+    W->>Q: Pop next contact ID
+    W->>CS: validate_before_dial(phone)
+    CS-->>W: (allowed, reason)
+    alt DND / outside hours / max retries
+      W->>W: Skip contact, update status
+    else Allowed
+      W->>TW: Create call with AMD enabled
+      TW-->>W: Call SID
+      TW->>AG: POST /api/voice/outbound/{agent_id}
+      AG->>AG: Check AnsweredBy (human/machine/fax)
+      alt Human answered
+        AG-->>TW: TwiML <Connect><Stream> with contact variables
+        Note over AG: Full voice pipeline runs<br/>(same as inbound)
+      else Machine / Fax
+        AG-->>TW: Hangup (or voicemail message)
+      end
+      TW->>API: POST /api/campaigns/{id}/amd-callback
+      API->>API: Update contact status + campaign stats
+    end
+    W->>W: sleep(1s) rate throttle
+  end
+  W->>API: Mark campaign completed
+  W->>W: Dispatch webhook: campaign.finished
+```
+
+---
+
+## RAG Engine Deep Dive
+
+The RAG engine lives in `rag_service.py` (~1200 lines) and is the central intelligence of the platform. Every query — chat, voice, widget, API — goes through this pipeline.
+
+### 5-Layer Hierarchical Context Assembly
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    assemble_context()                            │
+│                                                                 │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │ Layer 1: GLOBAL SAFETY RULES (hardcoded constant)       │    │
+│  │   • No impersonation, no hallucination                  │    │
+│  │   • No prompt leakage, privacy protection               │    │
+│  │   • Language matching, off-topic handling                │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                          ▼                                      │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │ Layer 2: TENANT (from PostgreSQL → Tenant table)        │    │
+│  │   • Organization name, industry, domain                 │    │
+│  │   • Tenant-wide policyRules                             │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                          ▼                                      │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │ Layer 3: BRAND (from PostgreSQL → Brand table)          │    │
+│  │   • Brand voice and tone                                │    │
+│  │   • Allowed topics, restricted topics                   │    │
+│  │   • Brand-level policyRules                             │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                          ▼                                      │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │ Layer 4: AGENT (from PostgreSQL → Agent + Config)       │    │
+│  │   • Persona name, role, personality traits              │    │
+│  │   • Custom instructions, behavior rules                 │    │
+│  │   • Escalation triggers and rules                       │    │
+│  │   • Knowledge boundaries, confidence threshold          │    │
+│  │   • LLM model selection (from llmPreferences)           │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                          ▼                                      │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │ Layer 5: SESSION (from Redis, 24h TTL)                  │    │
+│  │   • Last 20 conversation turns (user + assistant)       │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                          ▼                                      │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │ Layer 6: CONTACT VARIABLES (optional, outbound only)    │    │
+│  │   • Caller name, order ID, custom CSV fields            │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                          ▼                                      │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │ FEW-SHOT EXAMPLES (from PostgreSQL → RetrainingExample) │    │
+│  │   • Up to 10 approved examples, most recent first       │    │
+│  │   • Format: "User: {query}\nIdeal Response: {response}" │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                                                                 │
+│  All policies from Tenant + Brand + Agent are MERGED into a    │
+│  single mergedPolicies list for retrieval scoring.             │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Hybrid Search — Semantic + BM25 with Reciprocal Rank Fusion
+
+```mermaid
+flowchart TD
+    Q[User Query] --> S[Semantic Search]
+    Q --> B[BM25 Keyword Search]
+
+    S --> |ChromaDB vector similarity<br/>collection: tenant_{id}<br/>filter: agentId metadata<br/>top-K chunks| SR[Semantic Results<br/>score = 1.0 - distance]
+
+    B --> |Redis-stored BM25 index<br/>BM25Okapi scoring<br/>tokenized corpus| BR[BM25 Results<br/>score = BM25 relevance]
+
+    SR --> RRF[Reciprocal Rank Fusion<br/>k=60]
+    BR --> RRF
+
+    RRF --> |Score per doc:<br/>Σ 1/(k + rank + 1)<br/>across both lists| DEDUP[Deduplicate by<br/>content hash]
+
+    DEDUP --> PS[Policy Scoring]
+
+    PS --> |restrict = ×0.05<br/>require = ×2.0<br/>allow = ×1.0| RANKED[Final Ranked Chunks]
+
+    RANKED --> PROMPT[Inject into Prompt]
+```
+
+### Policy Scoring Rules
+
+After retrieval, each chunk's score is modified based on merged tenant/brand/agent policies:
+
+| Rule Action | Score Multiplier | Effect |
+|---|---|---|
+| `restrict` | ×0.05 | Nearly suppressed — chunk almost never reaches the prompt |
+| `require` | ×2.0 | Boosted — chunk ranked higher |
+| `allow` | ×1.0 | Unchanged |
+
+**Matching logic** — a policy rule matches a chunk when:
+| Rule Type | Matches On |
+|---|---|
+| `topic` | Target string found in chunk content (case-insensitive) |
+| `documentSource` | Target found in chunk metadata `source` field |
+| `documentTag` | Target found in chunk metadata `tags` list |
+
+### Dynamic 8-Section Prompt Assembly
+
+`build_system_prompt()` constructs the final system prompt from the assembled context:
+
+| Section | Tag | Content Source |
+|---|---|---|
+| 1 | `[SAFETY RULES]` | Hardcoded global safety constant |
+| 2 | `[ORGANIZATION]` | Tenant name + industry |
+| 3 | `[BRAND GUIDELINES]` | Brand voice, allowed topics, restricted topics ("NEVER discuss: ...") |
+| 4 | `[AGENT]` | Agent name, role, template prompt (with `{{placeholder}}` replacement), persona, custom instructions, behavior rules, knowledge boundaries |
+| 5 | `[LEARNED EXAMPLES]` | Few-shot examples from approved retraining ("User: ...\nIdeal Response: ...") |
+| 6 | `[ESCALATION]` | Escalation triggers + rules (condition → action) |
+| 7 | `[ACTIVE POLICIES]` | Human-readable summary of restrict/require policies |
+| 8 | `[CONTACT CONTEXT]` | Outbound call personalization ("You are speaking with {name}. Their order ID is {value}.") |
+
+Sections are joined with `\n\n---\n\n` delimiters.
+
+### Full Query Pipeline
+
+```mermaid
+flowchart TD
+    INPUT[User Query] --> AC[assemble_context<br/>5-layer hierarchy from DB + Redis]
+    AC --> QD[query_documents<br/>Concurrent: ChromaDB + BM25]
+    QD --> PS[apply_policy_scoring<br/>restrict/require/allow multipliers]
+    PS --> BSP[build_system_prompt<br/>8-section dynamic prompt]
+    BSP --> LLM{Streaming?}
+    LLM -->|Non-streaming| GR[generate_response<br/>Groq API, retry ×4]
+    LLM -->|Streaming| SC[LLMClient.stream_completion<br/>Multi-provider SSE]
+    GR --> SAVE[save_conversation_history<br/>Redis, 24h TTL, 20 turns]
+    SC --> FC{Function call<br/>detected?}
+    FC -->|Yes| TOOL[VoiceToolExecutor.execute<br/>→ inject result → re-stream]
+    FC -->|No| SAVE
+    TOOL --> SAVE
+    SAVE --> OUT[Response + Sources]
+```
+
+---
+
+## LLM & AI Architecture
+
+### Multi-Provider LLM Support
+
+The platform supports four LLM providers, configurable per-agent via `agent.llmPreferences`:
+
+| Provider | Streaming | Non-Streaming | SDK / Method | Notes |
+|---|---|---|---|---|
+| **Groq** | Yes (SSE) | Yes (retry ×4) | Custom httpx SSE parsing | Primary provider. Per-tenant BYOK or platform fallback key. |
+| **OpenAI** | Yes (SDK) | No | `openai.AsyncOpenAI` | Standard OpenAI-compatible API. |
+| **Gemini** | Yes (SDK bridge) | No | `google.generativeai` via `run_in_executor` + `asyncio.Queue` | Converts OpenAI message format → Gemini format. |
+| **Ollama** | Yes (SDK) | No | `ollama.AsyncClient` | Local self-hosted models. No API key required. |
+
+### Per-Tenant Key Resolution
+
+```
+1. Check agent.llmPreferences.llmProvider → determines provider
+2. Look up encrypted API key from tenant.settings (groqApiKey / openaiApiKey / geminiApiKey)
+3. Decrypt via credentials.decrypt_safe (AES-256-GCM)
+4. If tenant key missing → fall back to platform-level key from env vars
+5. Ollama → no key needed (local)
+```
+
+### Function Calling / Voice Tools
+
+During streaming voice responses, the system supports **live function calling**:
+
+1. If agent has `customFunctions` defined, a non-streaming pre-check runs first
+2. LLM output is scanned for tool-call JSON: `{"tool": "<name>", "arguments": {...}}`
+3. If detected → filler audio plays ("Let me check that for you...") → tool executes via HTTP → result injected as follow-up context → final response streams
+
+**Built-in tool registry:**
+| Tool | Action | Status |
+|---|---|---|
+| `book_appointment` | Schedule via calendar API | Scaffold |
+| `lookup_crm` | Customer lookup by phone | Scaffold |
+| `send_sms` | Send SMS via Twilio | Scaffold |
+| `capture_dtmf` | Collect DTMF digits | Scaffold |
+| `update_lead` | Update CRM lead status | Scaffold |
+| `transfer_call` | Warm transfer to human | Scaffold |
+
+### TTS Engine Routing
+
+```
+tts_router.synthesize(text, engine, voice_id, speed)
+        │
+        ├── engine == "kokoro"  → HTTP POST to Kokoro container (port 8880)
+        │                         OpenAI-compatible /v1/audio/speech
+        │
+        ├── engine == "piper"   → HTTP POST to Piper container (port 8890)
+        │                         /v1/audio/speech with fallback to /synthesize
+        │
+        ├── engine == "orpheus" → LLM rewrite (adds <laugh>, <sigh> emotion tags)
+        │                         → then delegates to Kokoro for synthesis
+        │
+        └── engine == "edge"    → Microsoft Edge TTS cloud API
+                                  300+ voices, no local container needed
+```
+
+**Streaming TTS:** `synthesize_streaming()` buffers incoming token stream and flushes on sentence boundaries (`.!?` followed by whitespace) or every ~64 tokens. Each flush produces a full WAV chunk — this is chunked batch synthesis, not true streaming TTS.
+
+### STT Engine Hierarchy
+
+```
+transcribe_bytes(audio, engine, groq_key)
+        │
+        ├── engine == "groq" && key exists → Groq Whisper API (whisper-large-v3-turbo)
+        │
+        └── else → try faster-whisper (local, tiny model, int8)
+                    → try Vosk (local, English small model)
+                    → try Groq API (if key available)
+                    → return "" (silent failure)
+```
+
+**Vosk streaming:** `create_vosk_recognizer()` + `transcribe_stream_chunk()` provide stateful streaming STT using Vosk's `KaldiRecognizer` — only Vosk supports per-chunk streaming; faster-whisper is batch-only.
+
+---
+
 ## Running the Project
 
 ### Prerequisites
@@ -683,6 +1107,62 @@ Primary runtime configuration is loaded from `python/.env` (created by `make env
 | ChromaDB | Docker | 8030 | Vector embeddings (per-tenant collections) |
 | MinIO API | Docker | 9020 | File storage (S3-compatible) |
 | MinIO Console | Docker | 8070 | MinIO web admin |
+
+---
+
+## Service Inventory
+
+The FastAPI backend contains **13 service modules** in `python/backend/app/services/`:
+
+| Service | File | Lines | What It Does |
+|---|---|---|---|
+| **RAG Engine** | `rag_service.py` | ~1200 | 5-layer context injection, hybrid search (semantic + BM25 + RRF), policy scoring, 8-section prompt assembly, multi-LLM generation (streaming + non-streaming), conversation history management |
+| **Document Ingestion** | `ingestion_service.py` | ~820 | Docling (PDF/DOCX/PPTX/XLSX), PaddleOCR (scanned docs), Trafilatura + BeautifulSoup (URLs), SentenceTransformer embedding, ChromaDB storage, BM25 index building in Redis |
+| **TTS Router** | `tts_router.py` | ~135 | Multi-engine text-to-speech dispatch: Kokoro (local CPU), Piper (local ONNX), Edge TTS (cloud), Orpheus (emotion-tagged). Streaming TTS with sentence-boundary chunking. |
+| **STT Service** | `stt_service.py` | ~270 | Multi-engine speech-to-text: faster-whisper (local, int8), Vosk (local, streaming), Groq Whisper API (cloud). Auto-downloads Vosk model on first run. |
+| **Campaign Worker** | `campaign_worker.py` | ~430 | Outbound campaign execution: Redis queue processing, per-tenant Twilio credentials, AMD handling, voicemail detection, rate throttling, campaign lifecycle management |
+| **Compliance Service** | `compliance_service.py` | ~128 | Pre-dial compliance checks: DND registry lookup, calling hours enforcement (timezone-aware), retry limit enforcement |
+| **Webhook Service** | `webhook_service.py` | ~125 | HMAC-SHA256 signed event dispatch to external URLs. 3 retries with exponential backoff. Events: `call.completed`, `campaign.finished`, `escalation.triggered`, `retraining.flagged` |
+| **Flow Engine** | `flow_engine.py` | ~250 | Visual conversation graph walker: executes node-based flows (greeting, knowledge, condition, api_call, human_transfer, end). Supports variable interpolation and conditional branching. |
+| **Voice Tools** | `voice_tools.py` | ~175 | Live function calling during voice conversations: tool registry, HTTP-based tool execution with timeout, filler audio synthesis during tool execution |
+| **Credentials** | `credentials.py` | ~87 | AES-256-GCM encryption/decryption for per-tenant API keys (Twilio, Groq, OpenAI). 96-bit random nonce. Graceful migration from plaintext via `decrypt_safe()`. |
+| **Scheduler** | `scheduler.py` | ~161 | APScheduler nightly cron (02:00): extracts Q/A pairs from flagged calls, embeds approved retraining examples into ChromaDB, creates platform notifications |
+| **Call State** | `call_state.py` | ~110 | Redis-backed call state machine (IDLE → LISTENING → THINKING → SPEAKING) with 2h TTL. Enforces valid transitions. Barge-in: any state → LISTENING always allowed. |
+| **Streaming Orchestrator** | `streaming_orchestrator.py` | ~330 | Reusable real-time voice pipeline: STT → RAG → TTS with PCM energy-based barge-in detection, call state machine integration, μ-law frame pacing |
+
+### Route Files (30 files, ~142 endpoints)
+
+| Route File | Prefix | Endpoints | Description |
+|---|---|---|---|
+| `auth.py` | `/auth` | 3 | Login, signup, user sync |
+| `onboarding.py` | `/onboarding` | 16 | 7-step wizard endpoints |
+| `agents.py` | `/api/agents` | 9 | Agent CRUD + activate/pause + WhatsApp config |
+| `documents.py` | `/api/documents` | 5 | Document CRUD + file upload |
+| `rag.py` | `/api/rag` | 3 | Direct RAG query + conversation history |
+| `runner.py` | `/api/runner` | 3 | Chat + audio endpoints |
+| `ingestion.py` | `/api/ingestion` | 4 | Trigger ingestion + poll status |
+| `templates.py` | `/api/templates` | 4 | Agent template CRUD |
+| `analytics.py` | `/analytics` | 6 | Overview, realtime, charts, agent comparison |
+| `logs.py` | `/api/logs` | 3 | Call log listing + rating + flagging |
+| `brands.py` | `/api/brands` | 5 | Brand CRUD (voice, topics, policies) |
+| `settings.py` | `/api/settings` | 8 | Twilio/Groq credential management |
+| `users.py` | `/api/users` | 3 | User management |
+| `retraining.py` | `/api/retraining` | 6 | Retraining queue + manual trigger |
+| `tts.py` | `/api/tts` | 5 | Voice presets, preview, synthesis, cloning |
+| `widget.py` | `/api/widget` | 6 | Embeddable widget config + session API |
+| `campaigns.py` | `/api/campaigns` | 7 | Campaign CRUD + CSV upload + start/pause + AMD callback |
+| `webhooks.py` | `/api/webhooks` | 5 | Webhook endpoint CRUD + test dispatch |
+| `ab_testing.py` | `/api/ab` | 5 | Experiment CRUD + variant stats + record outcome |
+| `dnd.py` | `/api/dnd` | 4 | DND registry CRUD + bulk import |
+| `whatsapp.py` | `/api/whatsapp` | 1 | WhatsApp inbound webhook handler |
+| `voice_inbound_router.py` | `/api/voice` | 1 | Inbound call dispatcher (gather vs stream) |
+| `voice_twilio_gather.py` | `/api/voice` | 4 | TwiML Gather loop + post-call analysis |
+| `voice_twilio_stream.py` | `/api/voice` | 5 | Twilio Media Streams WS + outbound + transfer |
+| `voice_live.py` | `/api/voice` | 1 | Gemini-live-style browser voice WS |
+| `voice_ws.py` | `/api/voice` | 1 | Legacy browser voice WS |
+| `admin.py` | `/admin` | 7 | Pipeline CRUD + trigger |
+| `platform.py` | `/api` | 5 | Audit, notifications, health |
+| `data_explorer.py` | `/api/data-explorer` | 4 | Postgres/ChromaDB/Redis viewer |
 
 ---
 
@@ -896,6 +1376,121 @@ sequenceDiagram
 GET /health  →  { status: "ok", timestamp: "..." }
 ```
 
+### Campaigns (Outbound Dialing)
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/campaigns/` | List campaigns for tenant |
+| POST | `/api/campaigns/` | Create campaign (draft status) |
+| POST | `/api/campaigns/{id}/contacts/upload` | Upload contacts CSV (phone, name, custom fields) |
+| POST | `/api/campaigns/{id}/start` | Enqueue contacts to Redis + launch campaign worker |
+| POST | `/api/campaigns/{id}/pause` | Pause campaign execution |
+| GET | `/api/campaigns/{id}/stats` | Live stats with Redis queue depth |
+| POST | `/api/campaigns/{id}/amd-callback` | Twilio AMD webhook (answering machine detection) |
+
+### Webhooks
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/webhooks/` | List webhook endpoints for tenant |
+| POST | `/api/webhooks/` | Create webhook endpoint (URL, events, auto-generated secret) |
+| PUT | `/api/webhooks/{id}` | Update webhook config |
+| DELETE | `/api/webhooks/{id}` | Delete webhook endpoint |
+| POST | `/api/webhooks/{id}/test` | Send test event to verify endpoint |
+
+### A/B Testing
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/ab/` | List experiments |
+| POST | `/api/ab/` | Create experiment with variants (prompt, voice, model, temperature) |
+| GET | `/api/ab/{id}/stats` | Variant performance stats (calls, conversions, sentiment) |
+| POST | `/api/ab/{id}/record` | Record call outcome for a variant |
+| DELETE | `/api/ab/{id}` | Delete experiment |
+
+### DND (Do Not Disturb) Registry
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/dnd/` | List DND entries for tenant |
+| POST | `/api/dnd/` | Add number to DND registry |
+| DELETE | `/api/dnd/{id}` | Remove DND entry |
+| POST | `/api/dnd/bulk` | Bulk import DND numbers |
+
+### WhatsApp
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/api/whatsapp/inbound/{agent_id}` | Twilio WhatsApp inbound webhook (text + voice notes, Redis conversation history with 24h TTL) |
+
+### Voice — Browser Live (Gemini-Style)
+| Method | Endpoint | Description |
+|---|---|---|
+| WS | `/api/voice/live/{agent_id}` | Full-duplex browser voice WebSocket with JWT auth, VAD, barge-in, streaming TTS |
+
+### Voice — Twilio Media Streams
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/api/voice/outbound/{agent_id}` | Outbound call TwiML (AMD check + Media Stream connect) |
+| WS | `/api/voice/media-stream/{agent_id}` | Full-duplex Twilio WebSocket (μ-law ↔ PCM) |
+| POST | `/api/voice/transfer/{call_sid}` | Warm transfer to human agent via Twilio REST API |
+| POST | `/api/voice/recording-status/{agent_id}` | Twilio recording callback |
+
+---
+
+## Security Architecture
+
+### Credential Encryption
+
+All tenant-supplied API keys (Twilio, Groq, OpenAI) are encrypted at rest using **AES-256-GCM**:
+
+```
+Encrypt: nonce (96-bit random) + AESGCM.encrypt(key, nonce, plaintext) → base64url(nonce + ciphertext)
+Decrypt: base64url decode → split nonce (12 bytes) + ciphertext → AESGCM.decrypt
+Key: 32-byte key from CREDENTIALS_ENCRYPTION_KEY env var (64-char hex)
+```
+
+- Keys are encrypted per-field before storage in `Tenant.settings` (PostgreSQL JSON)
+- `decrypt_safe()` gracefully handles plaintext values (migration support)
+- `mask()` shows only first 4 characters for display
+
+### Webhook HMAC Signing
+
+All webhook event deliveries are signed with **HMAC-SHA256**:
+- Each `WebhookEndpoint` has an auto-generated `secret`
+- Signature header: `X-VoiceFlow-Signature: sha256=<hex digest>`
+- Payload: JSON body of the event
+- 3 retries with exponential backoff (1s, 2s, 4s) on delivery failure
+
+### TwiML Injection Prevention
+
+LLM-generated text is sanitized before injection into TwiML `<Say>` tags:
+- Strips all XML/SSML tags via regex
+- Escapes `&`, `<`, `>` characters
+- Prevents LLM output from breaking TwiML structure or injecting executable tags
+
+### Tenant Isolation
+
+- **Database:** All queries include `WHERE tenantId = ?` — enforced at ORM level
+- **Vector Store:** Per-tenant ChromaDB collections (`tenant_{tenantId}`) with `agentId` metadata filter
+- **Conversation State:** Redis keys scoped to tenant + agent + session
+- **Credentials:** AES-256-GCM encrypted per-tenant, never cross-readable
+- **Rate Limiting:** Per-tenant via SlowAPI + Redis (falls back to IP-based)
+
+### Authentication Flow
+
+```
+Browser → Django Login (session-based) → Django stores user + tenant in session
+    │
+    ▼
+Django Proxy → Adds x-tenant-id, x-user-id, x-user-email headers
+    │
+    ▼
+FastAPI → Reads headers via get_auth() dependency → AuthContext(tenant_id, user_id)
+    │
+    ▼
+WebSocket endpoints → JWT bearer token in query param → validated via get_current_user()
+```
+
+### Twilio Signature Validation
+
+Inbound Twilio webhooks validate `X-Twilio-Signature` using Twilio's `RequestValidator` with the tenant's auth token. Falls back to allowing unsigned requests when credentials are not configured (development mode only).
+
 ---
 
 ## Implementation Status
@@ -981,6 +1576,12 @@ A complete breakdown of what works versus what needs attention.
 | Issue | Severity | Impact |
 |---|---|---|
 | Demo-mode auth | Low | No production auth — uses header-based tenant context for demos |
+| `@csrf_exempt` on proxy views | Medium | CSRF attacks possible on state-changing Django→FastAPI proxy routes |
+| Open redirect in login `next` param | Medium | Phishing via crafted redirect URL |
+| WebSocket JWT in query string | Medium | Token visible in server logs / browser history |
+| Recording callback bug | Low | Ignores `RecordingStatus` field; assumes audio URL always present |
+| No DB migrations | Medium | `create_all()` only — schema changes require manual intervention |
+| BM25 index rebuilt per query | Low | Performance degrades linearly with corpus size |
 
 ---
 
@@ -1113,6 +1714,88 @@ bm25:{tenantId}:{agentId}                      → JSON { documents, vocabulary 
 job:{jobId}                                    → ingestion job status string
 job:{jobId}:progress                           → "0"–"100" percent
 ```
+
+---
+
+## Testing
+
+### Test Files
+
+| File | Test Count | Focus |
+|---|---|---|
+| `python/tests/conftest.py` | — | Shared fixtures: `async_client`, `test_tenant`, `test_agent`, DB cleanup |
+| `python/tests/test_agents.py` | 5 | Agent CRUD, list, update, delete |
+| `python/tests/test_auth.py` | 4 | Signup, login, token refresh, protected routes |
+| `python/tests/test_tenants.py` | 3 | Tenant creation, settings update, get |
+| `python/tests/test_documents.py` | 3 | Document upload, list, delete |
+| `python/tests/test_knowledge_base.py` | 3 | KB creation, document association, search |
+| `python/tests/test_conversations.py` | 4 | Start conversation, send message, list, history |
+| `python/tests/test_webhooks.py` | 5 | Webhook CRUD + test delivery |
+| `python/tests/test_campaigns.py` | 4 | Campaign CRUD + contact upload |
+| `python/tests/test_rag_query.py` | 4 | RAG query with context, policy scoring, empty KB |
+
+### Running Tests
+
+```bash
+cd python
+# Run all tests
+pytest
+
+# Run with verbose output
+pytest -v
+
+# Run a specific test file
+pytest tests/test_agents.py
+
+# Run a specific test
+pytest tests/test_agents.py::test_create_agent
+```
+
+### Test Fixtures (`conftest.py`)
+
+- `async_client` — `httpx.AsyncClient` pointing at FastAPI's `TestClient`
+- `test_tenant` — auto-created tenant, cleaned up after test
+- `test_agent` — agent linked to `test_tenant`, auto-cleaned
+- Database is reset between test runs via truncation
+
+---
+
+## Known Limitations & Technical Debt
+
+### Security Gaps
+
+| Issue | Impact | Location |
+|---|---|---|
+| Django `@csrf_exempt` on proxy views | CSRF attacks on state-changing proxy routes | `django_frontend/views.py` |
+| Open redirect in `/accounts/login/?next=` | Phishing via crafted redirect URL | `django_frontend/urls.py` |
+| WebSocket JWT in query param | Token in server logs / browser history | `voice_live.py` |
+| `CREDENTIALS_ENCRYPTION_KEY` hardcoded in dev `.env` | Key compromised if `.env` committed | `.env` |
+
+### Performance Concerns
+
+| Issue | Impact | Mitigation |
+|---|---|---|
+| Per-frame `pydub.AudioSegment` in Twilio stream | ~2ms per frame, adds latency at scale | Batch or use raw PCM slicing |
+| BM25 built on every query (no index persistence) | O(n) per query on full corpus | Pre-build index on document ingest |
+| No DB connection pooling configured | Connection exhaustion under load | Add SQLAlchemy pool settings |
+| Unbounded `audio_buffer` in `voice_live.py` | Memory growth on long calls | Add max buffer size + flush |
+| Fire-and-forget `asyncio.create_task` | Silent failures, no retry | Add task error handlers or use Celery |
+
+### Known Bugs
+
+| Bug | Trigger | Location |
+|---|---|---|
+| Recording callback ignores `RecordingStatus` | Twilio posts status updates; code assumes audio URL always present | `voice_twilio.py` |
+| `streaming_orchestrator.py` orphaned | Imported nowhere; dead code | `python/services/` |
+| `voice.py` partially dead | Old half-duplex code; some paths unreachable | `python/routes/voice.py` |
+
+### Architecture Debt
+
+- **No message queue**: Campaign worker runs in-process; should use Celery/Redis queue with worker processes
+- **No circuit breaker**: External API failures (Twilio, LLM providers) propagate directly to callers
+- **No structured logging**: Uses `print()` and basic `logging`; needs JSON structured logs for production observability
+- **No database migrations**: Relies on `create_all()` — production needs Alembic migration chain
+- **No health checks for dependencies**: `/health` returns OK without checking Postgres/Redis/ChromaDB connectivity
 
 ---
 
