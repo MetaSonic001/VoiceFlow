@@ -53,6 +53,7 @@ help: ## Show this help
 	@Write-Host '    make env               Create .env from .env.example'
 	@Write-Host '    make migrate           Run Django makemigrations + migrate'
 	@Write-Host '    make makemigrations    Run Django makemigrations only'
+	@Write-Host '    make db-check          Verify Postgres creds (auto-fix stale volume)'
 	@Write-Host '    make superuser         Create Django admin superuser'
 	@Write-Host '    make seed              Seed default agent templates'
 	@Write-Host ''
@@ -78,7 +79,7 @@ help: ## Show this help
 # ─── FIRST-TIME INIT ─────────────────────────────────────────────
 
 .PHONY: init
-init: venv install env docker wait migrate seed ## One-time full setup
+init: venv install env docker wait db-check migrate create-tables seed ## One-time full setup
 	@Write-Host ''
 	@Write-Host '  ═══════════════════════════════════════════════════' -ForegroundColor Cyan
 	@Write-Host '  Setup complete!' -ForegroundColor Green
@@ -123,6 +124,11 @@ docker: ## Start Docker services (Postgres, MinIO, ChromaDB, Redis, TTS)
 wait:
 	@Write-Host 'Waiting for services to be ready...' -ForegroundColor Yellow
 	@Start-Sleep -Seconds 10
+
+.PHONY: db-check
+db-check: ## Verify Postgres credentials; reset volume if stale
+	@Write-Host 'Checking Postgres credentials...' -ForegroundColor Yellow
+	@$$ok = $$false; try { docker compose exec -T postgres psql -U vf_admin -d voiceflow_prod -c 'SELECT 1' 2>$$null | Out-Null; if ($$LASTEXITCODE -eq 0) { $$ok = $$true } } catch {}; if (-not $$ok) { Write-Host 'Postgres auth failed — volume has stale credentials. Recreating...' -ForegroundColor Red; docker compose down -v postgres 2>$$null; docker compose up -d postgres; Write-Host 'Waiting for fresh Postgres...' -ForegroundColor Yellow; $$a=0; while ($$a -lt 20) { try { docker compose exec -T postgres pg_isready -U vf_admin 2>$$null | Out-Null; if ($$LASTEXITCODE -eq 0) { break } } catch {}; Start-Sleep 2; $$a++ }; Write-Host 'Postgres recreated with correct credentials.' -ForegroundColor Green } else { Write-Host 'Postgres credentials OK.' -ForegroundColor Green }
 
 .PHONY: backend
 backend: ## Start FastAPI backend (foreground, port 8040)
@@ -204,6 +210,12 @@ superuser: ## Create Django admin superuser
 seed: ## Seed default agent templates
 	@Write-Host 'Seeding default templates...' -ForegroundColor Yellow
 	@Push-Location backend; & '$(PYTHON)' -c "from main import seed_defaults; import asyncio; asyncio.run(seed_defaults())"; Pop-Location
+
+.PHONY: create-tables
+create-tables: ## Create SQLAlchemy tables (FastAPI backend models)
+	@Write-Host 'Creating SQLAlchemy tables...' -ForegroundColor Yellow
+	@Push-Location backend; & '$(PYTHON)' create_tables.py; Pop-Location
+	@Write-Host 'SQLAlchemy tables ready.' -ForegroundColor Green
 
 .PHONY: setup
 setup: install docker wait migrate ## Setup without venv creation
