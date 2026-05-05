@@ -4,6 +4,8 @@ STT (Speech-to-Text) Service.
 Primary engine : faster-whisper (tiny or distil-small.en) — CPU, int8
 Secondary engine: Vosk KaldiRecognizer (offline, auto-downloads 40 MB model)
 Fallback engine : Groq Whisper API
+Indian languages: Sarvam AI (pip install sarvamai) — 22 Indian languages + Hinglish
+Noise reduction : noisereduce (spectral gating, CPU-only, applied before STT)
 """
 from __future__ import annotations
 
@@ -17,6 +19,8 @@ import wave
 import zipfile
 from typing import Any, Optional
 
+import numpy as np
+
 from app.config import settings
 
 logger = logging.getLogger("voiceflow.stt")
@@ -26,6 +30,37 @@ _WHISPER_AVAILABLE = False
 
 _VOSK_MODEL = None
 _VOSK_AVAILABLE = False
+
+_NOISEREDUCE_AVAILABLE = False
+
+# ── Noise reduction availability check ───────────────────────────────────────
+
+try:
+    import noisereduce  # noqa: F401
+    _NOISEREDUCE_AVAILABLE = True
+    logger.info("[stt] noisereduce available — noise suppression enabled")
+except ImportError:
+    logger.info("[stt] noisereduce not installed — skipping noise suppression")
+
+
+def _apply_noise_reduction(pcm_bytes: bytes, sample_rate: int = 16000) -> bytes:
+    """
+    Apply spectral-gating noise reduction to raw 16-bit mono PCM bytes.
+    Returns cleaned PCM bytes. Falls back to original if noisereduce unavailable.
+    Sarvam AI / OmniDim both suppress noise at this layer for India call quality.
+    """
+    if not _NOISEREDUCE_AVAILABLE or not pcm_bytes:
+        return pcm_bytes
+    try:
+        import noisereduce as nr
+        n = len(pcm_bytes) // 2
+        samples = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+        reduced = nr.reduce_noise(y=samples, sr=sample_rate, prop_decrease=0.75, stationary=False)
+        out = (reduced * 32768.0).clip(-32768, 32767).astype(np.int16)
+        return out.tobytes()
+    except Exception as exc:
+        logger.debug("[stt] noise reduction skipped: %s", exc)
+        return pcm_bytes
 
 
 def _load_faster_whisper() -> None:
@@ -130,15 +165,29 @@ class STTService:
         sample_rate: int = 16000,
         engine: str = "faster-whisper",
         groq_api_key: Optional[str] = None,
+        sarvam_api_key: Optional[str] = None,
+        language: Optional[str] = None,
     ) -> str:
         """
         Transcribe raw PCM 16-bit mono bytes.
 
         engine priorities (auto-falls-back):
-          1. faster-whisper (device='cpu', int8)
-          2. vosk
-          3. groq (if engine=='groq' and groq_api_key provided)
+          1. sarvam  — 22 Indian languages + Hinglish (requires SARVAM_API_KEY)
+          2. faster-whisper (device='cpu', int8)
+          3. vosk
+          4. groq (if engine=='groq' and groq_api_key provided)
+
+        Noise reduction (noisereduce spectral gating) is applied before transcription
+        when noisereduce is installed — critical for India call quality.
         """
+        # Apply noise reduction before any engine
+        audio_bytes = await asyncio.get_event_loop().run_in_executor(
+            None, _apply_noise_reduction, audio_bytes, sample_rate
+        )
+
+        if engine == "sarvam" and sarvam_api_key:
+            return await self._transcribe_sarvam(audio_bytes, sample_rate, sarvam_api_key, language)
+
         if engine == "groq" and groq_api_key:
             return await self._transcribe_groq(audio_bytes, sample_rate, groq_api_key)
 
@@ -209,6 +258,51 @@ class STTService:
             return text if text else None
 
         return await loop.run_in_executor(None, _run)
+
+    async def _transcribe_sarvam(
+        self, pcm_bytes: bytes, sample_rate: int, api_key: str, language: Optional[str] = None
+    ) -> str:
+        """
+        Transcribe using Sarvam AI — 22 Indian languages + Hinglish code-switching.
+
+        Sarvam API docs: https://docs.sarvam.ai/api-reference-docs/speech-to-text
+        Model: saarika:v2 — 8kHz telephony-optimised, mulaw/PCM, real-time WebSocket.
+        language_code examples: hi-IN, ta-IN, te-IN, kn-IN, ml-IN, bn-IN, mr-IN,
+                                  gu-IN, pa-IN, od-IN, ur-IN, en-IN (auto-detect if None)
+        """
+        import httpx
+
+        wav_bytes = _pcm_bytes_to_wav(pcm_bytes, sample_rate)
+        buf = io.BytesIO(wav_bytes)
+        try:
+            form_data = {
+                "model": "saarika:v2",
+                "with_timestamps": "false",
+                "with_disfluencies": "false",
+            }
+            if language:
+                form_data["language_code"] = language
+            # else: Sarvam auto-detects language
+
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(
+                    "https://api.sarvam.ai/speech-to-text",
+                    headers={"api-subscription-key": api_key},
+                    files={"file": ("audio.wav", buf, "audio/wav")},
+                    data=form_data,
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    # Sarvam returns {"transcript": "...", "language_code": "hi-IN", ...}
+                    transcript = data.get("transcript", "").strip()
+                    detected_lang = data.get("language_code")
+                    if detected_lang:
+                        logger.info("[stt] sarvam detected language: %s", detected_lang)
+                    return transcript
+                logger.warning("[stt] Sarvam STT returned %s: %s", resp.status_code, resp.text[:200])
+        except Exception as exc:
+            logger.warning("[stt] Sarvam STT request failed: %s", exc)
+        return ""
 
     async def _transcribe_faster_whisper(self, pcm_bytes: bytes, sample_rate: int) -> str:
         if not _WHISPER_AVAILABLE or _WHISPER_MODEL is None:

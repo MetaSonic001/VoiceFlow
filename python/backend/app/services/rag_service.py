@@ -77,6 +77,43 @@ GROQ_MODELS_ALLOWLIST = [
 CONVERSATION_TTL = 86400  # 24 hours
 MAX_CONVERSATION_TURNS = 20
 
+# ── Prompt Injection Defense ──────────────────────────────────────────────────
+# Pattern-based detection of common jailbreak/injection attempts.
+# Used in process_query_streaming() before sending to LLM.
+# Reference: OWASP LLM01 — Prompt Injection.
+
+_INJECTION_PATTERNS: list[re.Pattern] = [p for p in [
+    re.compile(r"ignore\s+(?:all\s+)?(?:previous|above|prior)\s+instructions?", re.I),
+    re.compile(r"disregard\s+(?:your\s+)?(?:system\s+)?(?:prompt|instructions?)", re.I),
+    re.compile(r"you\s+are\s+now\s+(?:a\s+)?(?:DAN|jailbreak|unrestricted)", re.I),
+    re.compile(r"forget\s+(?:everything|all)\s+(?:you\s+(?:were\s+)?told|above)", re.I),
+    re.compile(r"repeat\s+(?:after\s+me|this\s+prompt|your\s+system\s+prompt)", re.I),
+    re.compile(r"(?:reveal|show|print|output)\s+(?:your\s+)?system\s+prompt", re.I),
+    re.compile(r"act\s+as\s+(?:if\s+you\s+(?:have\s+no|are\s+without))\s+restrictions?", re.I),
+    re.compile(r"\[\s*SYSTEM\s*\]|\[INST\]|<\s*system\s*>", re.I),
+    re.compile(r"jailbreak|dan\s+mode|developer\s+mode|god\s+mode", re.I),
+]]
+
+_MAX_QUERY_LENGTH = 2000  # chars — truncate beyond this to prevent token flooding
+
+
+def _sanitize_query(query: str) -> tuple[str, bool]:
+    """
+    Sanitize user query for prompt injection.
+    Returns (sanitized_query, was_flagged).
+    Truncates long inputs; pattern-matches known jailbreak phrases.
+    """
+    # Truncate
+    q = query.strip()[:_MAX_QUERY_LENGTH]
+    # Strip null bytes and control characters
+    q = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", q)
+
+    for pattern in _INJECTION_PATTERNS:
+        if pattern.search(q):
+            logger.warning("[rag] prompt injection attempt detected: %r", q[:120])
+            return q, True
+    return q, False
+
 
 # ── 1. Conversation History (Redis) ──────────────────────────────────────────
 
@@ -1100,6 +1137,12 @@ async def process_query_streaming(
 
     Yields: str tokens or {"tool_call": ..., "tool_result": ...} dicts for function calls.
     """
+    # 0. Sanitize query — prompt injection defense (OWASP LLM01)
+    query, injection_flagged = _sanitize_query(query)
+    if injection_flagged:
+        yield "I'm sorry, I can't process that request."
+        return
+
     # 1. Assemble context
     ctx = await assemble_context(db, tenant_id, agent_id, session_id, contact_variables)
 

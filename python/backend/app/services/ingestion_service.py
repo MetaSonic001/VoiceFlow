@@ -52,7 +52,10 @@ text_splitter = RecursiveCharacterTextSplitter(
 def _get_embedding_model() -> SentenceTransformer:
     global _embedding_model
     if _embedding_model is None:
-        model_name = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+        # Default: paraphrase-multilingual-MiniLM-L12-v2 (512MB, 50+ languages)
+        # This enables cross-lingual RAG: Hindi query retrieves from English KB, etc.
+        # Fallback env var EMBEDDING_MODEL allows overriding (e.g. all-MiniLM-L6-v2 for English-only).
+        model_name = os.getenv("EMBEDDING_MODEL", "paraphrase-multilingual-MiniLM-L12-v2")
         _embedding_model = SentenceTransformer(model_name)
         logger.info(f"[ingestion] Loaded embedding model: {model_name}")
     return _embedding_model

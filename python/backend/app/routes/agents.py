@@ -251,6 +251,135 @@ async def activate_agent(agent_id: str, auth: AuthContext = Depends(get_auth), d
     return {"success": True}
 
 
+@router.post("/generate-from-prompt")
+async def generate_agent_from_prompt(
+    request: Request,
+    auth: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Prompt-based agent creation: "describe your agent in one sentence → auto-fills all fields."
+
+    Mirrors OmniDimension's one-line agent creation flow.
+    The LLM returns a complete agent config that can be used to pre-fill the wizard
+    or create the agent directly with create=true.
+
+    Request body:
+    {
+      "prompt": "A friendly sales agent for our SaaS startup that qualifies leads and books demos",
+      "create": false    // if true, also creates the agent immediately and returns its id
+    }
+
+    Returns:
+    {
+      "name": "Sales Lead Qualifier",
+      "description": "...",
+      "systemPrompt": "...",
+      "voiceType": "female",
+      "templateId": "cold-calling",
+      "llmPreferences": {"model": "llama-3.3-70b-versatile"},
+      "suggestedKnowledgeTopics": [...],
+      "suggestedChannels": ["voice", "whatsapp"],
+      "agentId": "..."    // only if create=true
+    }
+    """
+    from app.models import Tenant
+    from app.services.credentials import decrypt_safe
+    from app.config import settings as app_settings
+    import httpx, json
+
+    body = await request.json()
+    prompt = (body.get("prompt") or "").strip()[:500]
+    if not prompt:
+        return JSONResponse({"error": "prompt is required"}, status_code=400)
+
+    do_create = bool(body.get("create", False))
+
+    # Resolve Groq key
+    tenant_res = await db.execute(select(Tenant).where(Tenant.id == auth.tenant_id))
+    tenant = tenant_res.scalar_one_or_none()
+    groq_key = app_settings.GROQ_API_KEY
+    if tenant and tenant.settings:
+        enc = tenant.settings.get("groqApiKey")
+        if enc:
+            decrypted = decrypt_safe(enc)
+            if decrypted and decrypted.startswith("gsk_"):
+                groq_key = decrypted
+
+    if not groq_key:
+        return JSONResponse({"error": "No Groq API key configured"}, status_code=503)
+
+    generation_prompt = f"""Given this agent description, generate a complete VoiceFlow agent configuration.
+Return ONLY valid JSON — no markdown, no explanation.
+
+DESCRIPTION: "{prompt}"
+
+Generate JSON with exactly these fields:
+{{
+  "name": "short 2-4 word agent name",
+  "description": "one sentence description",
+  "systemPrompt": "full system prompt (3-5 sentences, professional tone, defines persona, goals, constraints)",
+  "voiceType": "male" or "female",
+  "templateId": one of: "customer-support" | "cold-calling" | "appointment-setter" | "healthcare" | "real-estate" | "e-commerce" | "lead-qualification" | "faq-bot" | "hr-recruiter" | "debt-collection",
+  "llmPreferences": {{"model": "llama-3.3-70b-versatile"}},
+  "tokenLimit": 4096,
+  "suggestedKnowledgeTopics": ["list", "of", "3-5 knowledge base topics to upload"],
+  "suggestedChannels": ["voice and/or whatsapp and/or chat"],
+  "sttEngine": "faster-whisper" or "sarvam" (use sarvam if Indian language context detected),
+  "ttsEngine": "kokoro" or "sarvam" (use sarvam if Indian language context detected),
+  "ttsLanguageCode": "en-IN" or relevant language code if non-English detected
+}}"""
+
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
+                json={
+                    "model": "llama-3.3-70b-versatile",
+                    "messages": [
+                        {"role": "system", "content": "You are an expert at configuring AI voice agents. Return valid JSON only."},
+                        {"role": "user", "content": generation_prompt},
+                    ],
+                    "temperature": 0.4,
+                    "max_tokens": 1024,
+                },
+            )
+    except Exception as exc:
+        return JSONResponse({"error": f"LLM request failed: {exc}"}, status_code=503)
+
+    if resp.status_code != 200:
+        return JSONResponse({"error": f"LLM returned {resp.status_code}"}, status_code=503)
+
+    content = resp.json()["choices"][0]["message"]["content"].strip()
+    content = content.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+
+    try:
+        agent_config: dict = json.loads(content)
+    except json.JSONDecodeError:
+        return JSONResponse({"error": "LLM returned invalid JSON", "raw": content[:500]}, status_code=500)
+
+    if do_create:
+        agent = Agent(
+            name=agent_config.get("name", "New Agent"),
+            description=agent_config.get("description", ""),
+            systemPrompt=agent_config.get("systemPrompt", ""),
+            voiceType=agent_config.get("voiceType", "female"),
+            templateId=agent_config.get("templateId"),
+            llmPreferences=agent_config.get("llmPreferences", {"model": "llama-3.3-70b-versatile"}),
+            tokenLimit=agent_config.get("tokenLimit", 4096),
+            tenantId=auth.tenant_id,
+            userId=auth.user_id,
+        )
+        db.add(agent)
+        await db.flush()
+        await db.commit()
+        await db.refresh(agent)
+        agent_config["agentId"] = agent.id
+
+    return JSONResponse(agent_config, status_code=201 if do_create else 200)
+
+
 @router.post("/{agent_id}/pause")
 async def pause_agent(agent_id: str, auth: AuthContext = Depends(get_auth), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.tenantId == auth.tenant_id))

@@ -4,10 +4,12 @@ Twilio Gather-loop voice handler — legacy inbound flow.
 Renamed from voice.py (Prompt 3).
 All routes live here so voice_inbound_router.py can delegate to handle_inbound_call().
 """
+import asyncio
 import json
 import logging
 import re
 from datetime import datetime, timezone
+from typing import Optional
 
 from fastapi import APIRouter, Depends, Request, BackgroundTasks
 from fastapi.responses import Response
@@ -222,6 +224,32 @@ async def voice_gather(
     return Response(content=str(resp), media_type="application/xml")
 
 
+# ── Post-call delivery helper ────────────────────────────────────────────────
+
+async def _run_post_call_delivery(
+    *,
+    tenant_id: str,
+    agent_id: str,
+    call_log_id: str,
+    transcript: str,
+    analysis: dict,
+    groq_key: Optional[str],
+) -> None:
+    """Fire-and-forget: lead extraction + CRM/Slack/webhook delivery."""
+    try:
+        from app.services.post_call_delivery import deliver_post_call
+        await deliver_post_call(
+            tenant_id=tenant_id,
+            agent_id=agent_id,
+            call_log_id=call_log_id,
+            transcript=transcript,
+            analysis=analysis,
+            groq_key=groq_key,
+        )
+    except Exception:
+        logger.exception("[post_call] delivery pipeline failed for call %s", call_log_id)
+
+
 # ── Post-call LLM analysis (Claim 12) ───────────────────────────────────────
 
 async def analyze_call(call_log_id: str, tenant_id: str):
@@ -261,6 +289,10 @@ async def analyze_call(call_log_id: str, tenant_id: str):
 - "actionItems": array of follow-up actions needed
 - "qualityScore": 1-10 rating of the AI agent's response quality
 - "summary": 2-3 sentence summary
+- "coachingInsights": array of specific improvement suggestions for the agent
+- "goalAchieved": boolean — did the agent achieve its likely goal?
+- "missedOpportunities": array of moments the agent could have done better
+- "hallucinationRisk": "low" | "medium" | "high" — did any agent response seem fabricated?
 
 Transcript:
 {transcript}"""
@@ -300,6 +332,19 @@ Transcript:
                     log.analysis = analysis
                     await db.commit()
                     logger.info("Post-call analysis completed for call %s", call_log_id)
+
+                    # ── AI Call Coach + CRM delivery ─────────────────────────
+                    # Extends analysis with coaching insights, then pushes to CRM/Slack
+                    asyncio.create_task(
+                        _run_post_call_delivery(
+                            tenant_id=log.tenantId,
+                            agent_id=log.agentId,
+                            call_log_id=call_log_id,
+                            transcript=transcript,
+                            analysis=analysis,
+                            groq_key=groq_key,
+                        )
+                    )
                 else:
                     logger.warning("Groq API returned %s for call analysis", resp.status_code)
 
