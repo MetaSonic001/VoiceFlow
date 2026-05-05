@@ -247,7 +247,6 @@ app.include_router(auth.router, prefix="/auth", tags=["Auth"])
 app.include_router(onboarding.router, prefix="/onboarding", tags=["Onboarding"])
 app.include_router(analytics.router, prefix="/analytics", tags=["Analytics"])
 app.include_router(admin.router, prefix="/admin", tags=["Admin"])
-app.include_router(settings_routes.router, prefix="/settings", tags=["Settings-NoPrefix"])
 
 # WITH /api prefix (matches Express)
 app.include_router(agents.router, prefix="/api/agents", tags=["Agents"])

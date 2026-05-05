@@ -173,18 +173,22 @@ async def assemble_context(
         "model": "llama-3.1-8b-instant",
     }
 
-    # Layer 2: Tenant
-    result = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
-    tenant = result.scalar_one_or_none()
+    # Layer 2 + 4: Tenant and Agent fetched in parallel (independent queries)
+    tenant_result, agent_result = await asyncio.gather(
+        db.execute(select(Tenant).where(Tenant.id == tenant_id)),
+        db.execute(select(Agent).where(Agent.id == agent_id)),
+    )
+    tenant = tenant_result.scalar_one_or_none()
+    agent = agent_result.scalar_one_or_none()
+
     if tenant:
         ts = tenant.settings or {}
         ctx["tenantName"] = tenant.name or ""
         ctx["tenantIndustry"] = ts.get("industry", "")
         ctx["tenantPolicies"] = tenant.policyRules or []
 
-    # Layer 4: Agent
-    result = await db.execute(select(Agent).where(Agent.id == agent_id))
-    agent = result.scalar_one_or_none()
+    brand_id = agent.brandId if agent else None
+
     if agent:
         ctx["agentName"] = agent.name
         ctx["agentPersona"] = agent.systemPrompt or ""
@@ -197,21 +201,43 @@ async def assemble_context(
             model = "llama-3.1-8b-instant"
         ctx["model"] = model
 
-        # Layer 3: Brand (via agent.brandId)
-        if agent.brandId:
-            br = await db.execute(select(Brand).where(Brand.id == agent.brandId))
-            brand = br.scalar_one_or_none()
-            if brand:
-                ctx["brandVoice"] = brand.brandVoice or ""
-                ctx["brandAllowedTopics"] = brand.allowedTopics or []
-                ctx["brandRestrictedTopics"] = brand.restrictedTopics or []
-                ctx["brandPolicies"] = brand.policyRules or []
+    # Layer 3 + AgentConfiguration + RetrainingExamples fetched in parallel
+    async def _noop():
+        return None
 
-        # Agent Configuration (detailed config)
-        cr = await db.execute(
-            select(AgentConfiguration).where(AgentConfiguration.agentId == agent_id)
+    brand_coro = (
+        db.execute(select(Brand).where(Brand.id == brand_id))
+        if brand_id
+        else _noop()
+    )
+    config_coro = db.execute(
+        select(AgentConfiguration).where(AgentConfiguration.agentId == agent_id)
+    )
+    retrain_coro = db.execute(
+        select(RetrainingExample)
+        .where(
+            RetrainingExample.tenantId == tenant_id,
+            RetrainingExample.agentId == agent_id,
+            RetrainingExample.status.in_(["approved", "in_prompt"]),
         )
-        config = cr.scalar_one_or_none()
+        .order_by(RetrainingExample.approvedAt.desc())
+        .limit(10)
+    )
+
+    brand_res, config_res, retrain_res = await asyncio.gather(
+        brand_coro, config_coro, retrain_coro
+    )
+
+    if agent and brand_id and brand_res is not None:
+        brand = brand_res.scalar_one_or_none()
+        if brand:
+            ctx["brandVoice"] = brand.brandVoice or ""
+            ctx["brandAllowedTopics"] = brand.allowedTopics or []
+            ctx["brandRestrictedTopics"] = brand.restrictedTopics or []
+            ctx["brandPolicies"] = brand.policyRules or []
+
+    if agent:
+        config = config_res.scalar_one_or_none()
         if config:
             ctx["agentRole"] = config.agentRole or ""
             ctx["agentCustomInstructions"] = config.customInstructions or ""
@@ -224,7 +250,7 @@ async def assemble_context(
             ctx["confidenceThreshold"] = config.confidenceThreshold or 0.7
             ctx["voiceId"] = config.voiceId or ""
 
-            # Agent Template (base system prompt)
+            # Agent Template (base system prompt) — fetch only if needed
             if config.templateId:
                 tr = await db.execute(
                     select(AgentTemplate).where(AgentTemplate.id == config.templateId)
@@ -240,19 +266,9 @@ async def assemble_context(
             all_policies.extend(src)
     ctx["mergedPolicies"] = all_policies
 
-    # Few-shot examples (from retraining pipeline)
+    # Few-shot examples (from retraining pipeline — fetched in parallel above)
     try:
-        fsr = await db.execute(
-            select(RetrainingExample)
-            .where(
-                RetrainingExample.tenantId == tenant_id,
-                RetrainingExample.agentId == agent_id,
-                RetrainingExample.status.in_(["approved", "in_prompt"]),
-            )
-            .order_by(RetrainingExample.approvedAt.desc())
-            .limit(10)
-        )
-        for ex in fsr.scalars().all():
+        for ex in retrain_res.scalars().all():
             ctx["fewShotExamples"].append({
                 "userQuery": ex.userQuery,
                 "idealResponse": ex.idealResponse,
@@ -355,6 +371,30 @@ async def _semantic_search(
         return []
 
 
+# ── BM25 in-memory cache ──────────────────────────────────────────────────────
+# Keyed by (tenant_id, agent_id, md5_of_raw_redis_data).
+# Avoids re-deserializing and re-building the BM25Okapi object on every query.
+# Entries are evicted automatically when the Redis data changes (hash mismatch).
+_BM25_CACHE_MAX = 32  # max number of distinct (tenant, agent) indexes to keep
+
+_bm25_cache: dict[tuple, tuple] = {}  # key → (BM25Okapi, documents, metadatas)
+_bm25_cache_order: list[tuple] = []   # insertion order for simple LRU eviction
+
+
+def _bm25_cache_get(cache_key: tuple):
+    return _bm25_cache.get(cache_key)
+
+
+def _bm25_cache_put(cache_key: tuple, value: tuple) -> None:
+    if cache_key in _bm25_cache:
+        _bm25_cache_order.remove(cache_key)
+    elif len(_bm25_cache) >= _BM25_CACHE_MAX:
+        oldest = _bm25_cache_order.pop(0)
+        _bm25_cache.pop(oldest, None)
+    _bm25_cache[cache_key] = value
+    _bm25_cache_order.append(cache_key)
+
+
 async def _bm25_search(
     tenant_id: str,
     agent_id: str,
@@ -363,6 +403,8 @@ async def _bm25_search(
 ) -> list[dict]:
     """
     BM25 keyword search using pre-built index from Redis.
+    The deserialized BM25Okapi object is cached in memory keyed by a hash of the
+    raw Redis data — avoids repeated JSON parse + index rebuild on every query.
     Falls back to empty if no index exists.
     """
     r = await get_redis()
@@ -375,25 +417,30 @@ async def _bm25_search(
         if not data:
             return []
 
-        bm25_data = json.loads(data)
-        documents = bm25_data.get("documents", [])
-        ids = bm25_data.get("ids", [])
-        metadatas = bm25_data.get("metadatas", [])
-        tokenized = bm25_data.get("tokenized", [])
+        # Use md5 of raw data as cache key — invalidates automatically when updated
+        data_hash = hashlib.md5(data.encode() if isinstance(data, str) else data).hexdigest()
+        cache_key = (tenant_id, agent_id, data_hash)
 
-        if not documents or not tokenized:
-            return []
+        cached = _bm25_cache_get(cache_key)
+        if cached is not None:
+            bm25, documents, metadatas = cached
+        else:
+            bm25_data = json.loads(data)
+            documents = bm25_data.get("documents", [])
+            metadatas = bm25_data.get("metadatas", [])
+            tokenized = bm25_data.get("tokenized", [])
 
-        # Build BM25 index
-        from rank_bm25 import BM25Okapi
-        bm25 = BM25Okapi(tokenized)
+            if not documents or not tokenized:
+                return []
+
+            from rank_bm25 import BM25Okapi
+            bm25 = BM25Okapi(tokenized)
+            _bm25_cache_put(cache_key, (bm25, documents, metadatas))
 
         # Score query
+        import numpy as np
         query_tokens = query.lower().split()
         scores = bm25.get_scores(query_tokens)
-
-        # Get top-K
-        import numpy as np
         top_indices = np.argsort(scores)[::-1][:top_k]
 
         results = []

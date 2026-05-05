@@ -1,5 +1,6 @@
 # Ignore downloaded models and large data
 models/
+python/backend/models/
 
 # Keep existing repository-level ignores as needed
 node_modules/
