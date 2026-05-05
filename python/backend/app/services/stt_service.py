@@ -43,19 +43,98 @@ except ImportError:
     logger.info("[stt] noisereduce not installed — skipping noise suppression")
 
 
-def _apply_noise_reduction(pcm_bytes: bytes, sample_rate: int = 16000) -> bytes:
+# ── Adaptive noise calibration ────────────────────────────────────────────────
+# Per-call noise floor estimate.  Key: call_sid, value: estimated noise RMS.
+# Calibration uses the first 500ms of audio to classify the environment and
+# select the appropriate prop_decrease level:
+#   quiet/office  → 0.4 (light filtering)
+#   typical call  → 0.6
+#   noisy street  → 0.85 (heavy filtering for India market/street calls)
+_noise_floor_cache: dict[str, float] = {}  # call_sid → noise_floor_rms
+
+
+def _estimate_noise_floor(pcm_bytes: bytes) -> float:
     """
-    Apply spectral-gating noise reduction to raw 16-bit mono PCM bytes.
-    Returns cleaned PCM bytes. Falls back to original if noisereduce unavailable.
+    Estimate background noise RMS from a short PCM segment (first 500ms recommended).
+    Uses the quietest 10% of 20ms frames as a noise floor estimator.
+    """
+    n = len(pcm_bytes) // 2
+    if n == 0:
+        return 0.0
+    samples = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+    frame_size = int(0.02 * 16000)  # 20ms frames
+    rms_values = []
+    for i in range(0, len(samples) - frame_size, frame_size):
+        frame = samples[i:i + frame_size]
+        rms_values.append(float(np.sqrt(np.mean(frame ** 2))))
+    if not rms_values:
+        return 0.0
+    rms_values.sort()
+    quiet_frames = rms_values[: max(1, len(rms_values) // 10)]
+    return sum(quiet_frames) / len(quiet_frames)
+
+
+def _noise_prop_decrease(noise_floor: float) -> float:
+    """
+    Map a noise floor RMS to an appropriate noisereduce prop_decrease.
+    Quiet office: low floor → gentle filter (0.4)
+    Busy street / market: high floor → aggressive filter (0.85)
+    """
+    if noise_floor < 0.01:      # very quiet
+        return 0.40
+    elif noise_floor < 0.04:    # typical call center
+        return 0.60
+    elif noise_floor < 0.10:    # outdoor / vehicle
+        return 0.75
+    else:                        # market / street
+        return 0.85
+
+
+def calibrate_noise_floor(call_sid: str, first_500ms_pcm: bytes) -> float:
+    """
+    Store noise floor estimate for a call.  Call once at call start with the
+    first 500ms of audio.  Subsequent calls to _apply_noise_reduction will
+    use the stored estimate for adaptive filtering.
+    """
+    floor = _estimate_noise_floor(first_500ms_pcm)
+    _noise_floor_cache[call_sid] = floor
+    logger.debug("[stt] calibrated noise floor for %s: %.4f (prop_decrease=%.2f)",
+                 call_sid, floor, _noise_prop_decrease(floor))
+    return floor
+
+
+def clear_noise_calibration(call_sid: str) -> None:
+    """Remove cached noise floor when a call ends."""
+    _noise_floor_cache.pop(call_sid, None)
+
+
+def _apply_noise_reduction(
+    pcm_bytes: bytes,
+    sample_rate: int = 16000,
+    call_sid: Optional[str] = None,
+) -> bytes:
+    """
+    Apply adaptive spectral-gating noise reduction to raw 16-bit mono PCM bytes.
+
+    If call_sid is provided and a noise floor has been calibrated via
+    calibrate_noise_floor(), the prop_decrease is chosen automatically based on
+    the measured environment (office vs. street vs. vehicle).
     Sarvam AI / OmniDim both suppress noise at this layer for India call quality.
     """
     if not _NOISEREDUCE_AVAILABLE or not pcm_bytes:
         return pcm_bytes
     try:
         import noisereduce as nr
-        n = len(pcm_bytes) // 2
+        if call_sid and call_sid in _noise_floor_cache:
+            prop_decrease = _noise_prop_decrease(_noise_floor_cache[call_sid])
+        else:
+            prop_decrease = 0.75  # safe default
         samples = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-        reduced = nr.reduce_noise(y=samples, sr=sample_rate, prop_decrease=0.75, stationary=False)
+        reduced = nr.reduce_noise(
+            y=samples, sr=sample_rate,
+            prop_decrease=prop_decrease,
+            stationary=False,
+        )
         out = (reduced * 32768.0).clip(-32768, 32767).astype(np.int16)
         return out.tobytes()
     except Exception as exc:
@@ -167,22 +246,24 @@ class STTService:
         groq_api_key: Optional[str] = None,
         sarvam_api_key: Optional[str] = None,
         language: Optional[str] = None,
+        call_sid: Optional[str] = None,
     ) -> str:
         """
         Transcribe raw PCM 16-bit mono bytes.
 
         engine priorities (auto-falls-back):
           1. sarvam  — 22 Indian languages + Hinglish (requires SARVAM_API_KEY)
-          2. faster-whisper (device='cpu', int8)
+          2. faster-whisper (device='cpu', int8) — also returns detected language_code
           3. vosk
           4. groq (if engine=='groq' and groq_api_key provided)
 
         Noise reduction (noisereduce spectral gating) is applied before transcription
-        when noisereduce is installed — critical for India call quality.
+        with adaptive prop_decrease based on the call's calibrated noise floor.
+        Pass call_sid to enable per-call adaptive calibration.
         """
-        # Apply noise reduction before any engine
+        # Apply adaptive noise reduction
         audio_bytes = await asyncio.get_event_loop().run_in_executor(
-            None, _apply_noise_reduction, audio_bytes, sample_rate
+            None, _apply_noise_reduction, audio_bytes, sample_rate, call_sid
         )
 
         if engine == "sarvam" and sarvam_api_key:
@@ -193,7 +274,7 @@ class STTService:
 
         if _WHISPER_AVAILABLE:
             try:
-                return await self._transcribe_faster_whisper(audio_bytes, sample_rate)
+                return await self._transcribe_faster_whisper(audio_bytes, sample_rate, language)
             except Exception as exc:
                 logger.warning("[stt] faster-whisper failed, trying Vosk: %s", exc)
 
@@ -304,7 +385,17 @@ class STTService:
             logger.warning("[stt] Sarvam STT request failed: %s", exc)
         return ""
 
-    async def _transcribe_faster_whisper(self, pcm_bytes: bytes, sample_rate: int) -> str:
+    async def _transcribe_faster_whisper(
+        self,
+        pcm_bytes: bytes,
+        sample_rate: int,
+        language: Optional[str] = None,
+    ) -> str:
+        """
+        Transcribe with faster-whisper.
+        When language is None, whisper auto-detects and the detected code is logged
+        so callers can update their per-call language state for mid-call switching.
+        """
         if not _WHISPER_AVAILABLE or _WHISPER_MODEL is None:
             return ""
 
@@ -312,7 +403,15 @@ class STTService:
 
         def _run() -> str:
             buf = io.BytesIO(wav_bytes)
-            segments, _ = _WHISPER_MODEL.transcribe(buf, language="en", vad_filter=True)
+            segments, info = _WHISPER_MODEL.transcribe(
+                buf,
+                language=language,  # None → auto-detect
+                vad_filter=True,
+            )
+            detected = getattr(info, "language", None)
+            if detected and detected != (language or "en"):
+                logger.info("[stt] whisper detected language=%s (prob=%.2f)",
+                            detected, getattr(info, "language_probability", 0))
             return " ".join(seg.text for seg in segments).strip()
 
         loop = asyncio.get_event_loop()

@@ -86,6 +86,31 @@ dev = [
     "ruff>=0.4.0",
 ]
 
+# ── Plugin extras for voiceflow/ package ────────────────────────────────────
+sarvam = ["sarvamai>=0.1"]
+groq-stt = ["groq>=0.9"]
+deepgram = ["deepgram-sdk>=3.7"]
+elevenlabs = ["elevenlabs>=1.5"]
+openai-llm = ["openai>=1.30"]
+anthropic = ["anthropic>=0.34"]
+langfuse = ["langfuse>=2.0"]
+mcp = ["fastmcp>=0.4"]
+crm = ["hubspot-api-client>=9.0", "simple-salesforce>=1.12", "slack-sdk>=3.29"]
+minio-extras = ["minio>=7.2"]
+ml = ["transformers>=4.43"]
+cli = ["typer[all]>=0.12"]
+
+# Install everything: pip install voiceflow[all]
+all = [
+    "voiceflow[dev]",
+    "voiceflow[sarvam,groq-stt,deepgram,elevenlabs]",
+    "voiceflow[openai-llm,anthropic]",
+    "voiceflow[langfuse,mcp,crm,minio-extras,ml,cli]",
+]
+
+[project.scripts]
+voiceflow = "voiceflow.cli:main"
+
 [tool.ruff]
 target-version = "py311"
 line-length = 120

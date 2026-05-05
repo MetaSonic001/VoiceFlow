@@ -419,3 +419,127 @@ class WebhookEndpoint(Base):
     updatedAt: Mapped[datetime] = mapped_column("updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     tenant = relationship("Tenant", back_populates="webhook_endpoints")
+
+
+# ── Contact (OmniCRM) ─────────────────────────────────────────────────────────
+
+class Contact(Base):
+    """
+    Built-in CRM contact.  Accumulates call history for a phone number so that
+    returning callers are greeted by name and given context automatically.
+    Pre-call enrichment from HubSpot/Salesforce also lands here.
+    """
+    __tablename__ = "contacts"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    tenantId: Mapped[str] = mapped_column("tenantId", String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    phoneNumber: Mapped[str] = mapped_column("phoneNumber", String, nullable=False)
+    name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    email: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    company: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    # intent_level: hot | warm | cold | not_interested
+    intentLevel: Mapped[Optional[str]] = mapped_column("intentLevel", String, nullable=True)
+    sentiment: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # positive | neutral | negative
+    # CRM source IDs for bidirectional sync
+    hubspotContactId: Mapped[Optional[str]] = mapped_column("hubspotContactId", String, nullable=True)
+    salesforceLeadId: Mapped[Optional[str]] = mapped_column("salesforceLeadId", String, nullable=True)
+    # Historical context pulled from CRM before the call
+    crmContext: Mapped[Optional[Any]] = mapped_column("crmContext", JSON, nullable=True)
+    # Extracted variables and custom facts from all past calls
+    extractedData: Mapped[Optional[Any]] = mapped_column("extractedData", JSON, nullable=True)
+    totalCalls: Mapped[int] = mapped_column("totalCalls", Integer, default=0)
+    lastCalledAt: Mapped[Optional[datetime]] = mapped_column("lastCalledAt", DateTime(timezone=True), nullable=True)
+    tags: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)  # list of string tags
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    createdAt: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+    updatedAt: Mapped[datetime] = mapped_column("updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    tenant = relationship("Tenant")
+
+
+# ── IVR Tree ──────────────────────────────────────────────────────────────────
+
+class IVRTree(Base):
+    """
+    IVR routing layer that sits before the AI agent.
+    Each node is either a menu (DTMF routing) or a leaf that routes to an agent.
+    The full tree is stored as a JSON adjacency list in `nodes`.
+    """
+    __tablename__ = "ivr_trees"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    tenantId: Mapped[str] = mapped_column("tenantId", String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    # JSON tree: [{"id": "root", "message": "Press 1 for ...", "children": [
+    #   {"id": "n1", "dtmf": "1", "agentId": "...", "label": "Sales"},
+    #   {"id": "n2", "dtmf": "2", "agentId": "...", "label": "Support"}
+    # ]}]
+    nodes: Mapped[Any] = mapped_column(JSON, nullable=False, default=list)
+    isActive: Mapped[bool] = mapped_column("isActive", Boolean, default=True)
+    phoneNumber: Mapped[Optional[str]] = mapped_column("phoneNumber", String, nullable=True)
+    createdAt: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+    updatedAt: Mapped[datetime] = mapped_column("updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    tenant = relationship("Tenant")
+
+
+# ── CallRecording ─────────────────────────────────────────────────────────────
+
+class CallRecording(Base):
+    """
+    Audio recording stored in MinIO, linked to a CallLog.
+    durationSeconds, waveformData, and timestampedTranscript enable
+    a click-to-seek waveform player in the dashboard.
+    """
+    __tablename__ = "call_recordings"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    tenantId: Mapped[str] = mapped_column("tenantId", String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    agentId: Mapped[str] = mapped_column("agentId", String, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False)
+    callLogId: Mapped[str] = mapped_column("callLogId", String, ForeignKey("call_logs.id", ondelete="CASCADE"), nullable=False)
+    # MinIO object key: recordings/{tenantId}/{callLogId}.wav
+    minioKey: Mapped[str] = mapped_column("minioKey", String, nullable=False)
+    durationSeconds: Mapped[Optional[int]] = mapped_column("durationSeconds", Integer, nullable=True)
+    fileSizeBytes: Mapped[Optional[int]] = mapped_column("fileSizeBytes", Integer, nullable=True)
+    # Consent disclosure included in opening? (required for recording)
+    consentDisclosed: Mapped[bool] = mapped_column("consentDisclosed", Boolean, default=False)
+    # Sparse waveform for UI: list of amplitude values (0.0–1.0) sampled at ~1s intervals
+    waveformData: Mapped[Optional[Any]] = mapped_column("waveformData", JSON, nullable=True)
+    # timestampedTranscript: [{"start_s": 4.5, "end_s": 6.2, "text": "...", "speaker": "agent"}]
+    timestampedTranscript: Mapped[Optional[Any]] = mapped_column("timestampedTranscript", JSON, nullable=True)
+    createdAt: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+
+    tenant = relationship("Tenant")
+    agent = relationship("Agent")
+
+
+# ── CoachingCard ──────────────────────────────────────────────────────────────
+
+class CoachingCard(Base):
+    """
+    AI-generated coaching suggestions from analyze_call().
+    Tenant admin reviews and approves; approved cards are merged into
+    the agent's systemPrompt automatically.
+    status: pending | approved | rejected | applied
+    """
+    __tablename__ = "coaching_cards"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    tenantId: Mapped[str] = mapped_column("tenantId", String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    agentId: Mapped[str] = mapped_column("agentId", String, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False)
+    callLogId: Mapped[Optional[str]] = mapped_column("callLogId", String, ForeignKey("call_logs.id"), nullable=True)
+    status: Mapped[str] = mapped_column(String, default="pending", nullable=False)
+    # What the agent did wrong / could improve
+    observation: Mapped[str] = mapped_column(Text, nullable=False)
+    # The specific prompt change — expressed as a diff-style instruction
+    suggestedPromptDelta: Mapped[Optional[str]] = mapped_column("suggestedPromptDelta", Text, nullable=True)
+    # Score improvement estimate (0.0–1.0)
+    impactScore: Mapped[Optional[float]] = mapped_column("impactScore", Float, nullable=True)
+    approvedBy: Mapped[Optional[str]] = mapped_column("approvedBy", String, nullable=True)
+    approvedAt: Mapped[Optional[datetime]] = mapped_column("approvedAt", DateTime(timezone=True), nullable=True)
+    appliedAt: Mapped[Optional[datetime]] = mapped_column("appliedAt", DateTime(timezone=True), nullable=True)
+    createdAt: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+
+    tenant = relationship("Tenant")
+    agent = relationship("Agent")

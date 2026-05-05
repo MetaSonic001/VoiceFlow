@@ -316,7 +316,199 @@ async def run_simulation(
     return data
 
 
+@mcp.tool()
+async def update_agent_from_prompt(
+    agent_id: str,
+    revision_prompt: str,
+    apply: bool = True,
+) -> dict:
+    """
+    Revise an existing agent's configuration using a plain-language instruction.
+    Only the fields that need to change are updated; manually set fields are preserved.
+
+    Args:
+        agent_id: The agent to revise
+        revision_prompt: Describe what should change.
+                        E.g. "make it more formal and add insurance query handling"
+        apply: If True, immediately applies the changes to the agent. Default True.
+
+    Returns:
+        Dict with "delta" (changed fields) and "applied" (bool).
+    """
+    data = await _post("/api/agents/generate-from-prompt/revise", {
+        "agent_id": agent_id,
+        "revision_prompt": revision_prompt,
+        "apply": apply,
+    })
+    return data
+
+
+@mcp.tool()
+async def add_knowledge_document(
+    agent_id: str,
+    content: str,
+    title: str = "",
+    source_url: str = "",
+) -> dict:
+    """
+    Add a document to an agent's knowledge base.
+    The document is chunked, embedded, and indexed for RAG automatically.
+
+    Args:
+        agent_id: The agent whose knowledge base to update
+        content: The document text content (UTF-8)
+        title: Optional document title
+        source_url: Optional source URL for attribution
+
+    Returns:
+        {"documentId": "...", "status": "processing", "chunkCount": N}
+    """
+    data = await _post("/api/ingestion/ingest", {
+        "agentId": agent_id,
+        "content": content,
+        "title": title,
+        "sourceUrl": source_url,
+    })
+    return data
+
+
+@mcp.tool()
+async def get_call_coaching_report(agent_id: str) -> dict:
+    """
+    Get the AI Call Coach report for an agent — pending coaching cards, avg impact score,
+    approved cards, and specific suggested prompt improvements.
+
+    Args:
+        agent_id: The agent to get coaching data for
+
+    Returns:
+        {"total": N, "pending": N, "approved": N, "avg_impact_score": 0.75, "cards": [...]}
+    """
+    data = await _get(f"/api/coaching/agents/{agent_id}/report")
+    return data
+
+
+@mcp.tool()
+async def get_latency_stats(agent_id: str) -> dict:
+    """
+    Get P50/P95/P99 latency breakdown for an agent: STT, RAG, LLM, TTS, total.
+    Useful for identifying bottlenecks in the conversation pipeline.
+
+    Args:
+        agent_id: The agent to query latency stats for
+
+    Returns:
+        Per-component latency percentiles with sample counts.
+    """
+    from app.services.latency_tracker import get_agent_latency_stats
+    return get_agent_latency_stats(agent_id)
+
+
+# ── MCP Resources (read-only data exposed to LLM context) ─────────────────────
+
+@mcp.resource("voiceflow://agents")
+async def resource_list_agents() -> str:
+    """Resource: all agents as formatted text for LLM context injection."""
+    data = await _get("/api/agents/", {"limit": "50"})
+    agents = data.get("agents", [])
+    if not agents:
+        return "No agents configured."
+    lines = [f"VoiceFlow Agents ({len(agents)} total):\n"]
+    for a in agents:
+        lines.append(
+            f"  [{a['id']}] {a['name']} — status={a['status']} "
+            f"calls={a.get('totalCalls', 0)} success={a.get('successRate', 'N/A')}%"
+        )
+    return "\n".join(lines)
+
+
+@mcp.resource("voiceflow://analytics/overview")
+async def resource_analytics_overview() -> str:
+    """Resource: high-level analytics for the last 7 days."""
+    try:
+        data = await _get("/api/analytics/overview", {"timeRange": "7d"})
+        return (
+            f"VoiceFlow Analytics (7d):\n"
+            f"  Total calls: {data.get('totalInteractions', 0)}\n"
+            f"  Success rate: {data.get('successRate', 'N/A')}%\n"
+            f"  Avg call duration: {data.get('avgResponseTime', 'N/A')}\n"
+            f"  Active agents: {data.get('activeAgents', 0)}\n"
+        )
+    except Exception as exc:
+        return f"Analytics unavailable: {exc}"
+
+
+@mcp.resource("voiceflow://config")
+async def resource_platform_config() -> str:
+    """Resource: current platform configuration summary."""
+    return (
+        f"VoiceFlow MCP Configuration:\n"
+        f"  API URL: {API_URL}\n"
+        f"  Tenant ID: {TENANT_ID}\n"
+        f"  Capabilities: STT(Whisper+Sarvam), TTS(Kokoro+Sarvam), "
+        f"RAG(ChromaDB+BM25), LLM(Groq), CRM(HubSpot+Salesforce), "
+        f"IVR, Recording, LiveTransfer, Simulation\n"
+    )
+
+
+# ── MCP Prompts (templated instructions for common workflows) ─────────────────
+
+@mcp.prompt()
+def prompt_weekly_call_summary(agent_id: str, week: str = "this week") -> str:
+    """Prompt template: summarise a week's calls for an agent."""
+    return (
+        f"Using the VoiceFlow tools, retrieve the call analytics for agent {agent_id} "
+        f"for {week}. Then get the 5 most recent call summaries for that agent. "
+        f"Produce a concise plain-English weekly summary covering: "
+        f"call volume trend, success rate, top caller intents, "
+        f"most common failure modes, and 1-2 actionable improvement suggestions."
+    )
+
+
+@mcp.prompt()
+def prompt_simulate_edge_cases(agent_id: str, use_case: str) -> str:
+    """Prompt template: generate and run edge-case simulation for an agent."""
+    return (
+        f"For VoiceFlow agent {agent_id} (use case: {use_case}), "
+        f"generate 10 adversarial test scenarios using the run_simulation tool. "
+        f"Focus on: injection attempts, callers who give incomplete information, "
+        f"callers who switch language mid-conversation, and emotionally frustrated callers. "
+        f"Run the simulation, report pass rates, and suggest 3 specific prompt improvements "
+        f"for any failures."
+    )
+
+
+@mcp.prompt()
+def prompt_onboard_new_agent(business_description: str) -> str:
+    """Prompt template: full agent onboarding from scratch."""
+    return (
+        f"Create a complete AI voice agent for: {business_description}\n\n"
+        f"Steps:\n"
+        f"1. Use create_agent to create the agent config from the description above\n"
+        f"2. Use generate FAQs (generate-from-prompt/faqs) to get starter knowledge\n"
+        f"3. Add each FAQ as a knowledge document using add_knowledge_document\n"
+        f"4. Generate and run a simulation suite using run_simulation\n"
+        f"5. Report the agent ID, simulation results, and any issues to address before going live"
+    )
+
+
+@mcp.prompt()
+def prompt_improve_agent(agent_id: str, problem_description: str) -> str:
+    """Prompt template: diagnose and fix a specific agent problem."""
+    return (
+        f"VoiceFlow agent {agent_id} has this reported problem: {problem_description}\n\n"
+        f"Diagnose and fix it:\n"
+        f"1. Get the agent's coaching report using get_call_coaching_report\n"
+        f"2. Search the knowledge base for relevant content on the problem topic\n"
+        f"3. Review the latest call analytics\n"
+        f"4. Apply a targeted fix using update_agent_from_prompt — describe only what to change\n"
+        f"5. Run a focused simulation to verify the fix addresses the problem\n"
+        f"6. Confirm the gate passed and report what was changed"
+    )
+
+
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     mcp.run()
+

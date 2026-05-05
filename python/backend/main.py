@@ -242,6 +242,7 @@ from app.routes import campaigns, whatsapp, webhooks
 from app.routes import ab_testing
 from app.routes import dnd
 from app.routes import simulate
+from app.routes import ivr, recordings, coaching, contacts
 
 # WITHOUT /api prefix (matches Express)
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])
@@ -274,6 +275,10 @@ app.include_router(webhooks.router, prefix="/api/webhooks", tags=["Webhooks"])
 app.include_router(ab_testing.router)
 app.include_router(dnd.router, prefix="/api/dnd", tags=["DND"])
 app.include_router(simulate.router, prefix="/api/simulate", tags=["Simulation"])
+app.include_router(ivr.router, prefix="/api/ivr", tags=["IVR"])
+app.include_router(recordings.router, prefix="/api/recordings", tags=["Recordings"])
+app.include_router(coaching.router, prefix="/api/coaching", tags=["Coaching"])
+app.include_router(contacts.router, prefix="/api/contacts", tags=["Contacts"])
 app.include_router(platform.router, prefix="/api", tags=["Platform"])
 app.include_router(data_explorer.router, prefix="/api/data-explorer", tags=["DataExplorer"])
 
