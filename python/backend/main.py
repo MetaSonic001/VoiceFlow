@@ -241,6 +241,7 @@ from app.routes import voice_live
 from app.routes import voices as voices_routes
 from app.routes import campaigns, whatsapp, webhooks
 from app.routes import ab_testing
+from app.routes import kb as kb_routes
 from app.routes import dnd
 from app.routes import simulate
 from app.routes import ivr, recordings, coaching, contacts
@@ -277,6 +278,7 @@ app.include_router(ab_testing.router)
 app.include_router(dnd.router, prefix="/api/dnd", tags=["DND"])
 app.include_router(simulate.router, prefix="/api/simulate", tags=["Simulation"])
 app.include_router(voices_routes.router, prefix="/api/voices", tags=["Voices"])
+app.include_router(kb_routes.router, prefix="/api/kb", tags=["Knowledge Base"])
 app.include_router(ivr.router, prefix="/api/ivr", tags=["IVR"])
 app.include_router(recordings.router, prefix="/api/recordings", tags=["Recordings"])
 app.include_router(coaching.router, prefix="/api/coaching", tags=["Coaching"])

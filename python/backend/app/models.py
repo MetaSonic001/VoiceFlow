@@ -47,6 +47,7 @@ class Tenant(Base):
     campaigns = relationship("Campaign", back_populates="tenant", cascade="all, delete-orphan")
     webhook_endpoints = relationship("WebhookEndpoint", back_populates="tenant", cascade="all, delete-orphan")
     cloned_voices = relationship("ClonedVoice", back_populates="tenant", cascade="all, delete-orphan")
+    kb_attachments = relationship("KbAttachment", back_populates="tenant", cascade="all, delete-orphan")
 
 
 # ── User ──────────────────────────────────────────────────────────────────────
@@ -143,6 +144,7 @@ class Agent(Base):
     template = relationship("AgentTemplate", back_populates="agents")
     configuration = relationship("AgentConfiguration", back_populates="agent", uselist=False)
     documents = relationship("Document", back_populates="agent", cascade="all, delete-orphan")
+    kb_attachments = relationship("KbAttachment", back_populates="agent", cascade="all, delete-orphan")
     call_logs = relationship("CallLog", back_populates="agent", cascade="all, delete-orphan")
     retraining_examples = relationship("RetrainingExample", back_populates="agent", cascade="all, delete-orphan")
     campaigns = relationship("Campaign", back_populates="agent", cascade="all, delete-orphan")
@@ -281,6 +283,9 @@ class Document(Base):
     title: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     content: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     metadata_: Mapped[Optional[Any]] = mapped_column("metadata", JSON, nullable=True)
+    # File-type metadata for KB display
+    fileType: Mapped[Optional[str]] = mapped_column("fileType", String, nullable=True)   # pdf/docx/txt/url/text
+    chunkCount: Mapped[Optional[int]] = mapped_column("chunkCount", Integer, nullable=True)
     tenantId: Mapped[str] = mapped_column("tenantId", String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
     agentId: Mapped[str] = mapped_column("agentId", String, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False)
     createdAt: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
@@ -288,6 +293,47 @@ class Document(Base):
 
     tenant = relationship("Tenant", back_populates="documents")
     agent = relationship("Agent", back_populates="documents")
+    kb_attachments = relationship("KbAttachment", back_populates="document", cascade="all, delete-orphan")
+
+
+# ── KbAttachment ─────────────────────────────────────────────────────────────
+
+class KbAttachment(Base):
+    """
+    Attaches a Document to an Agent for Knowledge Base retrieval.
+    Carries the when_to_use instruction that pre-filters retrieval at query time:
+    if the user's query is not semantically relevant to when_to_use, this
+    document's chunks are excluded — preventing irrelevant context from
+    being injected into the LLM prompt.
+    """
+    __tablename__ = "kb_attachments"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    tenantId: Mapped[str] = mapped_column(
+        "tenantId", String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    agentId: Mapped[str] = mapped_column(
+        "agentId", String, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False
+    )
+    documentId: Mapped[str] = mapped_column(
+        "documentId", String, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+    )
+    # Natural-language instruction: "Use this when the caller asks about pricing"
+    whenToUse: Mapped[Optional[str]] = mapped_column("whenToUse", Text, nullable=True)
+    chunkCount: Mapped[int] = mapped_column("chunkCount", Integer, default=0)
+    # indexed | pending | error
+    status: Mapped[str] = mapped_column(String, default="pending")
+    errorMessage: Mapped[Optional[str]] = mapped_column("errorMessage", Text, nullable=True)
+    createdAt: Mapped[datetime] = mapped_column(
+        "createdAt", DateTime(timezone=True), server_default=func.now()
+    )
+    updatedAt: Mapped[datetime] = mapped_column(
+        "updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    tenant = relationship("Tenant", back_populates="kb_attachments")
+    agent = relationship("Agent", back_populates="kb_attachments")
+    document = relationship("Document", back_populates="kb_attachments")
 
 
 # ── CallLog ───────────────────────────────────────────────────────────────────

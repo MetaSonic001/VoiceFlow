@@ -148,8 +148,32 @@ CREATE TABLE IF NOT EXISTS documents (
     "tenantId" TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     "agentId" TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
     "createdAt" TIMESTAMPTZ DEFAULT now(),
+    "updatedAt" TIMESTAMPTZ DEFAULT now(),
+    -- Knowledge-base additions
+    "fileType" TEXT,          -- pdf | docx | txt | csv | url | text | image
+    "chunkCount" INTEGER      -- number of vector chunks indexed
+);
+
+-- Add new columns to an existing documents table (idempotent)
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS "fileType"   TEXT;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS "chunkCount" INTEGER;
+
+-- KB Attachments — links a Document to an Agent with an optional when_to_use instruction
+CREATE TABLE IF NOT EXISTS kb_attachments (
+    id          TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::text,
+    "tenantId"  TEXT NOT NULL REFERENCES tenants(id)   ON DELETE CASCADE,
+    "agentId"   TEXT NOT NULL REFERENCES agents(id)    ON DELETE CASCADE,
+    "documentId" TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    "whenToUse"  TEXT,                          -- natural-language retrieval hint
+    "chunkCount" INTEGER    DEFAULT 0,          -- mirrors Document.chunkCount for quick display
+    status      TEXT        DEFAULT 'pending',  -- pending | indexed | error
+    "errorMessage" TEXT,
+    "createdAt" TIMESTAMPTZ DEFAULT now(),
     "updatedAt" TIMESTAMPTZ DEFAULT now()
 );
+CREATE INDEX IF NOT EXISTS ix_kb_attachments_tenant   ON kb_attachments("tenantId");
+CREATE INDEX IF NOT EXISTS ix_kb_attachments_agent    ON kb_attachments("agentId");
+CREATE INDEX IF NOT EXISTS ix_kb_attachments_document ON kb_attachments("documentId");
 
 -- Call Logs
 CREATE TABLE IF NOT EXISTS call_logs (

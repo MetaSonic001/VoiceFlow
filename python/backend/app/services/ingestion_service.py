@@ -380,6 +380,25 @@ def chunk_text(text: str, source: str = "", metadata: dict = None) -> list[dict]
     return result
 
 
+def get_document_chunk_count(tenant_id: str, agent_id: str, document_id: str) -> int:
+    """
+    Count how many chunks belong to a specific document in ChromaDB.
+    Used to update KbAttachment.chunkCount after ingestion.
+    """
+    client = _get_chroma()
+    if not client:
+        return 0
+    try:
+        collection = client.get_collection(f"tenant_{tenant_id}")
+        results = collection.get(
+            where={"agentId": agent_id, "documentId": document_id},
+            include=[],
+        )
+        return len(results.get("ids", []))
+    except Exception:
+        return 0
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # 4. EMBEDDING + STORAGE — ChromaDB + BM25 Index
 # ══════════════════════════════════════════════════════════════════════════════
@@ -513,13 +532,14 @@ async def ingest_file(
     tenant_id: str,
     agent_id: str,
     job_id: str = None,
+    document_id: str = None,
 ) -> dict:
     """
     Full file ingestion pipeline — incremental chunk storage.
     1. Save to temp file
     2. Parse with Docling (+ PaddleOCR for scans)
     3. Clean + chunk
-    4. Embed + store chunks in batches to ChromaDB
+    4. Embed + store chunks in batches to ChromaDB  (document_id tag in metadata)
     5. Rebuild BM25 index
     """
     if job_id:
@@ -552,6 +572,7 @@ async def ingest_file(
         chunks = chunk_text(text, source=filename, metadata={
             "filename": filename,
             "content_type": mimetypes.guess_type(filename)[0] or "application/octet-stream",
+            **(({"documentId": document_id}) if document_id else {}),
         })
 
         # Store chunks incrementally in batches of 20
@@ -598,6 +619,7 @@ async def ingest_urls(
     tenant_id: str,
     agent_id: str,
     job_id: str = None,
+    document_id: str = None,
 ) -> dict:
     """
     Ingest content from URLs:
@@ -621,7 +643,10 @@ async def ingest_urls(
                 continue
 
             text = clean_text(text)
-            chunks = chunk_text(text, source=url, metadata={"url": url})
+            chunks = chunk_text(text, source=url, metadata={
+                "url": url,
+                **(({"documentId": document_id}) if document_id else {}),
+            })
 
             loop = asyncio.get_event_loop()
             stored = await loop.run_in_executor(

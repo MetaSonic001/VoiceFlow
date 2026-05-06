@@ -289,7 +289,99 @@ def document_delete(request, doc_id):
         return JsonResponse({"error": str(e)}, status=400)
 
 
-# ── Settings ───────────────────────────────────────────────────────────
+# ── Knowledge Base (per-agent, with when_to_use) ───────────────────────
+
+@login_required
+@require_http_methods(["GET"])
+def kb_list(request, agent_id):
+    """List all KB attachments for an agent with document details."""
+    try:
+        return JsonResponse(get_client(request).kb_list(agent_id))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@csrf_exempt
+@require_http_methods(["POST"])
+def kb_ingest_file(request):
+    """Upload a file and attach it to an agent's KB."""
+    f = request.FILES.get("file")
+    if not f:
+        return JsonResponse({"error": "No file provided"}, status=400)
+    agent_id    = request.POST.get("agentId", "")
+    when_to_use = request.POST.get("whenToUse", "")
+    try:
+        result = get_client(request).kb_ingest_file(f.read(), f.name, agent_id, when_to_use)
+        return JsonResponse(result, status=201)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@require_http_methods(["POST"])
+def kb_ingest_url(request):
+    """Scrape a URL and attach it to an agent's KB."""
+    data        = _json_body(request)
+    agent_id    = data.get("agentId", "")
+    url         = data.get("url", "")
+    when_to_use = data.get("whenToUse", "")
+    try:
+        result = get_client(request).kb_ingest_url(agent_id, url, when_to_use)
+        return JsonResponse(result, status=201)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@require_http_methods(["POST"])
+def kb_ingest_text(request):
+    """Ingest pasted text and attach it to an agent's KB."""
+    data        = _json_body(request)
+    agent_id    = data.get("agentId", "")
+    text        = data.get("text", "")
+    title       = data.get("title", "")
+    when_to_use = data.get("whenToUse", "")
+    try:
+        result = get_client(request).kb_ingest_text(agent_id, text, title, when_to_use)
+        return JsonResponse(result, status=201)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@require_http_methods(["POST"])
+def kb_attach(request):
+    """Attach an existing document to an agent's KB."""
+    try:
+        return JsonResponse(get_client(request).kb_attach(_json_body(request)), status=201)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@require_http_methods(["PATCH", "DELETE"])
+def kb_update_attachment(request, att_id):
+    """Update when_to_use (PATCH) or detach (DELETE) a KB attachment."""
+    try:
+        if request.method == "DELETE":
+            return JsonResponse(get_client(request).kb_delete_attachment(att_id))
+        return JsonResponse(get_client(request).kb_update_attachment(att_id, _json_body(request)))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@require_http_methods(["POST"])
+def kb_test_query(request):
+    """Run a test query through the full RAG pipeline and return debug info."""
+    data     = _json_body(request)
+    agent_id = data.get("agentId", "")
+    query    = data.get("query", "")
+    try:
+        return JsonResponse(get_client(request).kb_test_query(agent_id, query))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
 
 @login_required
 @require_http_methods(["GET", "PUT"])

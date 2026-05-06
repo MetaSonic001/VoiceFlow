@@ -732,6 +732,202 @@ Sarvam voices will then be fully available for preview and synthesis.
 
 ---
 
+## Knowledge Base System
+
+VoiceFlow includes a **per-agent Knowledge Base** that goes far beyond simple PDF upload.  Every agent has its own isolated KB with precision-retrieval controls, multi-format ingestion, and a full debug panel — all accessible from the agent detail page under the **Knowledge Base** tab.
+
+### Supported Ingestion Formats
+
+| Format | How to Add | Processing |
+|--------|-----------|-----------|
+| **PDF** | File upload | Docling → PaddleOCR fallback → chunk → embed |
+| **DOCX / PPTX / XLSX** | File upload | Docling extraction → chunk → embed |
+| **TXT / MD / CSV** | File upload | Direct text → chunk → embed |
+| **Images** (PNG/JPG/TIFF/WebP) | File upload | PaddleOCR OCR → chunk → embed |
+| **URL** | Paste URL | `trafilatura` scraping → `BeautifulSoup` fallback → chunk → embed |
+| **Plain text paste** | Inline form | Direct storage → chunk → embed |
+
+### `when_to_use` Precision Retrieval
+
+Every document attachment has an optional **`when_to_use`** instruction:
+
+```
+"Use this document when the caller asks about pricing, plans, or subscription changes"
+"Use this when the user mentions refunds, cancellations, or billing disputes"
+```
+
+At query time, before hitting ChromaDB, the RAG engine:
+1. Loads all KB attachments for the agent  
+2. Encodes both the user query and each `when_to_use` instruction with the same multilingual embedding model  
+3. Computes cosine similarity — if below threshold (0.25), the document is **excluded** from retrieval  
+4. Passes only `allowed_doc_ids` to ChromaDB (`$and` filter) and BM25 index  
+
+This prevents context bleed across topics (e.g., a pricing document won't pollute a technical support query).
+
+Documents **without** a `when_to_use` instruction are always included — safe default.
+
+### Hybrid Retrieval Pipeline
+
+```
+Query
+  │
+  ├─ 1. when_to_use filter → allowed_doc_ids []
+  │
+  ├─ 2. ChromaDB semantic search   (top-10, filtered by agentId + documentId.$in)
+  │         ↓ cosine distance
+  │
+  ├─ 3. Redis BM25 keyword search  (top-10, corpus filtered to allowed docs)
+  │         ↓ Okapi BM25
+  │
+  ├─ 4. RRF fusion                 (Reciprocal Rank Fusion, k=60)
+  │         ↓ merged top-10
+  │
+  ├─ 5. Policy scoring             (category + temporal + domain weights)
+  │         ↓ re-scored
+  │
+  ├─ 6. Cross-encoder reranking    (cross-encoder/ms-marco-MiniLM-L-6-v2)
+  │         ↓ final top-7
+  │
+  └─ 7. → prompt assembly → Groq LLM
+```
+
+**Cross-lingual retrieval** works out-of-the-box: the `paraphrase-multilingual-MiniLM-L12-v2` model handles 50+ languages, so a Hindi query correctly matches English `when_to_use` instructions and English document chunks.
+
+### Cross-Encoder Reranking
+
+After RRF fusion a `cross-encoder/ms-marco-MiniLM-L-6-v2` model scores each `(query, chunk)` pair together (bi-encoder similarity ≠ true relevance). This ~75 MB model is:
+- CPU-compatible (runs on a t3.micro)
+- Lazy-loaded once on first use
+- Fail-open: if unavailable, RRF order is kept unchanged
+
+### Knowledge Base Dashboard (Agent Detail → "Knowledge Base" tab)
+
+| UI Element | Description |
+|---|---|
+| **Document list** | All attached documents with type icon (PDF/URL/text), upload date, chunk count, `when_to_use` status badge |
+| **Status badge** | ⏳ processing / ✓ indexed / ✗ error |
+| **Inline edit** | Click "Edit" on any `when_to_use` field to update it without leaving the page |
+| **Detach button** | Remove a document from the KB (Document record is retained) |
+| **Add File** | Upload any supported file; starts ingestion in background |
+| **Add URL** | Scrape a web page and index it |
+| **Paste Text** | Inline text area with title — useful for policies, FAQs, product descriptions |
+| **Test Query panel** | Send a test query and see: filter verdicts per document (with cosine similarity), raw semantic hits, raw BM25 hits, RRF-merged chunks, cross-encoder re-ranked chunks, and final LLM answer |
+
+### API Endpoints
+
+```
+GET    /api/kb/{agent_id}               → list all KB attachments (with document details)
+POST   /api/kb/ingest-file              → upload file + auto-create Document + KbAttachment
+POST   /api/kb/ingest-url               → ingest URL + auto-attach
+POST   /api/kb/ingest-text              → paste text + auto-attach
+POST   /api/kb/attach                   → attach an existing Document to an agent
+PATCH  /api/kb/attachments/{id}         → update when_to_use instruction
+DELETE /api/kb/attachments/{id}         → detach (KbAttachment deleted; Document retained)
+POST   /api/kb/test-query               → debug retrieval: { agentId, query } → full debug report
+```
+
+### Database Schema
+
+```sql
+-- New columns on documents
+ALTER TABLE documents ADD COLUMN "fileType"   TEXT;  -- pdf|docx|txt|url|text|image
+ALTER TABLE documents ADD COLUMN "chunkCount" INTEGER;
+
+-- Per-agent knowledge base attachments
+CREATE TABLE kb_attachments (
+  id           TEXT PRIMARY KEY,
+  "tenantId"   TEXT REFERENCES tenants(id)   ON DELETE CASCADE,
+  "agentId"    TEXT REFERENCES agents(id)    ON DELETE CASCADE,
+  "documentId" TEXT REFERENCES documents(id) ON DELETE CASCADE,
+  "whenToUse"  TEXT,           -- optional precision retrieval instruction
+  "chunkCount" INTEGER DEFAULT 0,
+  status       TEXT    DEFAULT 'pending',  -- pending|indexed|error
+  "errorMessage" TEXT,
+  "createdAt"  TIMESTAMPTZ DEFAULT now(),
+  "updatedAt"  TIMESTAMPTZ DEFAULT now()
+);
+```
+
+### Dependencies
+
+```
+sentence-transformers     # multilingual embeddings + cross-encoder
+cross-encoder/ms-marco-MiniLM-L-6-v2    # ~75 MB, downloaded on first use
+rank_bm25                 # BM25Okapi keyword indexing
+docling                   # PDF/DOCX extraction
+paddleocr                 # OCR fallback for images + scanned PDFs
+trafilatura               # URL scraping
+```
+
+---
+
+### Voice Providers
+
+| Provider | Voices | Language Coverage | Requires |
+|---|---|---|---|
+| **Edge TTS** (Microsoft) | 100+ | 20+ languages including en-US, en-GB, en-IN, hi-IN, ta-IN, te-IN, de, fr, es, zh, ja, ko, etc. | Internet (free, no API key) |
+| **Sarvam AI** | 50 (10 Indian languages × 5 speakers) | hi-IN, ta-IN, te-IN, bn-IN, mr-IN, kn-IN, gu-IN, ml-IN, pa-IN, en-IN | `SARVAM_API_KEY` in `.env` |
+| **Kokoro** (local CPU) | 5 | en-US, en-GB | Kokoro sidecar at `:8880` |
+| **Piper** (local ONNX) | 2 | en-US | Piper sidecar at `:8890` |
+
+### Voice Categories
+
+Every voice is tagged with one or more use-case categories:
+- **Customer Support** — Friendly, clear, empathetic voices for IVR and support flows
+- **Sales & Outreach** — Confident, persuasive voices for outbound campaigns
+- **News & Narration** — Authoritative, broadcast-quality voices
+- **Educational** — Patient, articulate voices for learning experiences
+- **ASMR & Calm** — Soft, soothing voices for low-stress interactions
+- **Indian Regional** — Curated Indian language voices for local markets
+
+### Voice ID Convention
+
+```
+edge-{ShortName}      → e.g.  edge-en-US-AriaNeural
+sarvam-{lang}-{spk}  → e.g.  sarvam-hi-IN-meera
+kokoro-{voice}        → e.g.  kokoro-af_sky
+piper-{voice}         → e.g.  piper-en_US-lessac-medium
+clone-{uuid}          → e.g.  clone-a3b4c5...  (user-uploaded)
+```
+
+### Voice Cloning
+
+Users can upload a reference audio sample (MP3/WAV/WebM, 6–60 seconds, max 50 MB) to create a named voice clone:
+
+1. **Upload** → reference audio stored in local disk (`/tmp/voiceflow_clones/`) or MinIO  
+2. **Preview** → browser plays back the uploaded reference audio  
+3. **Assign** → clone voice assigned to any agent via `llmPreferences.voiceId = "clone-{id}"`  
+4. **Call-time synthesis** → when XTTS-v2 is installed, full neural cloning is used; otherwise a language-matched Edge TTS voice is used as fallback (CPU-only, zero extra dependencies)
+
+### Preview Caching
+
+All library voice previews are generated once and cached at:
+```
+/tmp/voiceflow_voice_previews/{voice_id_md5}.{mp3|wav}
+```
+Repeated requests are served from cache with zero re-synthesis latency.
+
+### API Endpoints
+
+```
+GET  /api/voices/catalog              → full catalog with filter params: language, gender, provider, category, search
+POST /api/voices/preview              → { voice_id, text? } → { audioUrl (base64 data URI), cached }
+GET  /api/voices/clones               → list tenant's voice clones
+POST /api/voices/clones               → multipart upload (audio, name, language)
+GET  /api/voices/clones/{id}/preview  → stream reference audio bytes
+DELETE /api/voices/clones/{id}        → delete clone + stored audio
+```
+
+### Configure Sarvam AI (Optional)
+
+Add your Sarvam API key to `python/backend/.env`:
+```env
+SARVAM_API_KEY=your_sarvam_api_key_here
+```
+Sarvam voices will then be fully available for preview and synthesis.
+
+---
+
 ## Voice Pipeline Architecture
 
 VoiceFlow supports **four distinct voice paths**, each optimized for different use cases. All paths share the same RAG engine (`rag_service.py`) for response generation.

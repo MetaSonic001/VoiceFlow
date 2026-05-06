@@ -159,9 +159,40 @@ class BackendClient:
         """Generate a preview audio clip for a voice."""
         return self._post("/api/tts/preview", json={"voiceId": voice_id})
 
-    # ── Knowledge Base (proxied to onboarding/documents) ───────────────
+    # ── Knowledge Base ─────────────────────────────────────────────────
     def get_knowledge_base(self):
         return self._get("/api/documents/", params={"limit": 100})
+
+    # ── KB Attachments (per-agent, with when_to_use filtering) ─────────
+    def kb_list(self, agent_id: str):
+        return self._get(f"/api/kb/{agent_id}")
+
+    def kb_attach(self, data: dict):
+        return self._post("/api/kb/attach", json=data)
+
+    def kb_ingest_file(self, file_bytes: bytes, filename: str, agent_id: str, when_to_use: str = ""):
+        return self._post(
+            "/api/kb/ingest-file",
+            files={"file": (filename, file_bytes)},
+            data={"agentId": agent_id, "whenToUse": when_to_use},
+        )
+
+    def kb_ingest_url(self, agent_id: str, url: str, when_to_use: str = ""):
+        return self._post("/api/kb/ingest-url", json={"agentId": agent_id, "url": url, "whenToUse": when_to_use})
+
+    def kb_ingest_text(self, agent_id: str, text: str, title: str = "", when_to_use: str = ""):
+        return self._post("/api/kb/ingest-text", json={
+            "agentId": agent_id, "text": text, "title": title, "whenToUse": when_to_use,
+        })
+
+    def kb_update_attachment(self, att_id: str, data: dict):
+        return self._patch(f"/api/kb/attachments/{att_id}", json=data)
+
+    def kb_delete_attachment(self, att_id: str):
+        return self._delete(f"/api/kb/attachments/{att_id}")
+
+    def kb_test_query(self, agent_id: str, query: str):
+        return self._post("/api/kb/test-query", json={"agentId": agent_id, "query": query})
 
     def get_company_profile(self):
         return self._get("/onboarding/company")

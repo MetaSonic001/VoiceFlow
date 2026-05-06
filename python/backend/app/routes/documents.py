@@ -32,6 +32,8 @@ def _doc_to_dict(doc: Document) -> dict:
         "title": doc.title,
         "content": doc.content,
         "metadata": doc.metadata_,
+        "fileType": doc.fileType or ("url" if doc.url else "file"),
+        "chunkCount": doc.chunkCount,
         "tenantId": doc.tenantId,
         "agentId": doc.agentId,
         "createdAt": doc.createdAt.isoformat() if doc.createdAt else None,
@@ -138,6 +140,10 @@ async def upload_document(
         s3_key = None
 
     # Create document record
+    file_type_map = {".pdf": "pdf", ".docx": "docx", ".doc": "docx", ".pptx": "pptx",
+                    ".xlsx": "xlsx", ".txt": "txt", ".md": "txt", ".csv": "csv",
+                    ".json": "txt", ".png": "image", ".jpg": "image", ".jpeg": "image",
+                    ".tiff": "image", ".bmp": "image", ".webp": "image"}
     doc = Document(
         url=None,
         s3Path=f"{bucket}/{s3_key}" if s3_key else None,
@@ -145,6 +151,7 @@ async def upload_document(
         tenantId=auth.tenant_id,
         title=file.filename,
         status="processing",
+        fileType=file_type_map.get(ext, "file"),
     )
     db.add(doc)
     await db.flush()
@@ -163,8 +170,9 @@ async def upload_document(
                 tenant_id=auth.tenant_id,
                 agent_id=resolved_agent_id,
                 job_id=doc.id,
+                document_id=doc.id,
             )
-            # Update document status
+            # Update document status and track chunk count
             from app.database import AsyncSessionLocal
             from sqlalchemy import update
             async with AsyncSessionLocal() as session:
@@ -172,6 +180,7 @@ async def upload_document(
                     update(Document).where(Document.id == doc.id).values(
                         status="completed" if result.get("status") == "completed" else "failed",
                         metadata_=result,
+                        chunkCount=result.get("chunks", 0),
                     )
                 )
                 await session.commit()
@@ -213,6 +222,7 @@ async def create_document(body: dict, auth: AuthContext = Depends(get_auth), db:
                     tenant_id=auth.tenant_id,
                     agent_id=agent_id,
                     job_id=doc.id,
+                    document_id=doc.id,
                 )
                 from app.database import AsyncSessionLocal
                 from sqlalchemy import update
@@ -221,6 +231,7 @@ async def create_document(body: dict, auth: AuthContext = Depends(get_auth), db:
                         update(Document).where(Document.id == doc.id).values(
                             status="completed" if result.get("status") == "completed" else "failed",
                             metadata_=result,
+                            chunkCount=result.get("total_chunks", 0),
                         )
                     )
                     await session.commit()

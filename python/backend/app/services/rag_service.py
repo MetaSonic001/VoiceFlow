@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models import (
     Agent, AgentConfiguration, AgentTemplate, Brand, CallLog,
-    RetrainingExample, Tenant,
+    KbAttachment, RetrainingExample, Tenant,
 )
 
 logger = logging.getLogger("voiceflow.rag")
@@ -353,11 +353,17 @@ async def _semantic_search(
     agent_id: str,
     query: str,
     top_k: int = 7,
+    allowed_doc_ids: Optional[list[str]] = None,
 ) -> list[dict]:
     """
     Semantic search via ChromaDB Python client.
     Collection: tenant_{tenantId}, filtered by agentId.
+    allowed_doc_ids: if set, only chunks whose metadata.documentId is in this
+    list are returned.  Empty list → return nothing immediately.
     """
+    if allowed_doc_ids is not None and len(allowed_doc_ids) == 0:
+        return []
+
     loop = asyncio.get_event_loop()
 
     def _do_query():
@@ -373,14 +379,24 @@ async def _semantic_search(
             return []
 
         try:
-            query_kwargs = {
-                "query_texts": [query],
-                "n_results": top_k,
-            }
-            if agent_id:
-                query_kwargs["where"] = {"$or": [{"agentId": agent_id}, {"agentId": "knowledge_base"}]}
+            where_filter: dict = {"agentId": agent_id}
+            if allowed_doc_ids is not None:
+                # Combine agentId filter with documentId $in filter
+                where_filter = {
+                    "$and": [
+                        {"agentId": agent_id},
+                        {"documentId": {"$in": allowed_doc_ids}},
+                    ]
+                }
+            else:
+                # Allow either agent-specific or global knowledge base chunks
+                where_filter = {"$or": [{"agentId": agent_id}, {"agentId": "knowledge_base"}]}
 
-            data = collection.query(**query_kwargs)
+            data = collection.query(
+                query_texts=[query],
+                n_results=top_k,
+                where=where_filter,
+            )
 
             documents = data.get("documents", [[]])[0]
             metadatas = data.get("metadatas", [[]])[0]
@@ -437,13 +453,16 @@ async def _bm25_search(
     agent_id: str,
     query: str,
     top_k: int = 7,
+    allowed_doc_ids: Optional[list[str]] = None,
 ) -> list[dict]:
     """
     BM25 keyword search using pre-built index from Redis.
-    The deserialized BM25Okapi object is cached in memory keyed by a hash of the
-    raw Redis data — avoids repeated JSON parse + index rebuild on every query.
-    Falls back to empty if no index exists.
+    allowed_doc_ids: if set, only chunks whose metadata.documentId is in this list
+    are considered. Pass an empty list to return no results immediately.
     """
+    if allowed_doc_ids is not None and len(allowed_doc_ids) == 0:
+        return []
+
     r = await get_redis()
     if not r:
         return []
@@ -474,7 +493,37 @@ async def _bm25_search(
             bm25 = BM25Okapi(tokenized)
             _bm25_cache_put(cache_key, (bm25, documents, metadatas))
 
-        # Score query
+        # If doc_id filter is active, build a mask
+        if allowed_doc_ids is not None:
+            allowed_set = set(allowed_doc_ids)
+            active_indices = [
+                i for i, meta in enumerate(metadatas)
+                if isinstance(meta, dict) and meta.get("documentId") in allowed_set
+            ]
+            if not active_indices:
+                return []
+            # Rebuild BM25 on filtered corpus
+            from rank_bm25 import BM25Okapi
+            import numpy as np
+            filtered_docs = [documents[i] for i in active_indices]
+            filtered_metas = [metadatas[i] for i in active_indices]
+            filtered_tokenized = [doc.lower().split() for doc in filtered_docs]
+            bm25_filtered = BM25Okapi(filtered_tokenized)
+            query_tokens = query.lower().split()
+            scores = bm25_filtered.get_scores(query_tokens)
+            top_idx = np.argsort(scores)[::-1][:top_k]
+            results = []
+            for idx in top_idx:
+                if scores[idx] > 0:
+                    results.append({
+                        "content": filtered_docs[idx],
+                        "metadata": filtered_metas[idx],
+                        "score": float(scores[idx]),
+                        "retrieval_type": "bm25",
+                    })
+            return results
+
+        # Score query (unfiltered)
         import numpy as np
         query_tokens = query.lower().split()
         scores = bm25.get_scores(query_tokens)
@@ -496,20 +545,138 @@ async def _bm25_search(
         return []
 
 
+# ── Cross-Encoder Re-ranking ──────────────────────────────────────────────────
+# Uses cross-encoder/ms-marco-MiniLM-L-6-v2 (CPU-compatible, ~75 MB).
+# Lazy-loaded; gracefully skipped if model unavailable.
+
+_cross_encoder = None
+
+
+def _get_cross_encoder():
+    global _cross_encoder
+    if _cross_encoder is None:
+        try:
+            from sentence_transformers.cross_encoder import CrossEncoder
+            _cross_encoder = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+            logger.info("[rag] Cross-encoder loaded: ms-marco-MiniLM-L-6-v2")
+        except Exception as exc:
+            logger.warning("[rag] Cross-encoder not available, skipping rerank: %s", exc)
+    return _cross_encoder
+
+
+async def _rerank_with_cross_encoder(
+    query: str,
+    documents: list[dict],
+    top_k: int = 7,
+) -> list[dict]:
+    """
+    Rerank retrieved chunks using a cross-encoder for better relevance.
+    Blends cross-encoder score (primary) with RRF score (secondary) for stability.
+    If the cross-encoder isn't available, returns documents unchanged.
+    """
+    encoder = _get_cross_encoder()
+    if not encoder or not documents:
+        return documents
+
+    try:
+        import asyncio
+        pairs = [(query, doc["content"]) for doc in documents]
+
+        def _score_pairs():
+            import numpy as np
+            scores = encoder.predict(pairs, show_progress_bar=False)
+            return scores.tolist() if hasattr(scores, "tolist") else list(scores)
+
+        loop = asyncio.get_event_loop()
+        scores = await loop.run_in_executor(None, _score_pairs)
+
+        for doc, ce_score in zip(documents, scores):
+            # Blend: cross-encoder score as primary ranking key
+            doc["rerank_score"] = round(float(ce_score), 4)
+            # Preserve original retrieval score for transparency
+            doc["retrieval_score"] = doc.get("score", 0.0)
+            doc["score"] = float(ce_score)
+
+        documents.sort(key=lambda d: d.get("score", 0), reverse=True)
+        return documents[:top_k]
+
+    except Exception as exc:
+        logger.warning("[rag] Cross-encoder reranking failed: %s", exc)
+        return documents
+
+
+# ── KB Attachment when_to_use filtering ──────────────────────────────────────
+
+async def _load_kb_attachments(
+    db: AsyncSession, agent_id: str
+) -> list[dict]:
+    """Load all KB attachments for an agent from the database."""
+    try:
+        result = await db.execute(
+            select(KbAttachment).where(KbAttachment.agentId == agent_id)
+        )
+        attachments = result.scalars().all()
+        return [
+            {
+                "id": a.id,
+                "documentId": a.documentId,
+                "whenToUse": a.whenToUse,
+                "status": a.status,
+            }
+            for a in attachments
+        ]
+    except Exception:
+        return []
+
+
+def _is_query_relevant_to_kb(
+    query: str,
+    when_to_use: str,
+    threshold: float = 0.25,
+) -> bool:
+    """
+    Check if the user's query is semantically relevant to the KB attachment's
+    when_to_use instruction.  Uses cosine similarity via the same multilingual
+    embedding model used for ingestion so cross-lingual queries work correctly.
+    Returns True if relevant (include document) or if no when_to_use set.
+    """
+    if not when_to_use or not when_to_use.strip():
+        return True  # No filter instruction → always include
+    try:
+        from app.services.ingestion_service import _get_embedding_model
+        import numpy as np
+        model = _get_embedding_model()
+        vecs = model.encode([query, when_to_use], convert_to_numpy=True, show_progress_bar=False)
+        a, b = vecs[0], vecs[1]
+        norm_a, norm_b = float(np.linalg.norm(a)), float(np.linalg.norm(b))
+        if norm_a == 0 or norm_b == 0:
+            return True
+        similarity = float(np.dot(a, b) / (norm_a * norm_b))
+        return similarity >= threshold
+    except Exception:
+        return True  # On error, include by default (fail open)
+
+
 async def query_documents(
     tenant_id: str,
     agent_id: str,
     query: str,
     top_k: int = 7,
+    allowed_doc_ids: Optional[list[str]] = None,
 ) -> list[dict]:
     """
     Hybrid search: combine semantic (ChromaDB) + BM25 (keyword) results.
     Uses Reciprocal Rank Fusion (RRF) to merge rankings.
+    allowed_doc_ids: if provided, only chunks from those documents are searched.
+    None means no filter (search all). Empty list means return nothing.
     """
-    # Run both searches in parallel
+    if allowed_doc_ids is not None and len(allowed_doc_ids) == 0:
+        return []
+
+    # Run both searches in parallel, both respecting the document filter
     semantic_results, bm25_results = await asyncio.gather(
-        _semantic_search(tenant_id, agent_id, query, top_k),
-        _bm25_search(tenant_id, agent_id, query, top_k),
+        _semantic_search(tenant_id, agent_id, query, top_k, allowed_doc_ids),
+        _bm25_search(tenant_id, agent_id, query, top_k, allowed_doc_ids),
     )
 
     # If only one source has results, return it directly
@@ -833,26 +1000,58 @@ async def process_query(
     """
     Full RAG pipeline:
     1. Assemble context (5-layer)
-    2. Query ChromaDB (tenant-isolated)
-    3. Apply policy scoring
-    4. Build system prompt (7-section)
-    5. Generate response with conversation history
-    6. Save conversation turn
+    2. Load KB attachments + apply when_to_use pre-filter
+    3. Query ChromaDB with document filter (hybrid BM25 + semantic)
+    4. Apply policy scoring
+    5. Cross-encoder re-ranking
+    6. Build system prompt (7-section)
+    7. Generate response with conversation history
+    8. Save conversation turn
     """
     # 1. Assemble context
     ctx = await assemble_context(db, tenant_id, agent_id, session_id)
 
-    # 2. Query ChromaDB
-    retrieved_docs = await query_documents(tenant_id, agent_id, query)
+    # 2. Load KB attachments + compute allowed_doc_ids via when_to_use filter
+    kb_attachments = await _load_kb_attachments(db, agent_id)
+    allowed_doc_ids: Optional[list[str]] = None  # None = no filter (backward-compat)
 
-    # 3. Apply policy scoring
+    if kb_attachments:
+        # Determine which documents are relevant to this query
+        # Run synchronously in thread to keep event loop free (embedding model is CPU-bound)
+        import asyncio as _asyncio
+
+        def _compute_allowed():
+            relevant_ids = []
+            for att in kb_attachments:
+                doc_id = att.get("documentId")
+                when_to_use = att.get("whenToUse")
+                if _is_query_relevant_to_kb(query, when_to_use):
+                    if doc_id:
+                        relevant_ids.append(doc_id)
+            return relevant_ids
+
+        loop = _asyncio.get_event_loop()
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            allowed_doc_ids = await loop.run_in_executor(pool, _compute_allowed)
+
+    # 3. Query ChromaDB (with optional document filter)
+    retrieved_docs = await query_documents(
+        tenant_id, agent_id, query, allowed_doc_ids=allowed_doc_ids
+    )
+
+    # 4. Apply policy scoring
     if retrieved_docs and ctx.get("mergedPolicies"):
         retrieved_docs = apply_policy_scoring(retrieved_docs, ctx["mergedPolicies"])
 
-    # 4. Build system prompt
+    # 5. Cross-encoder re-ranking (only if we got results to re-rank)
+    if retrieved_docs:
+        retrieved_docs = await _rerank_with_cross_encoder(query, retrieved_docs)
+
+    # 6. Build system prompt
     system_prompt = build_system_prompt(ctx)
 
-    # 5. Resolve Groq key
+    # 7. Resolve Groq key
     result = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
     tenant = result.scalar_one_or_none()
     groq_key = _resolve_groq_key(tenant)
@@ -863,7 +1062,7 @@ async def process_query(
             "sources": [],
         }
 
-    # 6. Generate response
+    # 8. Generate response
     response_text = await generate_response(
         groq_key=groq_key,
         system_prompt=system_prompt,
@@ -874,7 +1073,7 @@ async def process_query(
         model=ctx["model"],
     )
 
-    # 7. Save conversation turn
+    # 9. Save conversation turn
     history = ctx["conversationHistory"]
     history.append({"role": "user", "content": query})
     history.append({"role": "assistant", "content": response_text})
@@ -886,7 +1085,9 @@ async def process_query(
         meta = doc.get("metadata", {})
         sources.append({
             "source": meta.get("source", "unknown"),
-            "score": round(doc.get("score", 0), 3),
+            "score": round(doc.get("score", 0), 4),
+            "rerank_score": round(doc.get("rerank_score", 0), 4) if "rerank_score" in doc else None,
+            "retrieval_type": doc.get("retrieval_type", "unknown"),
             "snippet": doc.get("content", "")[:200],
         })
 
@@ -895,6 +1096,7 @@ async def process_query(
         "sources": sources,
         "model": ctx["model"],
         "documentsRetrieved": len(retrieved_docs),
+        "kbDocsFiltered": len(kb_attachments) - len(allowed_doc_ids) if allowed_doc_ids is not None else 0,
     }
 
 
