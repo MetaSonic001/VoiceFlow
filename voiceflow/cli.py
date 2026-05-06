@@ -180,11 +180,104 @@ def main():
         api_key: str = typer.Option(
             ..., envvar="VOICEFLOW_API_KEY", help="Your VoiceFlow API key"),
         agent_file: str = typer.Option("agent.py", help="Path to agent.py"),
+        knowledge_dir: str = typer.Option("knowledge", help="Directory with knowledge docs"),
     ):
-        """Deploy this agent to the hosted VoiceFlow platform (placeholder)."""
+        """Deploy this agent to the hosted VoiceFlow platform."""
+        import asyncio
+        import importlib.util
+
         typer.echo(f"Deploying '{agent_file}' to {platform_url} …")
-        typer.echo("(deploy command will upload agent config + knowledge base)")
-        typer.echo("Not yet implemented — contact support@voiceflow.ai for early access.")
+
+        spec = importlib.util.spec_from_file_location("_agent_module", agent_file)
+        if spec is None:
+            typer.echo(f"Cannot load '{agent_file}'", err=True)
+            raise typer.Exit(1)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+
+        agent = getattr(mod, "agent", None)
+        if agent is None:
+            typer.echo("No 'agent' variable found in agent file.", err=True)
+            raise typer.Exit(1)
+
+        from voiceflow.client import VoiceFlowClient, VoiceFlowError
+
+        async def _deploy():
+            client = VoiceFlowClient(api_key=api_key, base_url=platform_url)
+
+            # Create or update agent
+            typer.echo(f"  → Creating agent '{agent.name}' …")
+            try:
+                result = await client.create_agent(
+                    name=agent.name,
+                    system_prompt=getattr(agent, "prompt", ""),
+                    language=getattr(agent, "language", "en-US"),
+                )
+                agent_id = result.get("id") or result.get("agentId")
+                typer.echo(f"  ✓ Agent created: {agent_id}")
+            except VoiceFlowError as exc:
+                typer.echo(f"  ✗ Failed to create agent: {exc}", err=True)
+                raise typer.Exit(1)
+
+            # Upload knowledge docs
+            if os.path.isdir(knowledge_dir):
+                docs = [
+                    os.path.join(knowledge_dir, f)
+                    for f in os.listdir(knowledge_dir)
+                    if f.lower().endswith((".pdf", ".txt", ".md", ".docx"))
+                ]
+                for doc in docs:
+                    typer.echo(f"  → Uploading '{doc}' …")
+                    try:
+                        await client.upload_knowledge(agent_id, doc)
+                        typer.echo(f"  ✓ Uploaded {os.path.basename(doc)}")
+                    except VoiceFlowError as exc:
+                        typer.echo(f"  ✗ Upload failed: {exc}", err=True)
+
+            typer.echo(f"\nDeploy complete. Agent ID: {agent_id}")
+            typer.echo(f"Manage at: {platform_url.replace('api.', 'app.')}/agents/{agent_id}")
+
+        asyncio.run(_deploy())
+
+    # ------------------------------------------------------------------ #
+    # `voiceflow serve-mcp`                                                #
+    # ------------------------------------------------------------------ #
+    @app.command(name="serve-mcp")
+    def serve_mcp(
+        agent_file: str = typer.Option("agent.py", help="Path to agent.py"),
+    ):
+        """
+        Export the agent as a FastMCP server (stdio, MCP protocol).
+
+        Configure in Claude Desktop claude_desktop_config.json:
+
+        \\b
+          {
+            "mcpServers": {
+              "my_agent": {
+                "command": "voiceflow",
+                "args": ["serve-mcp", "--agent-file", "agent.py"],
+                "env": {"VOICEFLOW_API_URL": "http://localhost:8040"}
+              }
+            }
+          }
+        """
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("_agent_module", agent_file)
+        if spec is None:
+            typer.echo(f"Cannot load '{agent_file}'", err=True)
+            raise typer.Exit(1)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+
+        agent = getattr(mod, "agent", None)
+        if agent is None:
+            typer.echo("No 'agent' variable found in agent file.", err=True)
+            raise typer.Exit(1)
+
+        typer.echo(f"Starting MCP server for agent '{agent.name}' (stdio) …", err=True)
+        agent.serve_mcp()
 
     # ------------------------------------------------------------------ #
     # `voiceflow call <phone>`                                             #

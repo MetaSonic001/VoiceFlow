@@ -32,8 +32,9 @@ pip install voiceflow[crm]             # + HubSpot + Salesforce + Slack
 pip install voiceflow[all]             # everything
 """
 from voiceflow.agent import VoiceAgent
+from voiceflow.client import VoiceFlowClient
 from voiceflow.knowledge_base import KnowledgeBase
 from voiceflow.tools import voice_tool
 
 __version__ = "0.1.0"
-__all__ = ["VoiceAgent", "KnowledgeBase", "voice_tool"]
+__all__ = ["VoiceAgent", "VoiceFlowClient", "KnowledgeBase", "voice_tool"]

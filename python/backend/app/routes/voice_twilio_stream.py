@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import AsyncSessionLocal, get_db
-from app.models import Agent, CallLog, Tenant
+from app.models import Agent, CallLog, Tenant, Contact
 from app.services.credentials import decrypt_safe
 from app.services.stt_service import stt_service
 from app.services.tts_router import TTSRouter
@@ -175,15 +175,72 @@ async def voice_outbound(agent_id: str, request: Request):
     form = await request.form()
     answered_by = (form.get("AnsweredBy") or "").lower()
     call_sid = form.get("CallSid", "")
+    contact_id = request.query_params.get("contact_id", "")
 
     if answered_by.startswith("machine") or answered_by == "fax":
-        from twilio.twiml.voice_response import VoiceResponse
-        resp = VoiceResponse()
-        resp.hangup()
-        logger.info("[twilio_stream] AMD machine detected — hanging up call=%s", call_sid)
-        return Response(content=str(resp), media_type="application/xml")
+        from twilio.twiml.voice_response import VoiceResponse, Say, Pause
+        from app.models import Campaign, CampaignContact, Contact
 
-    contact_id = request.query_params.get("contact_id", "")
+        logger.info("[twilio_stream] AMD machine detected — call=%s answered_by=%s", call_sid, answered_by)
+
+        # Look up campaign voicemail settings and persist detection
+        voicemail_twiml: str | None = None
+        async with AsyncSessionLocal() as db:
+            # Resolve agent to get tenant
+            ag_r = await db.execute(select(Agent).where(Agent.id == agent_id))
+            agent_obj = ag_r.scalar_one_or_none()
+
+            if contact_id:
+                cc_r = await db.execute(select(CampaignContact).where(CampaignContact.id == contact_id))
+                cc = cc_r.scalar_one_or_none()
+                if cc and cc.campaignId:
+                    camp_r = await db.execute(select(Campaign).where(Campaign.id == cc.campaignId))
+                    campaign = camp_r.scalar_one_or_none()
+                    if campaign:
+                        # Increment machined count
+                        campaign.machinedCount = (campaign.machinedCount or 0) + 1
+
+                        if campaign.voicemailAction == "leave_voicemail" and campaign.voicemailMessage:
+                            voicemail_twiml = campaign.voicemailMessage
+
+                # Tag the underlying contact with left_voicemail
+                if cc and cc.phoneNumber and agent_obj:
+                    ct_r = await db.execute(
+                        select(Contact).where(
+                            Contact.tenantId == (agent_obj.tenantId if agent_obj else ""),
+                            Contact.phoneNumber == cc.phoneNumber,
+                        )
+                    )
+                    contact_obj = ct_r.scalar_one_or_none()
+                    if contact_obj:
+                        tags = list(contact_obj.tags or [])
+                        if "left_voicemail" not in tags:
+                            tags.append("left_voicemail")
+                        contact_obj.tags = tags
+
+            # Persist CallLog with voicemailDetected=True
+            if agent_obj:
+                log = CallLog(
+                    tenantId=agent_obj.tenantId,
+                    agentId=agent_id,
+                    callSid=call_sid,
+                    callDirection="outbound",
+                    startedAt=datetime.now(timezone.utc),
+                    endedAt=datetime.now(timezone.utc),
+                    durationSeconds=0,
+                    transcript="[]",
+                    voicemailDetected=True,
+                )
+                db.add(log)
+            await db.commit()
+
+        resp = VoiceResponse()
+        if voicemail_twiml:
+            # Brief pause to wait for beep, then speak voicemail message
+            resp.pause(length=2)
+            resp.say(voicemail_twiml)
+        resp.hangup()
+        return Response(content=str(resp), media_type="application/xml")
 
     async with AsyncSessionLocal() as db:
         result = await db.execute(select(Agent).where(Agent.id == agent_id))

@@ -318,6 +318,15 @@ async def get_all_key_statuses(auth: AuthContext = Depends(get_auth), db: AsyncS
         "sarvam":      _status("sarvamApiKey",       "sarvam"),
         "deepgram":    _status("deepgramApiKey",     "deepgram"),
         "assemblyai":  _status("assemblyaiApiKey",   "assemblyai"),
+        "sip": {
+            "configured": bool(s.get("sipServer") and s.get("sipUsername") and s.get("sipPassword")),
+            "sipServer": s.get("sipServer"),
+            "sipUsername": s.get("sipUsername"),
+        },
+        "exotel": {
+            "configured": bool(s.get("exotelSid") and s.get("exotelApiKey") and s.get("exotelApiToken")),
+            "exotelSid": s.get("exotelSid"),
+        },
     }
 
 
@@ -552,3 +561,143 @@ async def get_assemblyai(auth: AuthContext = Depends(get_auth), db: AsyncSession
 @router.delete("/assemblyai")
 async def delete_assemblyai(auth: AuthContext = Depends(get_auth), db: AsyncSession = Depends(get_db)):
     return await _delete_byok_key("assemblyai", auth, db)
+
+
+# ── SIP Trunking BYOC ─────────────────────────────────────────────────────────
+# Bring-Your-Own-Carrier: store SIP trunk credentials per tenant.
+# Twilio Elastic SIP Trunking or any standard SIP provider is supported.
+# Credentials: sipServer (plain), sipUsername (plain), sipPassword (encrypted).
+
+@router.post("/sip")
+async def save_sip(body: dict, auth: AuthContext = Depends(get_auth), db: AsyncSession = Depends(get_db)):
+    """Save SIP trunk credentials for BYOC (Bring-Your-Own-Carrier) calling."""
+    sip_server = (body.get("sipServer") or "").strip()
+    sip_username = (body.get("sipUsername") or "").strip()
+    sip_password = (body.get("sipPassword") or "").strip()
+    sip_from_number = (body.get("sipFromNumber") or "").strip()
+
+    if not sip_server or not sip_username or not sip_password:
+        return JSONResponse(
+            {"error": "sipServer, sipUsername, and sipPassword are all required."},
+            status_code=400,
+        )
+
+    result = await db.execute(select(Tenant).where(Tenant.id == auth.tenant_id))
+    tenant = result.scalar_one_or_none()
+    if not tenant:
+        return JSONResponse({"error": "Tenant not found"}, status_code=404)
+
+    existing = dict(tenant.settings or {})
+    existing.update({
+        "sipServer": sip_server,
+        "sipUsername": sip_username,
+        "sipPassword": encrypt(sip_password),
+        "sipFromNumber": sip_from_number,
+        "sipConfiguredAt": datetime.now(timezone.utc).isoformat(),
+    })
+    tenant.settings = existing
+    await db.commit()
+    return {"success": True, "message": "SIP credentials saved (password encrypted)."}
+
+
+@router.get("/sip")
+async def get_sip(auth: AuthContext = Depends(get_auth), db: AsyncSession = Depends(get_db)):
+    """Return SIP trunk configuration status (password masked)."""
+    result = await db.execute(select(Tenant).where(Tenant.id == auth.tenant_id))
+    tenant = result.scalar_one_or_none()
+    s = (tenant.settings or {}) if tenant else {}
+    has_password = bool(s.get("sipPassword"))
+    return {
+        "configured": bool(s.get("sipServer") and s.get("sipUsername") and has_password),
+        "sipServer": s.get("sipServer"),
+        "sipUsername": s.get("sipUsername"),
+        "sipFromNumber": s.get("sipFromNumber"),
+        "hasPassword": has_password,
+        "configuredAt": s.get("sipConfiguredAt"),
+    }
+
+
+@router.delete("/sip")
+async def delete_sip(auth: AuthContext = Depends(get_auth), db: AsyncSession = Depends(get_db)):
+    """Remove SIP trunk credentials."""
+    result = await db.execute(select(Tenant).where(Tenant.id == auth.tenant_id))
+    tenant = result.scalar_one_or_none()
+    if tenant:
+        s = dict(tenant.settings or {})
+        for k in ("sipServer", "sipUsername", "sipPassword", "sipFromNumber", "sipConfiguredAt"):
+            s.pop(k, None)
+        tenant.settings = s
+        await db.commit()
+    return {"success": True, "message": "SIP credentials removed."}
+
+
+# ── Exotel credentials ────────────────────────────────────────────────────────
+
+@router.post("/exotel")
+async def save_exotel(body: dict, auth: AuthContext = Depends(get_auth), db: AsyncSession = Depends(get_db)):
+    """Save Exotel account credentials (India telephony with DLT compliance)."""
+    exotel_sid = (body.get("exotelSid") or "").strip()
+    api_key = (body.get("exotelApiKey") or "").strip()
+    api_token = (body.get("exotelApiToken") or "").strip()
+
+    if not exotel_sid or not api_key or not api_token:
+        return JSONResponse(
+            {"error": "exotelSid, exotelApiKey, and exotelApiToken are required."},
+            status_code=400,
+        )
+
+    # Optional live validation
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"https://api.exotel.com/v1/Accounts/{exotel_sid}.json",
+                auth=(api_key, api_token),
+            )
+            if resp.status_code == 401:
+                return JSONResponse({"error": "Invalid Exotel credentials."}, status_code=400)
+    except Exception:
+        pass  # network failure is non-fatal — save anyway
+
+    result = await db.execute(select(Tenant).where(Tenant.id == auth.tenant_id))
+    tenant = result.scalar_one_or_none()
+    if not tenant:
+        return JSONResponse({"error": "Tenant not found"}, status_code=404)
+
+    existing = dict(tenant.settings or {})
+    existing.update({
+        "exotelSid": exotel_sid,
+        "exotelApiKey": api_key,
+        "exotelApiToken": encrypt(api_token),
+        "exotelConfiguredAt": datetime.now(timezone.utc).isoformat(),
+    })
+    tenant.settings = existing
+    await db.commit()
+    return {"success": True, "message": "Exotel credentials saved (token encrypted)."}
+
+
+@router.get("/exotel")
+async def get_exotel(auth: AuthContext = Depends(get_auth), db: AsyncSession = Depends(get_db)):
+    """Return Exotel configuration status."""
+    result = await db.execute(select(Tenant).where(Tenant.id == auth.tenant_id))
+    tenant = result.scalar_one_or_none()
+    s = (tenant.settings or {}) if tenant else {}
+    return {
+        "configured": bool(s.get("exotelSid") and s.get("exotelApiKey") and s.get("exotelApiToken")),
+        "exotelSid": s.get("exotelSid"),
+        "hasApiToken": bool(s.get("exotelApiToken")),
+        "configuredAt": s.get("exotelConfiguredAt"),
+    }
+
+
+@router.delete("/exotel")
+async def delete_exotel(auth: AuthContext = Depends(get_auth), db: AsyncSession = Depends(get_db)):
+    """Remove Exotel credentials."""
+    result = await db.execute(select(Tenant).where(Tenant.id == auth.tenant_id))
+    tenant = result.scalar_one_or_none()
+    if tenant:
+        s = dict(tenant.settings or {})
+        for k in ("exotelSid", "exotelApiKey", "exotelApiToken", "exotelConfiguredAt"):
+            s.pop(k, None)
+        tenant.settings = s
+        await db.commit()
+    return {"success": True, "message": "Exotel credentials removed."}

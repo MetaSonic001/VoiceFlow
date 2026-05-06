@@ -371,6 +371,7 @@ class CallLog(Base):
     ratingNotes: Mapped[Optional[str]] = mapped_column("ratingNotes", String, nullable=True)
     flaggedForRetraining: Mapped[bool] = mapped_column("flaggedForRetraining", Boolean, default=False)
     retrained: Mapped[bool] = mapped_column(Boolean, default=False)
+    voicemailDetected: Mapped[bool] = mapped_column("voicemailDetected", Boolean, default=False)
     createdAt: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
 
     tenant = relationship("Tenant", back_populates="call_logs")

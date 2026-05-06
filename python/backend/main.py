@@ -238,6 +238,7 @@ from app.routes import ingestion, users, retraining, admin, tts, rag
 from app.routes import widget, voice_ws, platform, data_explorer
 from app.routes import voice_twilio_stream, voice_twilio_gather, voice_inbound_router
 from app.routes import voice_live
+from app.routes import voice_exotel
 from app.routes import voices as voices_routes
 from app.routes import campaigns, whatsapp, webhooks
 from app.routes import ab_testing
@@ -272,6 +273,7 @@ app.include_router(voice_live.router, prefix="/api/voice", tags=["VoiceLive"])
 app.include_router(voice_twilio_gather.router, prefix="/api/voice", tags=["VoiceTwilioGather"])
 app.include_router(voice_twilio_stream.router, prefix="/api/voice", tags=["VoiceTwilioStream"])
 app.include_router(voice_inbound_router.router, prefix="/api/voice", tags=["VoiceInboundRouter"])
+app.include_router(voice_exotel.router, prefix="/api/voice/exotel", tags=["VoiceExotel"])
 app.include_router(campaigns.router, prefix="/api/campaigns", tags=["Campaigns"])
 app.include_router(whatsapp.router, prefix="/api/whatsapp", tags=["WhatsApp"])
 app.include_router(webhooks.router, prefix="/api/webhooks", tags=["Webhooks"])

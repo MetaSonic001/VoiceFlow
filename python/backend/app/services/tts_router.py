@@ -2,6 +2,7 @@ import hashlib
 import io
 import logging
 import os
+import random
 import re
 import wave
 from collections.abc import AsyncGenerator
@@ -21,6 +22,25 @@ _SENTENCE_END_RE = re.compile(r"[.!?](?:\s|$)")
 _PHRASE_CACHE_DIR = Path(os.getenv("TTS_CACHE_DIR", "/tmp/voiceflow_tts_cache"))
 _PHRASE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
+# ── Filler phrases (played while LLM is thinking, >800ms threshold) ───────────
+# Pre-generated once per voice_id and served from disk for zero-latency playback.
+_FILLER_PHRASES = [
+    "Let me check that for you.",
+    "One moment please.",
+    "Hmm, let me see.",
+    "Sure, just a second.",
+    "Great question, let me look into that.",
+    "Right, let me find that information.",
+]
+_FILLER_THRESHOLD_MS = 800   # play filler if LLM hasn't started responding in 800ms
+
+# ── Initial ringing tone ──────────────────────────────────────────────────────
+# Played before the first agent utterance to simulate a natural call pickup feel.
+_RINGING_SOUND_FILE = Path(os.getenv(
+    "RINGING_SOUND_FILE",
+    str(Path(__file__).parent.parent / "static" / "audio" / "ringing.mp3"),
+))
+
 # ── Background ambient sounds ─────────────────────────────────────────────────
 # Shipped as filenames under a configurable directory.
 # Mixed at -18dB with TTS output before encoding to μ-law for Twilio.
@@ -30,9 +50,10 @@ _AMBIENT_SOUNDS = {
     "cafe": "cafe.mp3",
     "call_center": "call_center.mp3",
     "street": "street.mp3",
+    "nature": "nature.mp3",
 }
 # dB level for ambient mix — quiet enough not to interfere with speech
-_AMBIENT_GAIN_DB = -18
+_AMBIENT_GAIN_DB = -20
 
 
 class TTSRouter:
@@ -126,6 +147,58 @@ class TTSRouter:
         """Return μ-law 8kHz mono bytes for Twilio using pydub conversion."""
         audio_bytes = await self.synthesize(text=text, engine=engine, voice_id=voice_id, speed=speed, **kwargs)
         return self._wav_to_mulaw_8khz_mono(audio_bytes)
+
+    # ── Filler phrase system ──────────────────────────────────────────────────
+
+    async def get_filler(self, engine: str, voice_id: str) -> bytes:
+        """
+        Return a random pre-cached filler phrase as WAV bytes.
+
+        Filler phrases are synthesised once per (engine, voice_id) combination
+        and stored on disk.  Subsequent calls are instant (disk read ≈ 0ms).
+        If no filler has been pre-generated yet, generates all phrases lazily.
+        """
+        for phrase in random.sample(_FILLER_PHRASES, len(_FILLER_PHRASES)):
+            cache_key = hashlib.sha256(f"{engine}:{voice_id}:filler:{phrase}".encode()).hexdigest()
+            cache_file = _PHRASE_CACHE_DIR / f"{cache_key}.wav"
+            if cache_file.exists():
+                return cache_file.read_bytes()
+        # None cached — synthesise one now and cache the rest in the background
+        import asyncio
+        phrase = random.choice(_FILLER_PHRASES)
+        audio = await self.synthesize(phrase, engine=engine, voice_id=voice_id)
+        cache_key = hashlib.sha256(f"{engine}:{voice_id}:filler:{phrase}".encode()).hexdigest()
+        cache_file = _PHRASE_CACHE_DIR / f"{cache_key}.wav"
+        try:
+            cache_file.write_bytes(audio)
+        except Exception:
+            pass
+        asyncio.create_task(self.pre_generate_fillers(engine=engine, voice_id=voice_id))
+        return audio
+
+    async def pre_generate_fillers(self, engine: str, voice_id: str) -> None:
+        """Pre-generate and cache all filler phrases for a given voice."""
+        for phrase in _FILLER_PHRASES:
+            cache_key = hashlib.sha256(f"{engine}:{voice_id}:filler:{phrase}".encode()).hexdigest()
+            cache_file = _PHRASE_CACHE_DIR / f"{cache_key}.wav"
+            if not cache_file.exists():
+                try:
+                    audio = await self.synthesize(phrase, engine=engine, voice_id=voice_id)
+                    cache_file.write_bytes(audio)
+                except Exception as exc:
+                    logger.debug("[tts] filler pre-generate failed '%s': %s", phrase, exc)
+
+    def get_ringing_audio(self) -> bytes | None:
+        """Return the initial ringing sound WAV bytes, or None if file not found."""
+        if _RINGING_SOUND_FILE.exists():
+            try:
+                seg = AudioSegment.from_file(str(_RINGING_SOUND_FILE))
+                out = io.BytesIO()
+                seg.export(out, format="wav")
+                return out.getvalue()
+            except Exception as exc:
+                logger.debug("[tts] ringing sound load failed: %s", exc)
+        return None
 
     async def _synthesize_edge(self, text: str, voice_id: str) -> bytes:
         """Call Edge TTS and return WAV bytes (converted from MP3 via pydub)."""
