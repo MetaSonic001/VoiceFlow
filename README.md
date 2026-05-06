@@ -2,14 +2,15 @@
 
 A multi-tenant SaaS platform for building, deploying, and managing AI-powered voice and chat agents. Businesses onboard through a guided wizard, upload their knowledge base, and receive a domain-specific AI agent that answers customer queries over phone (Twilio), browser-based WebSocket voice calls, or a web chat interface — using Retrieval-Augmented Generation (RAG) over their own documents with hierarchical context injection and policy-based retrieval scoring.
 
-> **Status (April 2026):** The full pipeline is functional end-to-end: 7-step onboarding → document ingestion → per-tenant vector isolation → 5-layer context injection → policy-scored retrieval → dynamic 7-section prompt assembly → Groq LLM generation (per-tenant model selection, conversation history in all code paths) → TTS → multi-channel delivery (Twilio voice, **real WebSocket audio** with local `faster-whisper` or Groq Whisper STT + Edge/Kokoro/Piper TTS, web chat, embeddable widget, WhatsApp, **per-agent REST API for third-party integration**). Outbound campaigns with CSV upload, AMD detection, DND compliance, and real-time progress tracking. HMAC-SHA256 signed webhook dispatch with retry. A/B testing with traffic splitting. Analytics use real DB queries. A retraining pipeline captures bad calls and injects learned corrections as few-shot examples. Visual flow builder for conversation design. 29 route files (~142 endpoints), 13 services, 17 models. **Modern UI: glassmorphism, micro-interactions, 15+ CSS animations, dark mode on all 25 pages. Stack: Django 6 (HTMX + Alpine.js) frontend + FastAPI backend + Docker services (Postgres, Redis, ChromaDB, MinIO).** See [Implementation Status](#implementation-status) for the full breakdown.
+> **Status (May 2026):** The full pipeline is functional end-to-end. In the last 3 commits (unpushed, available locally) the **Architecture Bible** was fully implemented — see [What's New (May 2026)](#whats-new-may-2026). 42 route files (~175 endpoints), 21 service modules, 21 ORM models, 29 dashboard pages. Full `pip install voiceflow` developer SDK with plugin architecture. MCP server for Claude Desktop integration. **Modern UI: glassmorphism, micro-interactions, 15+ CSS animations, dark mode on all 29 pages.** Stack: Django 6 (HTMX + Alpine.js) frontend + FastAPI backend + Docker services (Postgres, Redis, ChromaDB, MinIO). See [Implementation Status](#implementation-status) for the full breakdown.
 
 ---
 
 ## Table of Contents
 
 1. [What This Project Does](#what-this-project-does)
-2. [System Architecture](#system-architecture)
+2. [What's New (May 2026)](#whats-new-may-2026)
+3. [System Architecture](#system-architecture)
 3. [Repository Structure](#repository-structure)
 4. [Tech Stack](#tech-stack)
 5. [How It Works — End to End](#how-it-works--end-to-end)
@@ -31,9 +32,102 @@ A multi-tenant SaaS platform for building, deploying, and managing AI-powered vo
 
 ---
 
-## What This Project Does
+## What's New (May 2026)
 
-VoiceFlow lets any business create an AI agent tailored to their domain without writing code:
+Three commits implement the **Architecture & Feature Bible** — deeper implementations of existing features, 10 new backend modules, and a `pip install voiceflow` developer SDK. All are **locally committed (commits `1f6086c`, `e82585d`, `4989a8d`) but not yet pushed to remote**.
+
+### Commit 1 — `1f6086c` chore: Alembic + priority fixes
+- Alembic migrations initialised (`python/backend/migrations/`)
+- Settings double-mount bug fixed in `main.py`
+- `assemble_context()` parallelised (concurrent ChromaDB + BM25 fetch)
+- BM25 index LRU-cached per tenant in Redis (db=2)
+
+### Commit 2 — `e82585d` feat: 12 platform enhancements
+| # | Feature | File(s) |
+|---|---------|---------|
+| 1–5 | Multi-engine STT: Sarvam, Groq Whisper, Deepgram, Vosk, language-detect | `stt_service.py` |
+| 6 | Web search via Tavily in RAG | `rag_service.py` |
+| 7 | HubSpot + Salesforce pre-call context | `crm_enrichment_service.py` |
+| 8–9 | Adversarial simulation + CI/CD gate endpoint | `simulation_service.py`, `simulate.py` |
+| 10–11 | Agent revision delta + FAQ auto-generator | `agents.py` |
+| 12 | MCP server: 6 tools + 3 Resources + 4 Prompts (Claude Desktop) | `mcp_server.py` |
+
+### Commit 3 — `4989a8d` feat: Architecture Bible (current HEAD)
+
+#### New Backend Services
+| Service | Purpose |
+|---------|---------|
+| `crm_enrichment_service.py` | Bidirectional HubSpot/Salesforce sync; injects enriched context into system prompt before each call |
+| `ivr_service.py` | IVR tree routing — TwiML `<Gather>` menus, BFS node traversal, DTMF-to-agent handoff |
+| `call_recording_service.py` | MinIO WAV storage, 1-sample/sec waveform, timestamped transcripts, 24h presigned download |
+| `auto_retry_service.py` | Redis ZSET retry scheduler — calling hours (8am–9pm), DND compliance, max-retries |
+| `live_transfer_service.py` | Escalation detection (regex + LLM), HMAC-signed context handoff webhook, TwiML `<Dial>` transfer |
+| `observability.py` | `async with trace_span("llm"):` — Langfuse tracing or structured JSON fallback |
+| `semantic_vad.py` | ML turn detection (distilbert-base-uncased-mnli) + rule-based fallback, adaptive silence threshold |
+| `latency_tracker.py` | `.mark("stt_start")` / P50/P95/P99 ring buffer, auto-optimisation hints (ANN, fast model) |
+
+#### New Backend Routes
+| Route | Prefix | Key Endpoints |
+|-------|--------|---------------|
+| `ivr.py` | `/api/ivr` | CRUD + `/voice/{tree_id}` Twilio webhook + `/voice/{tree_id}/gather` DTMF handler |
+| `recordings.py` | `/api/recordings` | List, detail (waveform + transcript), presigned download, delete |
+| `coaching.py` | `/api/coaching` | List, approve (merges delta into live prompt), reject, per-agent report |
+| `contacts.py` | `/api/contacts` | OmniCRM CRUD, phone lookup, timestamped note append |
+
+#### New Database Models
+| Model | Key Fields |
+|-------|-----------|
+| `Contact` | `phoneNumber`, `intentLevel`, `totalCalls`, `crmContext` (JSON), `hubspotContactId`, `salesforceLeadId` |
+| `IVRTree` | `nodes` (JSON adjacency list), `isActive`, `phoneNumber` |
+| `CallRecording` | `minioKey`, `waveformData` (JSON), `timestampedTranscript` (JSON), FK→`CallLog` |
+| `CoachingCard` | `status`, `suggestedPromptDelta`, `impactScore`, `approvedBy`, FK→`Agent` |
+
+#### `voiceflow/` — pip-installable developer SDK
+```
+voiceflow/
+├── agent.py         # VoiceAgent class
+├── tools.py         # @voice_tool decorator (auto JSON schema)
+├── knowledge_base.py# KnowledgeBase (ChromaDB + multilingual embeddings)
+├── mcp.py           # build_mcp_server(agent) → FastMCP for Claude Desktop
+├── cli.py           # voiceflow new / test / deploy / call <phone>
+└── plugins/
+    ├── stt.py       # WhisperSTT, SarvamSTT, GroqSTT, DeepgramSTT, VoskSTT
+    ├── tts.py       # KokoroTTS, SarvamTTS, EdgeTTS, ElevenLabsTTS
+    ├── llm.py       # GroqLLM, OpenAILLM, AnthropicLLM, OllamaLLM, GeminiLLM
+    └── telephony.py # TwilioTelephony, WebSocketTelephony
+```
+```python
+# 3-line quick start
+from voiceflow import VoiceAgent, voice_tool
+@voice_tool
+def book_demo(name: str, time: str) -> str:
+    """Book a product demo."""
+    return f"Demo booked for {name} at {time}."
+agent = VoiceAgent(name="Sales Bot", system_prompt="You are a friendly sales agent.")
+agent.add_tool(book_demo)
+agent.start()  # FastAPI on :8000, Twilio-ready
+```
+```bash
+pip install voiceflow[twilio,sarvam,mcp]
+voiceflow new my-agent && cd my-agent && python agent.py
+```
+
+#### New Dashboard Pages (fully wired: template → view → proxy → api_client → FastAPI)
+| Page | URL | Description |
+|------|-----|-------------|
+| **IVR Trees** | `/dashboard/ivr/` | Build DTMF routing menus with a node editor. Copy Twilio webhook URL. Activate/deactivate trees. |
+| **Call Recordings** | `/dashboard/recordings/` | Inline waveform bar chart, audio player, timestamped transcript, presigned WAV download, filter by agent. |
+| **Contacts (CRM)** | `/dashboard/contacts/` | OmniCRM table with Hot/Warm/Cold intent badges, HubSpot/Salesforce enrichment, call count, CRM context JSON viewer, note append. |
+| **AI Coaching** | `/dashboard/coaching/` | Review AI-generated prompt improvement cards filtered by status/agent. Approve → applies `suggestedPromptDelta` to live agent prompt instantly. Impact score leaderboard. |
+
+**Sidebar additions:**
+- Channels section: **IVR Trees**
+- Intelligence section: **Recordings**, **AI Coaching**
+- Data section: **Contacts (CRM)** (moved up; was unnamed)
+
+---
+
+## What This Project Does
 
 1. **Sign up** → Django authentication (email/password)
 2. **Onboarding wizard** (7 steps) → configure company profile, agent persona, knowledge base, voice settings, deployment channels
@@ -200,14 +294,24 @@ VoiceFlow/
 │   │   │   │   ├── platform.py    ← Audit, notifications, health
 │   │   │   │   ├── data_explorer.py ← Postgres/ChromaDB/Redis viewer
 │   │   │   │   └── users.py       ← User management
-│   │   │   └── services/          ← 13 service modules
+│   │   │   └── services/          ← 21 service modules
 │   │   │       ├── rag_service.py         ← 5-layer context injection +
 │   │   │       │                            policy scoring + 7-section
 │   │   │       │                            prompt assembly + multi-LLM
 │   │   │       ├── ingestion_service.py   ← Docling + PaddleOCR + scraping
 │   │   │       ├── streaming_orchestrator.py ← Real-time voice pipeline
 │   │   │       ├── tts_router.py          ← Multi-engine TTS (Kokoro/Piper/Edge)
-│   │   │       ├── stt_service.py         ← STT (Vosk/faster-whisper/Groq)
+│   │   │       ├── stt_service.py         ← STT (Vosk/Whisper/Groq/Sarvam/Deepgram)
+│   │   │       │                            + adaptive noise calibration
+│   │   │       ├── crm_enrichment_service.py ← HubSpot/Salesforce pre-call sync
+│   │   │       ├── ivr_service.py         ← DTMF IVR tree routing
+│   │   │       ├── call_recording_service.py ← MinIO WAV + waveform + transcript
+│   │   │       ├── auto_retry_service.py  ← Redis ZSET campaign retry scheduler
+│   │   │       ├── live_transfer_service.py ← Escalation detection + handoff
+│   │   │       ├── observability.py       ← Langfuse/OTEL tracing
+│   │   │       ├── semantic_vad.py        ← ML turn detection (adaptive silence)
+│   │   │       ├── latency_tracker.py     ← P50/P95/P99 per-component latency
+│   │   │       ├── simulation_service.py  ← Adversarial scenarios + CI/CD gate
 │   │   │       ├── campaign_worker.py     ← Outbound campaign execution
 │   │   │       ├── compliance_service.py  ← DND/hours/retry compliance
 │   │   │       ├── webhook_service.py     ← HMAC-SHA256 event dispatch
@@ -218,21 +322,25 @@ VoiceFlow/
 │   └── frontend/                  ← ACTIVE: Django 6.0.4 frontend (Port 8050)
 │       ├── manage.py
 │       ├── core/
-│       │   ├── urls.py            ← All URL routes
-│       │   ├── api_client.py      ← Unified backend API client
+│       │   ├── urls.py            ← All URL routes (+ IVR/Recordings/Contacts/Coaching)
+│       │   ├── api_client.py      ← Unified backend API client (+ 4 new feature groups)
 │       │   └── views/
 │       │       ├── dashboard.py   ← Agent list + detail views
-│       │       ├── pages.py       ← All dashboard page views
-│       │       ├── api_proxy.py   ← 55 proxy endpoints for JS/HTMX
+│       │       ├── pages.py       ← All dashboard page views (+ ivr/recordings/contacts/coaching)
+│       │       ├── api_proxy.py   ← 75+ proxy endpoints for JS/HTMX
 │       │       ├── onboarding.py  ← 7-step wizard view
 │       │       ├── auth.py        ← Login/register/logout
 │       │       └── chat.py        ← Chat + voice agent views
 │       └── templates/
 │           ├── base_dashboard.html
-│           ├── partials/sidebar.html
+│           ├── partials/sidebar.html  ← (IVR Trees, Recordings, AI Coaching, Contacts added)
 │           ├── onboarding/flow.html   ← 7-step wizard (Alpine.js)
 │           ├── agents/detail.html     ← Agent detail + chat
-│           └── dashboard/             ← 25 dashboard pages
+│           └── dashboard/             ← 29 dashboard pages
+│               ├── ivr.html           ← NEW: IVR tree CRUD + node builder
+│               ├── recordings.html    ← NEW: Waveform player + transcript viewer
+│               ├── contacts.html      ← NEW: OmniCRM contacts table + detail
+│               ├── coaching.html      ← NEW: AI coaching card approve/reject
 │               ├── analytics.html     ← Charts + metrics
 │               ├── ab_testing.html    ← A/B test management
 │               ├── audit.html         ← Filterable audit log
@@ -255,6 +363,19 @@ VoiceFlow/
 │               ├── whatsapp.html      ← WhatsApp config
 │               ├── widget.html        ← Embed code manager
 │               └── ...
+│
+├── voiceflow/                     ← pip install voiceflow SDK
+│   ├── __init__.py                ← VoiceAgent, KnowledgeBase, voice_tool exports
+│   ├── agent.py                   ← VoiceAgent class
+│   ├── tools.py                   ← @voice_tool decorator
+│   ├── knowledge_base.py          ← ChromaDB-backed KnowledgeBase
+│   ├── mcp.py                     ← build_mcp_server() for Claude Desktop
+│   ├── cli.py                     ← voiceflow new/test/deploy/call CLI
+│   └── plugins/
+│       ├── stt.py                 ← 5 STT implementations
+│       ├── tts.py                 ← 4 TTS implementations
+│       ├── llm.py                 ← 5 LLM implementations
+│       └── telephony.py           ← TwilioTelephony, WebSocketTelephony
 │
 ├── PATENT_CLAIMS_MAPPING.md       ← Patent claim → code trace mapping
 │

@@ -46,6 +46,12 @@ urlpatterns = [
     path("dashboard/dnd/", pages.dnd_registry, name="dnd_registry"),
     path("dashboard/agents/builder/", pages.agent_builder, name="agent_builder"),
 
+    # ── Architecture Bible pages ─────────────────────────────────────────
+    path("dashboard/ivr/", pages.ivr, name="ivr"),
+    path("dashboard/recordings/", pages.recordings, name="recordings"),
+    path("dashboard/contacts/", pages.contacts, name="contacts"),
+    path("dashboard/coaching/", pages.coaching, name="coaching"),
+
     # API proxy endpoints (for HTMX / JS calls from the browser)
     path("api/agents/", api_proxy.agents_list, name="api_agents"),
     path("api/agents/<str:agent_id>/", api_proxy.agent_detail_api, name="api_agent_detail"),
@@ -121,4 +127,25 @@ urlpatterns = [
     path("api/dnd/", api_proxy.dnd_api, name="api_dnd"),
     path("api/dnd/<str:number_id>/", api_proxy.dnd_delete, name="api_dnd_delete"),
     path("api/dnd/bulk/", api_proxy.dnd_bulk, name="api_dnd_bulk"),
+
+    # ── IVR Trees ──────────────────────────────────────────────────────
+    path("api/ivr/", api_proxy.ivr_list, name="api_ivr_list"),
+    path("api/ivr/<str:tree_id>/", api_proxy.ivr_detail, name="api_ivr_detail"),
+
+    # ── Call Recordings ────────────────────────────────────────────────
+    path("api/recordings/", api_proxy.recordings_list, name="api_recordings_list"),
+    path("api/recordings/<str:recording_id>/", api_proxy.recording_detail, name="api_recording_detail"),
+    path("api/recordings/<str:recording_id>/download/", api_proxy.recording_download, name="api_recording_download"),
+
+    # ── Contacts (OmniCRM) ─────────────────────────────────────────────
+    path("api/contacts/", api_proxy.contacts_list, name="api_contacts_list"),
+    path("api/contacts/<str:contact_id>/", api_proxy.contact_detail, name="api_contact_detail"),
+    path("api/contacts/<str:contact_id>/note/", api_proxy.contact_note, name="api_contact_note"),
+
+    # ── Coaching Cards ─────────────────────────────────────────────────
+    path("api/coaching/", api_proxy.coaching_list, name="api_coaching_list"),
+    path("api/coaching/<str:card_id>/", api_proxy.coaching_detail, name="api_coaching_detail"),
+    path("api/coaching/<str:card_id>/approve/", api_proxy.coaching_approve, name="api_coaching_approve"),
+    path("api/coaching/<str:card_id>/reject/", api_proxy.coaching_reject, name="api_coaching_reject"),
+    path("api/coaching/agents/<str:agent_id>/report/", api_proxy.coaching_report, name="api_coaching_report"),
 ]

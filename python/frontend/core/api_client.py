@@ -356,6 +356,85 @@ class BackendClient:
     def delete_brand(self, brand_id: str):
         return self._delete(f"/api/brands/{brand_id}")
 
+    # ── IVR Trees ──────────────────────────────────────────────────────
+    def list_ivr_trees(self):
+        return self._get("/api/ivr/")
+
+    def get_ivr_tree(self, tree_id: str):
+        return self._get(f"/api/ivr/{tree_id}")
+
+    def create_ivr_tree(self, data: dict):
+        return self._post("/api/ivr/", json=data)
+
+    def update_ivr_tree(self, tree_id: str, data: dict):
+        return self._put(f"/api/ivr/{tree_id}", json=data)
+
+    def delete_ivr_tree(self, tree_id: str):
+        return self._delete(f"/api/ivr/{tree_id}")
+
+    # ── Call Recordings ────────────────────────────────────────────────
+    def list_recordings(self, page=1, limit=20, agent_id="", search=""):
+        params: dict = {"page": page, "limit": limit}
+        if agent_id:
+            params["agent_id"] = agent_id
+        if search:
+            params["search"] = search
+        return self._get("/api/recordings/", params=params)
+
+    def get_recording(self, recording_id: str):
+        return self._get(f"/api/recordings/{recording_id}")
+
+    def get_recording_download_url(self, recording_id: str):
+        return self._get(f"/api/recordings/{recording_id}/download")
+
+    def delete_recording(self, recording_id: str):
+        return self._delete(f"/api/recordings/{recording_id}")
+
+    # ── Contacts (OmniCRM) ─────────────────────────────────────────────
+    def list_contacts(self, page=1, limit=25, search="", intent_level=""):
+        params: dict = {"page": page, "limit": limit}
+        if search:
+            params["search"] = search
+        if intent_level:
+            params["intent_level"] = intent_level
+        return self._get("/api/contacts/", params=params)
+
+    def get_contact(self, contact_id: str):
+        return self._get(f"/api/contacts/{contact_id}")
+
+    def create_contact(self, data: dict):
+        return self._post("/api/contacts/", json=data)
+
+    def update_contact(self, contact_id: str, data: dict):
+        return self._put(f"/api/contacts/{contact_id}", json=data)
+
+    def delete_contact(self, contact_id: str):
+        return self._delete(f"/api/contacts/{contact_id}")
+
+    def add_contact_note(self, contact_id: str, note: str):
+        return self._post(f"/api/contacts/{contact_id}/note", json={"note": note})
+
+    # ── Coaching Cards ─────────────────────────────────────────────────
+    def list_coaching_cards(self, agent_id="", status="pending"):
+        params: dict = {}
+        if agent_id:
+            params["agent_id"] = agent_id
+        if status:
+            params["status"] = status
+        return self._get("/api/coaching/", params=params)
+
+    def get_coaching_card(self, card_id: str):
+        return self._get(f"/api/coaching/{card_id}")
+
+    def approve_coaching_card(self, card_id: str):
+        return self._post(f"/api/coaching/{card_id}/approve")
+
+    def reject_coaching_card(self, card_id: str):
+        return self._post(f"/api/coaching/{card_id}/reject")
+
+    def get_coaching_report(self, agent_id: str):
+        return self._get(f"/api/coaching/agents/{agent_id}/report")
+
 
 def get_client(request) -> BackendClient:
     """Build a BackendClient from the current Django request."""

@@ -1,0 +1,224 @@
+{% extends "base_dashboard.html" %}
+{% block title %}Call Recordings — VoiceFlow AI{% endblock %}
+
+{% block content %}
+<div x-data="recordingsApp()" x-init="init()" class="space-y-6 fade-in">
+
+  <!-- Header -->
+  <div class="flex items-center justify-between flex-wrap gap-3">
+    <div>
+      <h1 class="text-2xl font-bold vf-heading bg-gradient-to-r from-slate-900 to-slate-600 dark:from-slate-100 dark:to-slate-400 bg-clip-text text-transparent">Call Recordings</h1>
+      <p class="text-slate-500 dark:text-slate-400 text-sm mt-1">Replay calls, view waveforms and timestamped transcripts.</p>
+    </div>
+    <!-- Filters -->
+    <div class="flex items-center gap-2">
+      <select x-model="filter.agent" @change="load()" class="vf-input text-sm py-2 pr-8">
+        <option value="">All agents</option>
+        <template x-for="ag in agents" :key="ag.id">
+          <option :value="ag.id" x-text="ag.name"></option>
+        </template>
+      </select>
+      <input x-model.debounce.400ms="filter.search" @input="load()" placeholder="Search…"
+             class="vf-input text-sm py-2 w-40">
+    </div>
+  </div>
+
+  <!-- Loading -->
+  <div x-show="loading" class="flex justify-center py-12">
+    <div class="w-8 h-8 border-2 border-teal-500 border-t-transparent rounded-full animate-spin"></div>
+  </div>
+
+  <!-- Empty state -->
+  <div x-show="!loading && recordings.length === 0" class="vf-card text-center py-16">
+    <svg class="w-14 h-14 text-slate-300 dark:text-slate-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4M12 4a3 3 0 00-3 3v4a3 3 0 006 0V7a3 3 0 00-3-3z"/></svg>
+    <p class="text-slate-500 dark:text-slate-400 font-medium">No recordings yet</p>
+    <p class="text-slate-400 dark:text-slate-500 text-sm mt-1">Recordings are created automatically when call recording is enabled in Settings.</p>
+  </div>
+
+  <!-- Recordings list -->
+  <div x-show="!loading && recordings.length > 0" class="space-y-3">
+    <template x-for="rec in recordings" :key="rec.id">
+      <div class="vf-card p-5 group">
+        <div class="flex items-start gap-4">
+
+          <!-- Play button -->
+          <button @click="openPlayer(rec)"
+                  class="flex-shrink-0 w-12 h-12 rounded-xl bg-gradient-to-br from-teal-500 to-cyan-600 text-white flex items-center justify-center shadow-md shadow-cyan-500/20 hover:shadow-cyan-500/40 transition">
+            <svg class="w-5 h-5 ml-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+          </button>
+
+          <div class="flex-1 min-w-0">
+            <!-- Meta row -->
+            <div class="flex items-center gap-2 flex-wrap mb-2">
+              <span class="font-semibold text-slate-900 dark:text-slate-100 text-sm" x-text="rec.callLogId || rec.id"></span>
+              <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                    x-text="formatDuration(rec.durationSeconds)"></span>
+              <span x-show="rec.consentDisclosed" class="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">Consent ✓</span>
+              <span class="text-xs text-slate-400 dark:text-slate-500" x-text="formatDate(rec.createdAt)"></span>
+              <span class="text-xs text-slate-400 dark:text-slate-500" x-text="formatBytes(rec.fileSizeBytes)"></span>
+            </div>
+
+            <!-- Waveform -->
+            <div x-show="rec.waveformData && rec.waveformData.length > 0" class="flex items-end gap-0.5 h-8 mb-2">
+              <template x-for="(amp, wi) in (rec.waveformData || []).slice(0, 80)" :key="wi">
+                <div class="flex-1 bg-teal-400 dark:bg-teal-500 rounded-sm opacity-70 hover:opacity-100 transition"
+                     :style="'height: ' + (8 + amp * 24) + 'px'"></div>
+              </template>
+            </div>
+
+            <!-- Transcript preview -->
+            <p x-show="rec.transcriptPreview" class="text-xs text-slate-500 dark:text-slate-400 truncate italic"
+               x-text="'«' + rec.transcriptPreview + '»'"></p>
+          </div>
+
+          <!-- Actions -->
+          <div class="flex items-center gap-2 flex-shrink-0">
+            <button @click="downloadRec(rec.id)"
+                    class="p-2 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 transition text-slate-500 dark:text-slate-400"
+                    title="Download">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+            </button>
+            <button @click="deleteRec(rec.id)"
+                    class="p-2 rounded-lg border border-rose-200 dark:border-rose-800 hover:bg-rose-50 dark:hover:bg-rose-900/20 transition text-rose-400"
+                    title="Delete">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </template>
+  </div>
+
+  <!-- Pagination -->
+  <div x-show="total > perPage" class="flex justify-center gap-2">
+    <button @click="page > 1 && (page--, load())" :disabled="page <= 1"
+            class="px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-sm hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-40 transition">Prev</button>
+    <span class="px-4 py-2 text-sm text-slate-500 dark:text-slate-400" x-text="'Page ' + page + ' of ' + Math.ceil(total/perPage)"></span>
+    <button @click="page < Math.ceil(total/perPage) && (page++, load())" :disabled="page >= Math.ceil(total/perPage)"
+            class="px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-sm hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-40 transition">Next</button>
+  </div>
+
+  <!-- Player modal -->
+  <div x-show="player.open" x-cloak @click.self="closePlayer()"
+       x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+       class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+    <div x-show="player.open" x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0 scale-95" x-transition:enter-end="opacity-100 scale-100"
+         class="vf-card-static max-w-3xl w-full p-6 dark:bg-slate-800 max-h-[90vh] flex flex-col">
+
+      <div class="flex items-center justify-between mb-5">
+        <h3 class="font-bold text-lg vf-heading">Recording Player</h3>
+        <button @click="closePlayer()" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <!-- Audio element -->
+      <audio controls x-ref="audioEl" class="w-full mb-4 rounded-lg" preload="metadata">
+        <source :src="player.audioUrl" type="audio/wav">
+        Your browser does not support the audio element.
+      </audio>
+
+      <!-- Full waveform -->
+      <div x-show="player.rec && player.rec.waveformData && player.rec.waveformData.length" class="flex items-end gap-0.5 h-12 mb-5 px-1">
+        <template x-for="(amp, wi) in (player.rec?.waveformData || [])" :key="wi">
+          <div class="flex-1 bg-teal-400 dark:bg-teal-500 rounded-sm opacity-60 hover:opacity-100 transition"
+               :style="'height: ' + (4 + amp * 44) + 'px'"></div>
+        </template>
+      </div>
+
+      <!-- Timestamped transcript -->
+      <div class="flex-1 overflow-y-auto space-y-2" x-show="(player.rec?.timestampedTranscript || []).length > 0">
+        <p class="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-3 uppercase tracking-wide">Transcript</p>
+        <template x-for="line in (player.rec?.timestampedTranscript || [])" :key="line.ts">
+          <div class="flex gap-3 items-start">
+            <span class="flex-shrink-0 w-14 text-xs text-teal-600 dark:text-teal-400 font-mono pt-0.5"
+                  x-text="formatTimestamp(line.ts)"></span>
+            <span :class="line.speaker === 'agent' ? 'text-cyan-700 dark:text-cyan-300' : 'text-slate-700 dark:text-slate-200'"
+                  class="text-sm" x-text="line.text"></span>
+          </div>
+        </template>
+      </div>
+      <p x-show="(player.rec?.timestampedTranscript || []).length === 0" class="text-sm text-slate-400 dark:text-slate-500 text-center py-4">No transcript available for this recording.</p>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div x-show="toast.show" x-cloak x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0 translate-y-4" x-transition:enter-end="opacity-100 translate-y-0"
+       class="fixed bottom-6 right-6 z-50 px-5 py-3 rounded-xl shadow-lg text-sm font-medium text-white"
+       :class="toast.type === 'success' ? 'bg-emerald-600' : 'bg-rose-600'"
+       x-text="toast.msg"></div>
+</div>
+
+<script>
+function recordingsApp() {
+  return {
+    recordings: [], agents: [], total: 0, page: 1, perPage: 20,
+    loading: true,
+    filter: { agent: '', search: '' },
+    player: { open: false, rec: null, audioUrl: '' },
+    toast: { show: false, msg: '', type: 'success' },
+
+    async init() {
+      try {
+        const r = await fetch('/api/agents/?limit=100');
+        const d = await r.json();
+        this.agents = d.agents || [];
+      } catch {}
+      await this.load();
+    },
+    async load() {
+      this.loading = true;
+      try {
+        const params = new URLSearchParams({ page: this.page, limit: this.perPage });
+        if (this.filter.agent) params.set('agent_id', this.filter.agent);
+        if (this.filter.search) params.set('search', this.filter.search);
+        const r = await fetch('/api/recordings/?' + params, { headers: { 'X-CSRFToken': csrfToken() } });
+        const d = await r.json();
+        this.recordings = d.recordings || d || [];
+        this.total = d.total || this.recordings.length;
+      } catch { this.notify('Failed to load recordings', 'error'); }
+      this.loading = false;
+    },
+    async openPlayer(rec) {
+      this.player = { open: true, rec, audioUrl: '' };
+      try {
+        const r = await fetch(`/api/recordings/${rec.id}/`);
+        const detail = await r.json();
+        this.player.rec = detail;
+      } catch {}
+      try {
+        const r = await fetch(`/api/recordings/${rec.id}/download/`);
+        const d = await r.json();
+        this.player.audioUrl = d.url || '';
+      } catch {}
+    },
+    closePlayer() {
+      const el = this.$refs.audioEl;
+      if (el) { el.pause(); el.currentTime = 0; }
+      this.player.open = false;
+    },
+    async downloadRec(id) {
+      try {
+        const r = await fetch(`/api/recordings/${id}/download/`);
+        const d = await r.json();
+        if (d.url) window.open(d.url, '_blank');
+      } catch { this.notify('Download failed', 'error'); }
+    },
+    async deleteRec(id) {
+      if (!confirm('Delete this recording permanently?')) return;
+      try {
+        await fetch(`/api/recordings/${id}/`, { method: 'DELETE', headers: { 'X-CSRFToken': csrfToken() } });
+        this.recordings = this.recordings.filter(r => r.id !== id);
+        this.notify('Recording deleted');
+      } catch { this.notify('Delete failed', 'error'); }
+    },
+    formatDuration(s) { if (!s) return '—'; const m = Math.floor(s/60); const sec = s%60; return `${m}m ${sec}s`; },
+    formatDate(d) { return d ? new Date(d).toLocaleString() : '—'; },
+    formatBytes(b) { if (!b) return ''; if (b < 1024) return b + ' B'; if (b < 1048576) return (b/1024).toFixed(1) + ' KB'; return (b/1048576).toFixed(1) + ' MB'; },
+    formatTimestamp(s) { if (!s && s !== 0) return ''; const m = Math.floor(s/60); const sec = Math.floor(s%60); return `${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`; },
+    notify(msg, type = 'success') { this.toast = { show: true, msg, type }; setTimeout(() => this.toast.show = false, 3500); },
+  };
+}
+function csrfToken() { const m = document.cookie.match(/csrftoken=([^;]+)/); return m ? m[1] : ''; }
+</script>
+{% endblock %}

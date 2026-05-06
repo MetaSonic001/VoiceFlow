@@ -292,3 +292,30 @@ def agent_builder(request):
     """Visual flow builder for an agent."""
     agent_id = request.GET.get("agent_id", "")
     return render(request, "agents/builder.html", {"agent_id": agent_id})
+
+
+# ── New pages added in Architecture Bible ─────────────────────────────
+
+@login_required
+def ivr(request):
+    """IVR tree management — build DTMF routing menus."""
+    return render(request, "dashboard/ivr.html")
+
+
+@login_required
+def recordings(request):
+    """Call recordings — waveform player + timestamped transcript viewer."""
+    return render(request, "dashboard/recordings.html")
+
+
+@login_required
+def contacts(request):
+    """OmniCRM contacts — enriched from HubSpot, Salesforce and call data."""
+    return render(request, "dashboard/contacts.html")
+
+
+@login_required
+def coaching(request):
+    """AI Coaching Cards — approve/reject AI-generated prompt improvements."""
+    return render(request, "dashboard/coaching.html")
+

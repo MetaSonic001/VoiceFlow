@@ -787,3 +787,167 @@ def dnd_bulk(request):
         return JsonResponse(result)
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)
+
+
+# ── IVR Trees ─────────────────────────────────────────────────────────
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def ivr_list(request):
+    client = get_client(request)
+    try:
+        if request.method == "POST":
+            return JsonResponse(client.create_ivr_tree(_json_body(request)), status=201)
+        return JsonResponse(client.list_ivr_trees())
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
+@require_http_methods(["GET", "PUT", "DELETE"])
+def ivr_detail(request, tree_id):
+    client = get_client(request)
+    try:
+        if request.method == "PUT":
+            return JsonResponse(client.update_ivr_tree(tree_id, _json_body(request)))
+        if request.method == "DELETE":
+            client.delete_ivr_tree(tree_id)
+            return JsonResponse({"ok": True})
+        return JsonResponse(client.get_ivr_tree(tree_id))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+# ── Call Recordings ───────────────────────────────────────────────────
+
+@login_required
+@require_http_methods(["GET"])
+def recordings_list(request):
+    client = get_client(request)
+    try:
+        return JsonResponse(client.list_recordings(
+            page=int(request.GET.get("page", 1)),
+            limit=int(request.GET.get("limit", 20)),
+            agent_id=request.GET.get("agent_id", ""),
+            search=request.GET.get("search", ""),
+        ))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
+@require_http_methods(["GET", "DELETE"])
+def recording_detail(request, recording_id):
+    client = get_client(request)
+    try:
+        if request.method == "DELETE":
+            client.delete_recording(recording_id)
+            return JsonResponse({"ok": True})
+        return JsonResponse(client.get_recording(recording_id))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@require_http_methods(["GET"])
+def recording_download(request, recording_id):
+    try:
+        return JsonResponse(get_client(request).get_recording_download_url(recording_id))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+# ── Contacts (OmniCRM) ────────────────────────────────────────────────
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def contacts_list(request):
+    client = get_client(request)
+    try:
+        if request.method == "POST":
+            return JsonResponse(client.create_contact(_json_body(request)), status=201)
+        return JsonResponse(client.list_contacts(
+            page=int(request.GET.get("page", 1)),
+            limit=int(request.GET.get("limit", 25)),
+            search=request.GET.get("search", ""),
+            intent_level=request.GET.get("intent_level", ""),
+        ))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
+@require_http_methods(["GET", "PUT", "DELETE"])
+def contact_detail(request, contact_id):
+    client = get_client(request)
+    try:
+        if request.method == "PUT":
+            return JsonResponse(client.update_contact(contact_id, _json_body(request)))
+        if request.method == "DELETE":
+            client.delete_contact(contact_id)
+            return JsonResponse({"ok": True})
+        return JsonResponse(client.get_contact(contact_id))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@require_http_methods(["POST"])
+def contact_note(request, contact_id):
+    try:
+        data = _json_body(request)
+        return JsonResponse(get_client(request).add_contact_note(contact_id, data.get("note", "")))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+# ── Coaching Cards ────────────────────────────────────────────────────
+
+@login_required
+@require_http_methods(["GET"])
+def coaching_list(request):
+    client = get_client(request)
+    try:
+        return JsonResponse(client.list_coaching_cards(
+            agent_id=request.GET.get("agent_id", ""),
+            status=request.GET.get("status", "pending"),
+        ))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
+@require_http_methods(["GET"])
+def coaching_detail(request, card_id):
+    try:
+        return JsonResponse(get_client(request).get_coaching_card(card_id))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@require_http_methods(["POST"])
+def coaching_approve(request, card_id):
+    try:
+        return JsonResponse(get_client(request).approve_coaching_card(card_id))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@require_http_methods(["POST"])
+def coaching_reject(request, card_id):
+    try:
+        return JsonResponse(get_client(request).reject_coaching_card(card_id))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@require_http_methods(["GET"])
+def coaching_report(request, agent_id):
+    try:
+        return JsonResponse(get_client(request).get_coaching_report(agent_id))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+

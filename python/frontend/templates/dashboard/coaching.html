@@ -1,0 +1,242 @@
+{% extends "base_dashboard.html" %}
+{% block title %}AI Coaching — VoiceFlow AI{% endblock %}
+
+{% block content %}
+<div x-data="coachingApp()" x-init="init()" class="space-y-6 fade-in">
+
+  <!-- Header -->
+  <div class="flex items-center justify-between flex-wrap gap-3">
+    <div>
+      <h1 class="text-2xl font-bold vf-heading bg-gradient-to-r from-slate-900 to-slate-600 dark:from-slate-100 dark:to-slate-400 bg-clip-text text-transparent">AI Coaching Cards</h1>
+      <p class="text-slate-500 dark:text-slate-400 text-sm mt-1">Review AI-generated prompt improvement suggestions from real calls. Approve to apply instantly.</p>
+    </div>
+    <div class="flex items-center gap-2">
+      <select x-model="statusFilter" @change="load()" class="vf-input text-sm py-2 pr-8">
+        <option value="pending">Pending Review</option>
+        <option value="approved">Approved</option>
+        <option value="rejected">Rejected</option>
+        <option value="">All</option>
+      </select>
+      <select x-model="agentFilter" @change="load()" class="vf-input text-sm py-2 pr-8">
+        <option value="">All agents</option>
+        <template x-for="ag in agents" :key="ag.id">
+          <option :value="ag.id" x-text="ag.name"></option>
+        </template>
+      </select>
+    </div>
+  </div>
+
+  <!-- Stats -->
+  <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+    <div class="vf-card p-4 text-center">
+      <p class="text-2xl font-bold text-amber-500" x-text="stats.pending || 0"></p>
+      <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Pending Review</p>
+    </div>
+    <div class="vf-card p-4 text-center">
+      <p class="text-2xl font-bold text-emerald-500" x-text="stats.approved || 0"></p>
+      <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Approved</p>
+    </div>
+    <div class="vf-card p-4 text-center">
+      <p class="text-2xl font-bold text-rose-500" x-text="stats.rejected || 0"></p>
+      <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Rejected</p>
+    </div>
+    <div class="vf-card p-4 text-center">
+      <p class="text-2xl font-bold text-teal-500" x-text="(stats.avgImpact || 0).toFixed(2)"></p>
+      <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Avg Impact Score</p>
+    </div>
+  </div>
+
+  <!-- Loading -->
+  <div x-show="loading" class="flex justify-center py-12">
+    <div class="w-8 h-8 border-2 border-teal-500 border-t-transparent rounded-full animate-spin"></div>
+  </div>
+
+  <!-- Empty state -->
+  <div x-show="!loading && cards.length === 0" class="vf-card text-center py-16">
+    <svg class="w-14 h-14 text-slate-300 dark:text-slate-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+    <p class="text-slate-500 dark:text-slate-400 font-medium">No coaching cards found</p>
+    <p class="text-slate-400 dark:text-slate-500 text-sm mt-1">
+      The AI generates coaching cards automatically after calls when it detects improvement opportunities.
+    </p>
+  </div>
+
+  <!-- Coaching cards -->
+  <div x-show="!loading && cards.length > 0" class="space-y-4">
+    <template x-for="card in cards" :key="card.id">
+      <div class="vf-card p-5 border-l-4"
+           :class="{
+             'border-l-amber-400': card.status === 'pending',
+             'border-l-emerald-400': card.status === 'approved',
+             'border-l-rose-400': card.status === 'rejected',
+             'border-l-teal-400': card.status === 'applied',
+           }">
+        <div class="flex items-start gap-4">
+          <!-- Impact score badge -->
+          <div class="flex-shrink-0 text-center">
+            <div class="w-14 h-14 rounded-xl flex flex-col items-center justify-center"
+                 :class="card.impactScore >= 0.7 ? 'bg-emerald-100 dark:bg-emerald-900/30' : card.impactScore >= 0.4 ? 'bg-amber-100 dark:bg-amber-900/30' : 'bg-slate-100 dark:bg-slate-800'">
+              <span class="text-lg font-bold"
+                    :class="card.impactScore >= 0.7 ? 'text-emerald-600 dark:text-emerald-400' : card.impactScore >= 0.4 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-500'"
+                    x-text="(card.impactScore || 0).toFixed(2)"></span>
+              <span class="text-[9px] text-slate-500 dark:text-slate-400 uppercase font-semibold">impact</span>
+            </div>
+          </div>
+
+          <div class="flex-1 min-w-0">
+            <!-- Status + meta row -->
+            <div class="flex items-center gap-2 flex-wrap mb-2">
+              <span :class="{
+                'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400': card.status === 'pending',
+                'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400': card.status === 'approved',
+                'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400': card.status === 'rejected',
+                'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400': card.status === 'applied',
+              }" class="px-2.5 py-1 rounded-full text-xs font-semibold capitalize" x-text="card.status"></span>
+              <span class="text-xs text-slate-400 dark:text-slate-500" x-text="'Agent: ' + (card.agentId || '?')"></span>
+              <span class="text-xs text-slate-400 dark:text-slate-500" x-text="formatDate(card.createdAt)"></span>
+              <span x-show="card.approvedBy" class="text-xs text-emerald-600 dark:text-emerald-400"
+                    x-text="'Approved by ' + card.approvedBy"></span>
+            </div>
+
+            <!-- Observation -->
+            <div class="mb-3">
+              <p class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1">Observation</p>
+              <p class="text-sm text-slate-700 dark:text-slate-200" x-text="card.observation"></p>
+            </div>
+
+            <!-- Suggested prompt delta -->
+            <div x-show="card.suggestedPromptDelta">
+              <p class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1">Suggested Prompt Change</p>
+              <pre class="bg-slate-50 dark:bg-slate-900/50 rounded-lg p-3 text-xs font-mono overflow-x-auto text-slate-700 dark:text-slate-300 whitespace-pre-wrap"
+                   x-text="card.suggestedPromptDelta"></pre>
+            </div>
+
+            <!-- Actions -->
+            <div x-show="card.status === 'pending'" class="flex gap-2 mt-4">
+              <button @click="approve(card)"
+                      :disabled="card._loading"
+                      class="vf-btn px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 text-white text-xs font-medium rounded-lg flex items-center gap-1.5">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                Approve &amp; Apply
+              </button>
+              <button @click="reject(card)"
+                      :disabled="card._loading"
+                      class="px-4 py-2 border border-rose-200 dark:border-rose-800 text-rose-600 dark:text-rose-400 text-xs font-medium rounded-lg hover:bg-rose-50 dark:hover:bg-rose-900/20 transition flex items-center gap-1.5">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                Reject
+              </button>
+            </div>
+
+            <!-- Applied timestamp -->
+            <p x-show="card.status === 'applied' && card.appliedAt" class="mt-3 text-xs text-teal-600 dark:text-teal-400 flex items-center gap-1">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              Applied to agent prompt at <span x-text="formatDate(card.appliedAt)"></span>
+            </p>
+          </div>
+        </div>
+      </div>
+    </template>
+  </div>
+
+  <!-- Approve confirmation modal (shows diff) -->
+  <div x-show="confirmModal.open" x-cloak @click.self="confirmModal.open=false"
+       x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+       class="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+    <div x-show="confirmModal.open" x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0 scale-95" x-transition:enter-end="opacity-100 scale-100"
+         class="vf-card-static max-w-lg w-full p-6 dark:bg-slate-800">
+      <h3 class="font-bold text-lg vf-heading mb-2">Approve Coaching Card?</h3>
+      <p class="text-sm text-slate-500 dark:text-slate-400 mb-4">
+        The following change will be <strong>merged into the agent's live system prompt</strong> immediately. This cannot be undone automatically.
+      </p>
+      <pre class="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg p-3 text-xs font-mono overflow-x-auto text-slate-700 dark:text-slate-200 whitespace-pre-wrap mb-5"
+           x-text="confirmModal.delta"></pre>
+      <div class="flex gap-3">
+        <button @click="confirmApprove()"
+                class="vf-btn flex-1 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-xl text-sm font-medium">
+          <span x-show="!confirmModal.loading">Confirm Approval</span>
+          <span x-show="confirmModal.loading">Applying…</span>
+        </button>
+        <button @click="confirmModal.open=false"
+                class="flex-1 py-2.5 border border-slate-200 dark:border-slate-600 rounded-xl text-sm hover:bg-slate-50 dark:hover:bg-slate-700 transition">
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div x-show="toast.show" x-cloak x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0 translate-y-4" x-transition:enter-end="opacity-100 translate-y-0"
+       class="fixed bottom-6 right-6 z-50 px-5 py-3 rounded-xl shadow-lg text-sm font-medium text-white"
+       :class="toast.type === 'success' ? 'bg-emerald-600' : 'bg-rose-600'"
+       x-text="toast.msg"></div>
+</div>
+
+<script>
+function coachingApp() {
+  return {
+    cards: [], agents: [], loading: true,
+    statusFilter: 'pending', agentFilter: '',
+    stats: { pending: 0, approved: 0, rejected: 0, avgImpact: 0 },
+    confirmModal: { open: false, card: null, delta: '', loading: false },
+    toast: { show: false, msg: '', type: 'success' },
+
+    async init() {
+      try {
+        const r = await fetch('/api/agents/?limit=100');
+        const d = await r.json();
+        this.agents = d.agents || [];
+      } catch {}
+      await this.load();
+    },
+    async load() {
+      this.loading = true;
+      try {
+        const params = new URLSearchParams();
+        if (this.statusFilter) params.set('status', this.statusFilter);
+        if (this.agentFilter) params.set('agent_id', this.agentFilter);
+        const r = await fetch('/api/coaching/?' + params, { headers: { 'X-CSRFToken': csrfToken() } });
+        const d = await r.json();
+        this.cards = (d.cards || d || []).map(c => ({ ...c, _loading: false }));
+        // compute stats
+        this.stats.pending = this.cards.filter(c => c.status === 'pending').length;
+        this.stats.approved = this.cards.filter(c => c.status === 'approved' || c.status === 'applied').length;
+        this.stats.rejected = this.cards.filter(c => c.status === 'rejected').length;
+        const impacts = this.cards.filter(c => c.impactScore).map(c => c.impactScore);
+        this.stats.avgImpact = impacts.length ? impacts.reduce((a, b) => a + b, 0) / impacts.length : 0;
+      } catch { this.notify('Failed to load coaching cards', 'error'); }
+      this.loading = false;
+    },
+    approve(card) {
+      this.confirmModal = { open: true, card, delta: card.suggestedPromptDelta || '(no delta)', loading: false };
+    },
+    async confirmApprove() {
+      this.confirmModal.loading = true;
+      try {
+        const r = await fetch(`/api/coaching/${this.confirmModal.card.id}/approve/`, {
+          method: 'POST', headers: { 'X-CSRFToken': csrfToken() } });
+        if (!r.ok) throw new Error(await r.text());
+        const idx = this.cards.findIndex(c => c.id === this.confirmModal.card.id);
+        if (idx !== -1) this.cards[idx].status = 'applied';
+        this.confirmModal.open = false;
+        this.notify('Coaching card approved — agent prompt updated!');
+        await this.load();
+      } catch (e) { this.notify('Approval failed: ' + e.message, 'error'); }
+      this.confirmModal.loading = false;
+    },
+    async reject(card) {
+      card._loading = true;
+      try {
+        const r = await fetch(`/api/coaching/${card.id}/reject/`, {
+          method: 'POST', headers: { 'X-CSRFToken': csrfToken() } });
+        if (!r.ok) throw new Error();
+        card.status = 'rejected';
+        this.notify('Card rejected');
+      } catch { this.notify('Rejection failed', 'error'); }
+      card._loading = false;
+    },
+    formatDate(d) { return d ? new Date(d).toLocaleString() : '—'; },
+    notify(msg, type = 'success') { this.toast = { show: true, msg, type }; setTimeout(() => this.toast.show = false, 3500); },
+  };
+}
+function csrfToken() { const m = document.cookie.match(/csrftoken=([^;]+)/); return m ? m[1] : ''; }
+</script>
+{% endblock %}
