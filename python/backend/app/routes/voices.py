@@ -30,7 +30,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import AuthContext, get_auth
 from app.config import settings
 from app.database import get_db
-from app.models import ClonedVoice
+from app.models import ClonedVoice, Tenant
+from app.services.credentials import decrypt_safe
 from app.services.voice_catalog import (
     VOICE_CATEGORIES,
     filter_catalog,
@@ -156,6 +157,17 @@ def _validate_audio_upload(data: bytes, filename: str) -> tuple[str, str]:
     return ext, ""
 
 
+def _resolve_sarvam_key(tenant: Tenant | None) -> str | None:
+    """Return the decrypted Sarvam AI key from tenant settings, falling back to platform env var."""
+    if tenant and tenant.settings:
+        enc = tenant.settings.get("sarvamApiKey")
+        if enc:
+            key = decrypt_safe(enc)
+            if key:
+                return key
+    return getattr(settings, "SARVAM_API_KEY", None) or None
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @router.get("/catalog")
@@ -165,11 +177,18 @@ async def voice_catalog(
     provider: str | None = None,
     category: str | None = None,
     search: str | None = None,
+    auth: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Return the full voice catalog with optional filters.
     All 150+ library voices are pre-defined; no API calls are made here.
     """
+    # Resolve tenant to check per-tenant Sarvam key
+    result = await db.execute(select(Tenant).where(Tenant.id == auth.tenant_id))
+    tenant = result.scalar_one_or_none()
+    sarvam_key = _resolve_sarvam_key(tenant)
+
     all_voices = get_full_catalog()
     filtered = filter_catalog(
         all_voices,
@@ -187,22 +206,30 @@ async def voice_catalog(
         "providers": [
             {"id": "edge",   "name": "Edge TTS (Free)", "count": sum(1 for v in all_voices if v["provider"] == "edge")},
             {"id": "sarvam", "name": "Sarvam AI (Indian)", "count": sum(1 for v in all_voices if v["provider"] == "sarvam"),
-             "requires_key": "SARVAM_API_KEY", "configured": bool(getattr(settings, "SARVAM_API_KEY", None))},
+             "requires_key": "sarvamApiKey", "configured": bool(sarvam_key)},
             {"id": "kokoro", "name": "Kokoro (Local CPU)", "count": sum(1 for v in all_voices if v["provider"] == "kokoro")},
             {"id": "piper",  "name": "Piper (Local CPU)",  "count": sum(1 for v in all_voices if v["provider"] == "piper")},
         ],
-        "sarvam_configured": bool(getattr(settings, "SARVAM_API_KEY", None)),
+        "sarvam_configured": bool(sarvam_key),
     }
 
 
 @router.post("/preview")
-async def voice_preview(body: dict):
+async def voice_preview(
+    body: dict,
+    auth: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_db),
+):
     """
     Generate a short preview clip for a voice ID.
     Results are cached on disk — repeated requests are instant.
     """
     voice_id: str = body.get("voice_id", "edge-en-US-AriaNeural")
     text: str = body.get("text") or PREVIEW_TEXT
+
+    # Resolve tenant for BYOK key lookup
+    result = await db.execute(select(Tenant).where(Tenant.id == auth.tenant_id))
+    tenant = result.scalar_one_or_none()
 
     # ── Cache check ───────────────────────────────────────────────────────────
     for ext in ("mp3", "wav"):
@@ -230,9 +257,9 @@ async def voice_preview(body: dict):
 
         # ── Sarvam AI ─────────────────────────────────────────────────────────
         if provider == "sarvam":
-            api_key = getattr(settings, "SARVAM_API_KEY", None)
+            api_key = _resolve_sarvam_key(tenant)
             if not api_key:
-                raise HTTPException(status_code=402, detail="Sarvam API key not configured. Add SARVAM_API_KEY to .env")
+                raise HTTPException(status_code=402, detail="Sarvam API key not configured. Add it in Settings → Voice & Speech.")
             from app.services.tts_router import TTSRouter
             tts = TTSRouter()
             audio_bytes = await tts._synthesize_sarvam(

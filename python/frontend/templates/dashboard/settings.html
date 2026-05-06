@@ -2,70 +2,245 @@
 {% block title %}Settings — VoiceFlow AI{% endblock %}
 {% block content %}
 <div x-data="settingsApp()" x-init="init()">
-  <div class="mb-8"><h1 class="text-3xl font-bold vf-heading">Settings</h1><p class="text-slate-500 text-sm mt-1">Manage integrations, credentials, and platform configuration.</p></div>
+  <div class="mb-8">
+    <h1 class="text-3xl font-bold vf-heading">Settings</h1>
+    <p class="text-slate-500 text-sm mt-1">Manage your API keys, credentials, and platform configuration. All keys are encrypted with AES-256-GCM and stored securely.</p>
+  </div>
 
   <!-- Tabs -->
-  <div class="flex gap-1 mb-6 bg-slate-100 rounded-xl p-1.5 w-fit border border-slate-200">
-    <template x-for="t in ['Twilio','Groq API','Voice','General']">
+  <div class="flex flex-wrap gap-1 mb-6 bg-slate-100 rounded-xl p-1.5 w-fit border border-slate-200">
+    <template x-for="t in ['LLM Providers','Voice & Speech','Telephony','General']">
       <button @click="tab=t" :class="tab===t?'bg-white shadow-sm text-slate-900':'text-slate-500 hover:text-slate-700'" class="px-4 py-2 rounded-lg text-sm font-medium transition" x-text="t"></button>
     </template>
   </div>
 
-  <!-- Twilio -->
-  <div x-show="tab==='Twilio'" class="vf-card p-6 space-y-4">
-    <h3 class="font-semibold">Twilio Credentials</h3>
-    <p class="text-sm text-gray-500">Connect your Twilio account for phone agent capabilities.</p>
-    <div class="flex items-center gap-2 mb-4">
-      <span class="text-sm">Status:</span>
-      <span :class="twilioConfigured?'bg-green-100 text-green-700':'bg-red-100 text-red-700'" class="px-2 py-1 rounded-full text-xs font-medium" x-text="twilioConfigured?'Connected':'Not configured'"></span>
+  <!-- ── LLM Providers ──────────────────────────────────────────────── -->
+  <div x-show="tab==='LLM Providers'" class="space-y-4">
+    <p class="text-sm text-slate-500">Add your own LLM provider keys. If a key is not set, the platform will use its shared key as a fallback (if available).</p>
+
+    <!-- Groq -->
+    <div class="vf-card p-6 space-y-4">
+      <div class="flex items-start justify-between">
+        <div>
+          <h3 class="font-semibold flex items-center gap-2">
+            <span class="inline-block w-6 h-6 bg-orange-500 rounded text-white text-xs flex items-center justify-center font-bold">G</span>
+            Groq
+          </h3>
+          <p class="text-xs text-slate-500 mt-0.5">Ultra-fast LLM inference — <a href="https://console.groq.com/keys" target="_blank" class="text-cyan-600 hover:underline">Get key ↗</a></p>
+        </div>
+        <span :class="keys.groq?.configured ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'"
+              class="px-2 py-1 rounded-full text-xs font-medium"
+              x-text="keys.groq?.configured ? 'Configured' : 'Using default'"></span>
+      </div>
+      <div x-show="keys.groq?.maskedKey" class="text-xs text-slate-500 font-mono bg-slate-50 border border-slate-200 rounded px-3 py-2" x-text="'Current: ' + keys.groq?.maskedKey"></div>
+      <div class="flex gap-2">
+        <input type="password" x-model="inputs.groq" class="flex-1 px-4 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-cyan-500" placeholder="gsk_xxxxxxxxxxxxxxxx">
+        <button @click="saveKey('groq', inputs.groq, '/api/settings/groq/')" class="px-4 py-2 bg-cyan-600 text-white text-sm rounded-lg hover:bg-cyan-700 transition whitespace-nowrap">Save Key</button>
+        <button @click="deleteKey('groq', '/api/settings/groq/')" x-show="keys.groq?.configured" class="px-3 py-2 border border-red-200 text-red-600 text-sm rounded-lg hover:bg-red-50 transition">Remove</button>
+      </div>
     </div>
-    <div class="grid md:grid-cols-2 gap-4">
-      <div><label class="text-sm font-medium text-slate-700">Account SID</label><input type="text" x-model="twilio.accountSid" class="w-full mt-1 px-4 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-cyan-500" placeholder="ACxxxxxxx"></div>
-      <div><label class="text-sm font-medium text-slate-700">Auth Token</label><input type="password" x-model="twilio.authToken" class="w-full mt-1 px-4 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-cyan-500" placeholder="••••••••"></div>
+
+    <!-- OpenAI -->
+    <div class="vf-card p-6 space-y-4">
+      <div class="flex items-start justify-between">
+        <div>
+          <h3 class="font-semibold flex items-center gap-2">
+            <span class="inline-block w-6 h-6 bg-emerald-600 rounded text-white text-xs flex items-center justify-center font-bold">O</span>
+            OpenAI
+          </h3>
+          <p class="text-xs text-slate-500 mt-0.5">GPT-4o, GPT-4-turbo and more — <a href="https://platform.openai.com/api-keys" target="_blank" class="text-cyan-600 hover:underline">Get key ↗</a></p>
+        </div>
+        <span :class="keys.openai?.configured ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'"
+              class="px-2 py-1 rounded-full text-xs font-medium"
+              x-text="keys.openai?.configured ? 'Configured' : 'Not set'"></span>
+      </div>
+      <div x-show="keys.openai?.maskedKey" class="text-xs text-slate-500 font-mono bg-slate-50 border border-slate-200 rounded px-3 py-2" x-text="'Current: ' + keys.openai?.maskedKey"></div>
+      <div class="flex gap-2">
+        <input type="password" x-model="inputs.openai" class="flex-1 px-4 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-cyan-500" placeholder="sk-xxxxxxxxxxxxxxxx">
+        <button @click="saveKey('openai', inputs.openai, '/api/settings/openai/')" class="px-4 py-2 bg-cyan-600 text-white text-sm rounded-lg hover:bg-cyan-700 transition whitespace-nowrap">Save Key</button>
+        <button @click="deleteKey('openai', '/api/settings/openai/')" x-show="keys.openai?.configured" class="px-3 py-2 border border-red-200 text-red-600 text-sm rounded-lg hover:bg-red-50 transition">Remove</button>
+      </div>
     </div>
-    <div class="flex gap-3">
-      <button @click="saveTwilio" class="px-4 py-2 bg-cyan-600 text-white text-sm rounded-lg hover:bg-cyan-700 transition">Save Credentials</button>
-      <button @click="deleteTwilio" x-show="twilioConfigured" class="px-4 py-2 border border-red-200 text-red-600 text-sm rounded-lg">Remove</button>
+
+    <!-- Anthropic -->
+    <div class="vf-card p-6 space-y-4">
+      <div class="flex items-start justify-between">
+        <div>
+          <h3 class="font-semibold flex items-center gap-2">
+            <span class="inline-block w-6 h-6 bg-amber-600 rounded text-white text-xs flex items-center justify-center font-bold">A</span>
+            Anthropic / Claude
+          </h3>
+          <p class="text-xs text-slate-500 mt-0.5">Claude 3 Haiku, Sonnet, Opus — <a href="https://console.anthropic.com/settings/keys" target="_blank" class="text-cyan-600 hover:underline">Get key ↗</a></p>
+        </div>
+        <span :class="keys.anthropic?.configured ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'"
+              class="px-2 py-1 rounded-full text-xs font-medium"
+              x-text="keys.anthropic?.configured ? 'Configured' : 'Not set'"></span>
+      </div>
+      <div x-show="keys.anthropic?.maskedKey" class="text-xs text-slate-500 font-mono bg-slate-50 border border-slate-200 rounded px-3 py-2" x-text="'Current: ' + keys.anthropic?.maskedKey"></div>
+      <div class="flex gap-2">
+        <input type="password" x-model="inputs.anthropic" class="flex-1 px-4 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-cyan-500" placeholder="sk-ant-xxxxxxxxxxxxxxxx">
+        <button @click="saveKey('anthropic', inputs.anthropic, '/api/settings/anthropic/')" class="px-4 py-2 bg-cyan-600 text-white text-sm rounded-lg hover:bg-cyan-700 transition whitespace-nowrap">Save Key</button>
+        <button @click="deleteKey('anthropic', '/api/settings/anthropic/')" x-show="keys.anthropic?.configured" class="px-3 py-2 border border-red-200 text-red-600 text-sm rounded-lg hover:bg-red-50 transition">Remove</button>
+      </div>
+    </div>
+
+    <!-- Gemini -->
+    <div class="vf-card p-6 space-y-4">
+      <div class="flex items-start justify-between">
+        <div>
+          <h3 class="font-semibold flex items-center gap-2">
+            <span class="inline-block w-6 h-6 bg-blue-500 rounded text-white text-xs flex items-center justify-center font-bold">G</span>
+            Google Gemini
+          </h3>
+          <p class="text-xs text-slate-500 mt-0.5">Gemini 1.5 Pro / Flash — <a href="https://aistudio.google.com/app/apikey" target="_blank" class="text-cyan-600 hover:underline">Get key ↗</a></p>
+        </div>
+        <span :class="keys.gemini?.configured ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'"
+              class="px-2 py-1 rounded-full text-xs font-medium"
+              x-text="keys.gemini?.configured ? 'Configured' : 'Not set'"></span>
+      </div>
+      <div x-show="keys.gemini?.maskedKey" class="text-xs text-slate-500 font-mono bg-slate-50 border border-slate-200 rounded px-3 py-2" x-text="'Current: ' + keys.gemini?.maskedKey"></div>
+      <div class="flex gap-2">
+        <input type="password" x-model="inputs.gemini" class="flex-1 px-4 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-cyan-500" placeholder="AIzaxxxxxxxxxxxxxxxx">
+        <button @click="saveKey('gemini', inputs.gemini, '/api/settings/gemini/')" class="px-4 py-2 bg-cyan-600 text-white text-sm rounded-lg hover:bg-cyan-700 transition whitespace-nowrap">Save Key</button>
+        <button @click="deleteKey('gemini', '/api/settings/gemini/')" x-show="keys.gemini?.configured" class="px-3 py-2 border border-red-200 text-red-600 text-sm rounded-lg hover:bg-red-50 transition">Remove</button>
+      </div>
     </div>
   </div>
 
-  <!-- Groq -->
-  <div x-show="tab==='Groq API'" class="vf-card p-6 space-y-4">
-    <h3 class="font-semibold">Groq API Key (BYOK)</h3>
-    <p class="text-sm text-gray-500">Bring your own Groq API key for LLM inference.</p>
-    <div class="flex items-center gap-2 mb-4">
-      <span class="text-sm">Status:</span>
-      <span :class="groqConfigured?'bg-green-100 text-green-700':'bg-yellow-100 text-yellow-700'" class="px-2 py-1 rounded-full text-xs font-medium" x-text="groqConfigured?'Connected':'Using default'"></span>
+  <!-- ── Voice & Speech ─────────────────────────────────────────────── -->
+  <div x-show="tab==='Voice & Speech'" class="space-y-4">
+    <p class="text-sm text-slate-500">Keys for cloud TTS (text-to-speech) and STT (speech-to-text) services. Local engines (Kokoro, Piper, Vosk) require no key.</p>
+
+    <!-- ElevenLabs -->
+    <div class="vf-card p-6 space-y-4">
+      <div class="flex items-start justify-between">
+        <div>
+          <h3 class="font-semibold flex items-center gap-2">
+            <span class="inline-block w-6 h-6 bg-purple-600 rounded text-white text-xs flex items-center justify-center font-bold">11</span>
+            ElevenLabs
+            <span class="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">TTS</span>
+          </h3>
+          <p class="text-xs text-slate-500 mt-0.5">Premium realistic voice synthesis — <a href="https://elevenlabs.io/app/settings/api-keys" target="_blank" class="text-cyan-600 hover:underline">Get key ↗</a></p>
+        </div>
+        <span :class="keys.elevenlabs?.configured ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'"
+              class="px-2 py-1 rounded-full text-xs font-medium"
+              x-text="keys.elevenlabs?.configured ? 'Configured' : 'Not set'"></span>
+      </div>
+      <div x-show="keys.elevenlabs?.maskedKey" class="text-xs text-slate-500 font-mono bg-slate-50 border border-slate-200 rounded px-3 py-2" x-text="'Current: ' + keys.elevenlabs?.maskedKey"></div>
+      <div class="flex gap-2">
+        <input type="password" x-model="inputs.elevenlabs" class="flex-1 px-4 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-cyan-500" placeholder="sk_xxxxxxxxxxxxxxxx">
+        <button @click="saveKey('elevenlabs', inputs.elevenlabs, '/api/settings/elevenlabs/')" class="px-4 py-2 bg-cyan-600 text-white text-sm rounded-lg hover:bg-cyan-700 transition whitespace-nowrap">Save Key</button>
+        <button @click="deleteKey('elevenlabs', '/api/settings/elevenlabs/')" x-show="keys.elevenlabs?.configured" class="px-3 py-2 border border-red-200 text-red-600 text-sm rounded-lg hover:bg-red-50 transition">Remove</button>
+      </div>
     </div>
-    <input type="password" x-model="groqKey" class="w-full px-4 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-cyan-500" placeholder="gsk_xxxxxxx">
-    <div class="flex gap-3">
-      <button @click="saveGroq" class="px-4 py-2 bg-cyan-600 text-white text-sm rounded-lg hover:bg-cyan-700 transition">Save Key</button>
-      <button @click="deleteGroq" x-show="groqConfigured" class="px-4 py-2 border border-red-200 text-red-600 text-sm rounded-lg">Remove</button>
+
+    <!-- Sarvam AI -->
+    <div class="vf-card p-6 space-y-4">
+      <div class="flex items-start justify-between">
+        <div>
+          <h3 class="font-semibold flex items-center gap-2">
+            <span class="inline-block w-6 h-6 bg-orange-400 rounded text-white text-xs flex items-center justify-center font-bold">S</span>
+            Sarvam AI
+            <span class="text-xs bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded">TTS + STT</span>
+          </h3>
+          <p class="text-xs text-slate-500 mt-0.5">50 Indian-language voices (hi-IN, ta-IN, te-IN …) — <a href="https://dashboard.sarvam.ai/" target="_blank" class="text-cyan-600 hover:underline">Get key ↗</a></p>
+        </div>
+        <span :class="keys.sarvam?.configured ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'"
+              class="px-2 py-1 rounded-full text-xs font-medium"
+              x-text="keys.sarvam?.configured ? 'Configured' : 'Not set'"></span>
+      </div>
+      <div x-show="keys.sarvam?.maskedKey" class="text-xs text-slate-500 font-mono bg-slate-50 border border-slate-200 rounded px-3 py-2" x-text="'Current: ' + keys.sarvam?.maskedKey"></div>
+      <div class="flex gap-2">
+        <input type="password" x-model="inputs.sarvam" class="flex-1 px-4 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-cyan-500" placeholder="sarvam-xxxxxxxxxxxxxxxx">
+        <button @click="saveKey('sarvam', inputs.sarvam, '/api/settings/sarvam/')" class="px-4 py-2 bg-cyan-600 text-white text-sm rounded-lg hover:bg-cyan-700 transition whitespace-nowrap">Save Key</button>
+        <button @click="deleteKey('sarvam', '/api/settings/sarvam/')" x-show="keys.sarvam?.configured" class="px-3 py-2 border border-red-200 text-red-600 text-sm rounded-lg hover:bg-red-50 transition">Remove</button>
+      </div>
+    </div>
+
+    <!-- Deepgram -->
+    <div class="vf-card p-6 space-y-4">
+      <div class="flex items-start justify-between">
+        <div>
+          <h3 class="font-semibold flex items-center gap-2">
+            <span class="inline-block w-6 h-6 bg-teal-600 rounded text-white text-xs flex items-center justify-center font-bold">D</span>
+            Deepgram
+            <span class="text-xs bg-teal-100 text-teal-700 px-1.5 py-0.5 rounded">STT</span>
+          </h3>
+          <p class="text-xs text-slate-500 mt-0.5">Nova-2 real-time transcription — <a href="https://console.deepgram.com/" target="_blank" class="text-cyan-600 hover:underline">Get key ↗</a></p>
+        </div>
+        <span :class="keys.deepgram?.configured ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'"
+              class="px-2 py-1 rounded-full text-xs font-medium"
+              x-text="keys.deepgram?.configured ? 'Configured' : 'Not set'"></span>
+      </div>
+      <div x-show="keys.deepgram?.maskedKey" class="text-xs text-slate-500 font-mono bg-slate-50 border border-slate-200 rounded px-3 py-2" x-text="'Current: ' + keys.deepgram?.maskedKey"></div>
+      <div class="flex gap-2">
+        <input type="password" x-model="inputs.deepgram" class="flex-1 px-4 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-cyan-500" placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx">
+        <button @click="saveKey('deepgram', inputs.deepgram, '/api/settings/deepgram/')" class="px-4 py-2 bg-cyan-600 text-white text-sm rounded-lg hover:bg-cyan-700 transition whitespace-nowrap">Save Key</button>
+        <button @click="deleteKey('deepgram', '/api/settings/deepgram/')" x-show="keys.deepgram?.configured" class="px-3 py-2 border border-red-200 text-red-600 text-sm rounded-lg hover:bg-red-50 transition">Remove</button>
+      </div>
+    </div>
+
+    <!-- AssemblyAI -->
+    <div class="vf-card p-6 space-y-4">
+      <div class="flex items-start justify-between">
+        <div>
+          <h3 class="font-semibold flex items-center gap-2">
+            <span class="inline-block w-6 h-6 bg-sky-600 rounded text-white text-xs flex items-center justify-center font-bold">AI</span>
+            AssemblyAI
+            <span class="text-xs bg-sky-100 text-sky-700 px-1.5 py-0.5 rounded">STT</span>
+          </h3>
+          <p class="text-xs text-slate-500 mt-0.5">Universal-2 STT with speaker diarization — <a href="https://www.assemblyai.com/app" target="_blank" class="text-cyan-600 hover:underline">Get key ↗</a></p>
+        </div>
+        <span :class="keys.assemblyai?.configured ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'"
+              class="px-2 py-1 rounded-full text-xs font-medium"
+              x-text="keys.assemblyai?.configured ? 'Configured' : 'Not set'"></span>
+      </div>
+      <div x-show="keys.assemblyai?.maskedKey" class="text-xs text-slate-500 font-mono bg-slate-50 border border-slate-200 rounded px-3 py-2" x-text="'Current: ' + keys.assemblyai?.maskedKey"></div>
+      <div class="flex gap-2">
+        <input type="password" x-model="inputs.assemblyai" class="flex-1 px-4 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-cyan-500" placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx">
+        <button @click="saveKey('assemblyai', inputs.assemblyai, '/api/settings/assemblyai/')" class="px-4 py-2 bg-cyan-600 text-white text-sm rounded-lg hover:bg-cyan-700 transition whitespace-nowrap">Save Key</button>
+        <button @click="deleteKey('assemblyai', '/api/settings/assemblyai/')" x-show="keys.assemblyai?.configured" class="px-3 py-2 border border-red-200 text-red-600 text-sm rounded-lg hover:bg-red-50 transition">Remove</button>
+      </div>
     </div>
   </div>
 
-  <!-- Voice -->
-  <div x-show="tab==='Voice'" class="vf-card p-6 space-y-4">
-    <h3 class="font-semibold">Voice Configuration</h3>
-    <p class="text-sm text-gray-500">Configure TTS voice for your agents.</p>
-    <div>
-      <label class="text-sm font-medium text-slate-700">Voice Preset</label>
-      <select x-model="voiceId" class="w-full mt-1 px-4 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-cyan-500">
-        <option value="">Default</option>
-        <template x-for="v in voicePresets"><option :value="v.id" x-text="v.name"></option></template>
-      </select>
-    </div>
-    <div>
-      <label class="text-sm font-medium text-slate-700">Or clone a voice</label>
-      <input type="file" accept="audio/*" @change="cloneFile=$event.target.files[0]" class="w-full mt-1 border border-slate-200 rounded-lg p-2 text-sm">
-    </div>
-    <div class="flex gap-3">
-      <button @click="saveVoice" class="px-4 py-2 bg-cyan-600 text-white text-sm rounded-lg hover:bg-cyan-700 transition">Save Voice</button>
-      <button @click="cloneVoice" x-show="cloneFile" class="px-4 py-2 bg-purple-600 text-white text-sm rounded-lg">Clone Voice</button>
+  <!-- ── Telephony ──────────────────────────────────────────────────── -->
+  <div x-show="tab==='Telephony'" class="space-y-4">
+    <p class="text-sm text-slate-500">Credentials for telephony services used by your phone agents.</p>
+
+    <!-- Twilio -->
+    <div class="vf-card p-6 space-y-4">
+      <div class="flex items-start justify-between">
+        <div>
+          <h3 class="font-semibold flex items-center gap-2">
+            <span class="inline-block w-6 h-6 bg-red-600 rounded text-white text-xs flex items-center justify-center font-bold">TW</span>
+            Twilio
+          </h3>
+          <p class="text-xs text-slate-500 mt-0.5">Phone calls, SMS, WhatsApp — <a href="https://console.twilio.com/" target="_blank" class="text-cyan-600 hover:underline">Get credentials ↗</a></p>
+        </div>
+        <span :class="keys.twilio?.configured ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'"
+              class="px-2 py-1 rounded-full text-xs font-medium"
+              x-text="keys.twilio?.configured ? 'Connected' : 'Not configured'"></span>
+      </div>
+      <div x-show="keys.twilio?.accountSid" class="text-xs text-slate-500 font-mono bg-slate-50 border border-slate-200 rounded px-3 py-2" x-text="'Account SID: ' + keys.twilio?.accountSid"></div>
+      <div class="grid md:grid-cols-2 gap-4">
+        <div>
+          <label class="text-sm font-medium text-slate-700">Account SID</label>
+          <input type="text" x-model="twilio.accountSid" class="w-full mt-1 px-4 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-cyan-500" placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx">
+        </div>
+        <div>
+          <label class="text-sm font-medium text-slate-700">Auth Token</label>
+          <input type="password" x-model="twilio.authToken" class="w-full mt-1 px-4 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-cyan-500" placeholder="••••••••••••••••••••••••••••••••">
+        </div>
+      </div>
+      <div class="flex gap-3">
+        <button @click="saveTwilio" class="px-4 py-2 bg-cyan-600 text-white text-sm rounded-lg hover:bg-cyan-700 transition">Save Credentials</button>
+        <button @click="deleteTwilio" x-show="keys.twilio?.configured" class="px-4 py-2 border border-red-200 text-red-600 text-sm rounded-lg hover:bg-red-50 transition">Remove</button>
+      </div>
     </div>
   </div>
 
-  <!-- General -->
+  <!-- ── General ────────────────────────────────────────────────────── -->
   <div x-show="tab==='General'" class="vf-card p-6 space-y-4">
     <h3 class="font-semibold">General Settings</h3>
     <div class="space-y-3">
@@ -76,49 +251,73 @@
     <button @click="saveGeneral()" :disabled="savingGeneral" class="px-4 py-2 bg-cyan-600 text-white text-sm rounded-lg disabled:opacity-50 hover:bg-cyan-700 transition" x-text="savingGeneral ? 'Saving…' : 'Save Settings'"></button>
   </div>
 </div>
+
 <script>
 function settingsApp() {
   return {
-    tab: 'Twilio',
-    twilioConfigured: {{ twilio_status.configured|default:"false"|lower }},
-    groqConfigured: {{ groq_status.configured|default:"false"|lower }},
+    tab: 'LLM Providers',
+    keys: {{ all_keys|safe }},
+    inputs: { groq:'', openai:'', anthropic:'', gemini:'', elevenlabs:'', sarvam:'', deepgram:'', assemblyai:'' },
     twilio: { accountSid: '', authToken: '' },
-    groqKey: '',
-    voiceId: '', cloneFile: null, voicePresets: [],
     async init() {
-      try { const d = await fetch('/api/voice/presets/', {headers:{'X-CSRFToken':getCookie('csrftoken')}}).then(r=>r.json()); this.voicePresets = d.voices || []; } catch(e) {}
+      // keys already injected server-side; nothing extra to fetch
+    },
+    async saveKey(provider, value, url) {
+      if (!value || !value.trim()) { showToast('Please enter a key', 'error'); return; }
+      try {
+        const r = await apiFetch(url, { method:'POST', json:{ apiKey: value.trim() } });
+        if (r.error) { showToast(r.error, 'error'); return; }
+        if (!this.keys[provider]) this.keys[provider] = {};
+        this.keys[provider].configured = true;
+        this.keys[provider].maskedKey = r.maskedKey || null;
+        this.inputs[provider] = '';
+        showToast(r.message || provider + ' key saved');
+      } catch(e) { showToast('Save failed: ' + (e.message||e), 'error'); }
+    },
+    async deleteKey(provider, url) {
+      try {
+        await apiFetch(url, { method:'DELETE' });
+        if (!this.keys[provider]) this.keys[provider] = {};
+        this.keys[provider].configured = false;
+        this.keys[provider].maskedKey = null;
+        showToast(provider + ' key removed');
+      } catch(e) { showToast('Remove failed', 'error'); }
     },
     async saveTwilio() {
-      try { await apiFetch('/api/settings/twilio/', {method:'POST', json:this.twilio}); this.twilioConfigured=true; showToast('Twilio saved'); } catch(e) { showToast('Failed','error'); }
+      if (!this.twilio.accountSid || !this.twilio.authToken) { showToast('Both fields required', 'error'); return; }
+      try {
+        await apiFetch('/api/settings/twilio/', { method:'POST', json: this.twilio });
+        if (!this.keys.twilio) this.keys.twilio = {};
+        this.keys.twilio.configured = true;
+        this.keys.twilio.accountSid = this.twilio.accountSid;
+        this.twilio = { accountSid:'', authToken:'' };
+        showToast('Twilio credentials saved');
+      } catch(e) { showToast('Save failed', 'error'); }
     },
     async deleteTwilio() {
-      try { await apiFetch('/api/settings/twilio/', {method:'DELETE'}); this.twilioConfigured=false; showToast('Twilio removed'); } catch(e) { showToast('Failed','error'); }
-    },
-    async saveGroq() {
-      try { await apiFetch('/api/settings/groq/', {method:'POST', json:{apiKey:this.groqKey}}); this.groqConfigured=true; showToast('Groq key saved'); } catch(e) { showToast('Failed','error'); }
-    },
-    async deleteGroq() {
-      try { await apiFetch('/api/settings/groq/', {method:'DELETE'}); this.groqConfigured=false; showToast('Key removed'); } catch(e) { showToast('Failed','error'); }
-    },
-    async saveVoice() {
-      try { await apiFetch('/api/settings/', {method:'PUT', json:{defaultVoiceId:this.voiceId}}); showToast('Voice saved'); } catch(e) { showToast('Failed','error'); }
-    },
-    async cloneVoice() {
-      const fd = new FormData(); fd.append('audio', this.cloneFile);
       try {
-        const r = await fetch('/api/voice/clone/', {method:'POST', headers:{'X-CSRFToken':CSRF}, body:fd}).then(r=>r.json());
-        showToast('Voice cloned: clone-' + (r.cloneId || 'unknown'));
-      } catch(e) { showToast('Clone failed','error'); }
+        await apiFetch('/api/settings/twilio/', { method:'DELETE' });
+        if (!this.keys.twilio) this.keys.twilio = {};
+        this.keys.twilio.configured = false;
+        this.keys.twilio.accountSid = null;
+        showToast('Twilio credentials removed');
+      } catch(e) { showToast('Remove failed', 'error'); }
     },
     generalSettings: {
-      emailNotifications: {{ settings_data.emailNotifications|default:"true"|lower }},
-      maintenanceMode: {{ settings_data.maintenanceMode|default:"false"|lower }},
-      debugLogging: {{ settings_data.debugLogging|default:"false"|lower }},
+      emailNotifications: {{ settings_data.notifications.emailNotifications|default:"true"|lower }},
+      maintenanceMode: {{ settings_data.system.maintenanceMode|default:"false"|lower }},
+      debugLogging: {{ settings_data.system.debugLogging|default:"false"|lower }},
     },
     savingGeneral: false,
     async saveGeneral() {
       this.savingGeneral = true;
-      try { await apiFetch('/api/settings/', {method:'PUT', json:this.generalSettings}); showToast('Settings saved'); } catch(e) { showToast('Failed','error'); }
+      try {
+        await apiFetch('/api/settings/', { method:'PUT', json: {
+          notifications: { emailNotifications: this.generalSettings.emailNotifications },
+          system: { maintenanceMode: this.generalSettings.maintenanceMode, debugLogging: this.generalSettings.debugLogging },
+        }});
+        showToast('Settings saved');
+      } catch(e) { showToast('Save failed', 'error'); }
       this.savingGeneral = false;
     }
   }

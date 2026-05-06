@@ -63,22 +63,21 @@ def knowledge(request):
 def settings_page(request):
     client = get_client(request)
     settings_data = {}
-    twilio_status = {}
-    groq_status = {}
+    all_keys = {}
     try:
         settings_data = client.get_settings()
     except Exception:
         pass
     try:
-        twilio_status = client.get_twilio_credential_status()
-    except Exception:
-        pass
-    try:
-        groq_status = client.get_groq_key_status()
+        all_keys = client.get_all_key_statuses()
     except Exception:
         pass
     return render(request, "dashboard/settings.html", {
-        "settings_data": settings_data, "twilio_status": twilio_status, "groq_status": groq_status,
+        "settings_data": settings_data,
+        "all_keys": all_keys,
+        # Keep legacy keys so old template references still work
+        "twilio_status": all_keys.get("twilio", {}),
+        "groq_status": all_keys.get("groq", {}),
     })
 
 

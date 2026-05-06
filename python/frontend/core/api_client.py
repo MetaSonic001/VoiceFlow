@@ -284,6 +284,72 @@ class BackendClient:
     def delete_groq_api_key(self):
         return self._delete("/api/settings/groq")
 
+    def get_all_key_statuses(self):
+        return self._get("/api/settings/keys/all")
+
+    def save_openai_api_key(self, data: dict):
+        return self._post("/api/settings/openai", json=data)
+
+    def get_openai_key_status(self):
+        return self._get("/api/settings/openai")
+
+    def delete_openai_api_key(self):
+        return self._delete("/api/settings/openai")
+
+    def save_anthropic_api_key(self, data: dict):
+        return self._post("/api/settings/anthropic", json=data)
+
+    def get_anthropic_key_status(self):
+        return self._get("/api/settings/anthropic")
+
+    def delete_anthropic_api_key(self):
+        return self._delete("/api/settings/anthropic")
+
+    def save_gemini_api_key(self, data: dict):
+        return self._post("/api/settings/gemini", json=data)
+
+    def get_gemini_key_status(self):
+        return self._get("/api/settings/gemini")
+
+    def delete_gemini_api_key(self):
+        return self._delete("/api/settings/gemini")
+
+    def save_elevenlabs_api_key(self, data: dict):
+        return self._post("/api/settings/elevenlabs", json=data)
+
+    def get_elevenlabs_key_status(self):
+        return self._get("/api/settings/elevenlabs")
+
+    def delete_elevenlabs_api_key(self):
+        return self._delete("/api/settings/elevenlabs")
+
+    def save_sarvam_api_key(self, data: dict):
+        return self._post("/api/settings/sarvam", json=data)
+
+    def get_sarvam_key_status(self):
+        return self._get("/api/settings/sarvam")
+
+    def delete_sarvam_api_key(self):
+        return self._delete("/api/settings/sarvam")
+
+    def save_deepgram_api_key(self, data: dict):
+        return self._post("/api/settings/deepgram", json=data)
+
+    def get_deepgram_key_status(self):
+        return self._get("/api/settings/deepgram")
+
+    def delete_deepgram_api_key(self):
+        return self._delete("/api/settings/deepgram")
+
+    def save_assemblyai_api_key(self, data: dict):
+        return self._post("/api/settings/assemblyai", json=data)
+
+    def get_assemblyai_key_status(self):
+        return self._get("/api/settings/assemblyai")
+
+    def delete_assemblyai_api_key(self):
+        return self._delete("/api/settings/assemblyai")
+
     def get_twilio_numbers(self):
         return self._get("/twilio/numbers")
 

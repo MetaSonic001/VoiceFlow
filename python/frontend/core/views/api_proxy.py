@@ -421,6 +421,40 @@ def groq_api_key(request):
         return JsonResponse({"error": str(e)}, status=400)
 
 
+@login_required
+@require_http_methods(["GET"])
+def all_key_statuses(request):
+    try:
+        return JsonResponse(get_client(request).get_all_key_statuses())
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+def _byok_provider_view(save_fn_name: str, delete_fn_name: str):
+    """Return a view function for a generic BYOK provider."""
+    @login_required
+    @require_http_methods(["POST", "DELETE"])
+    def _view(request):
+        client = get_client(request)
+        try:
+            if request.method == "DELETE":
+                getattr(client, delete_fn_name)()
+                return JsonResponse({"ok": True})
+            return JsonResponse(getattr(client, save_fn_name)(_json_body(request)))
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=400)
+    return _view
+
+
+openai_api_key    = _byok_provider_view("save_openai_api_key",    "delete_openai_api_key")
+anthropic_api_key = _byok_provider_view("save_anthropic_api_key", "delete_anthropic_api_key")
+gemini_api_key    = _byok_provider_view("save_gemini_api_key",    "delete_gemini_api_key")
+elevenlabs_api_key = _byok_provider_view("save_elevenlabs_api_key", "delete_elevenlabs_api_key")
+sarvam_api_key    = _byok_provider_view("save_sarvam_api_key",    "delete_sarvam_api_key")
+deepgram_api_key  = _byok_provider_view("save_deepgram_api_key",  "delete_deepgram_api_key")
+assemblyai_api_key = _byok_provider_view("save_assemblyai_api_key", "delete_assemblyai_api_key")
+
+
 # ── Analytics / Call Logs / Retraining / System / Users / Billing ──────
 
 @login_required
