@@ -426,6 +426,21 @@ async def media_stream_ws(websocket: WebSocket, agent_id: str):
                 # Reverse index: callSid → streamSid (for efficient transfer lookup)
                 if call_sid:
                     await redis.setex(f"call_stream:{call_sid}", 3600, stream_sid.encode())
+                # Live monitor: store call metadata for supervisor dashboard
+                import time as _time
+                call_meta = json.dumps({
+                    "agent_id": agent_id,
+                    "tenant_id": tenant_id,
+                    "caller_number": caller_phone or "Unknown",
+                    "start_time": _time.time(),
+                    "sentiment": "neutral",
+                })
+                await redis.setex(f"call_meta:{call_sid}", 7200, call_meta)
+                await redis.setex(f"call_state:{call_sid}", 7200, json.dumps({
+                    "state": "listening",
+                    "agent_id": agent_id,
+                    "tenant_id": tenant_id,
+                }))
 
             elif event == "media":
                 payload_b64 = msg.get("media", {}).get("payload", "")
@@ -603,6 +618,23 @@ async def _handle_utterance(
     full_transcript.append({"role": "user", "content": transcript})
     logger.info("[twilio_stream] transcript call=%s: %s", call_sid, transcript)
 
+    # Push transcript update to Redis for live monitor
+    if call_sid:
+        try:
+            _r = _redis_client()
+            _r_decoded = aioredis.Redis(
+                host=settings.REDIS_HOST, port=settings.REDIS_PORT,
+                db=2, decode_responses=True,
+            )
+            raw_turns = await _r_decoded.get(f"live_transcript:{call_sid}")
+            turns: list = json.loads(raw_turns) if raw_turns else []
+            turns = turns[-19:]  # keep last 20 turns
+            turns.append({"role": "user", "content": transcript})
+            await _r_decoded.setex(f"live_transcript:{call_sid}", 7200, json.dumps(turns))
+            await _r_decoded.aclose()
+        except Exception:
+            pass
+
     # 2. Streaming RAG → streaming TTS → Twilio chunks
     from app.services.rag_service import process_query_streaming
 
@@ -652,6 +684,21 @@ async def _handle_utterance(
     full_response = "".join(full_response_parts)
     if full_response:
         full_transcript.append({"role": "assistant", "content": full_response})
+        # Push agent response to Redis for live monitor
+        if call_sid:
+            try:
+                _r_decoded = aioredis.Redis(
+                    host=settings.REDIS_HOST, port=settings.REDIS_PORT,
+                    db=2, decode_responses=True,
+                )
+                raw_turns = await _r_decoded.get(f"live_transcript:{call_sid}")
+                turns = json.loads(raw_turns) if raw_turns else []
+                turns = turns[-19:]
+                turns.append({"role": "assistant", "content": full_response})
+                await _r_decoded.setex(f"live_transcript:{call_sid}", 7200, json.dumps(turns))
+                await _r_decoded.aclose()
+            except Exception:
+                pass
 
 
 async def _stream_mulaw_to_twilio(

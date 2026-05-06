@@ -247,6 +247,8 @@ from app.routes import dnd
 from app.routes import simulate
 from app.routes import ivr, recordings, coaching, contacts
 from app.routes import integrations as integrations_routes
+from app.routes import phone_numbers as phone_numbers_routes
+from app.routes import live_monitor
 
 # WITHOUT /api prefix (matches Express)
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])
@@ -289,6 +291,8 @@ app.include_router(contacts.router, prefix="/api/contacts", tags=["Contacts"])
 app.include_router(integrations_routes.router, prefix="/api", tags=["Integrations"])
 app.include_router(platform.router, prefix="/api", tags=["Platform"])
 app.include_router(data_explorer.router, prefix="/api/data-explorer", tags=["DataExplorer"])
+app.include_router(phone_numbers_routes.router, prefix="/api/phone-numbers", tags=["PhoneNumbers"])
+app.include_router(live_monitor.router, prefix="/api/live-monitor", tags=["LiveMonitor"])
 
 
 # ── Twilio proxy (matches Express /twilio/numbers) ──────────────────────────

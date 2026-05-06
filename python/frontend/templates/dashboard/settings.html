@@ -320,6 +320,28 @@
         <strong>Twilio Elastic SIP setup:</strong> In your Twilio Console, create an Elastic SIP Trunk, then set the Origination SIP URI to <code class="bg-violet-100 px-1 py-0.5 rounded">sip:your-agent@{sipServer}</code>. Calls will be delivered to your VoiceFlow agent at <code class="bg-violet-100 px-1 py-0.5 rounded">/api/voice/sip/{agent_id}</code>.
       </div>
     </div>
+
+    <!-- Truecaller Business (Caller Enrichment) -->
+    <div class="vf-card p-6 space-y-4">
+      <div class="flex items-start justify-between">
+        <div>
+          <h3 class="font-semibold flex items-center gap-2">
+            <span class="inline-block w-6 h-6 bg-blue-600 rounded text-white text-xs flex items-center justify-center font-bold">TC</span>
+            Truecaller Business (Caller Enrichment)
+          </h3>
+          <p class="text-xs text-slate-500 mt-0.5">Enrich inbound caller details with name and carrier — greet callers by name automatically. <a href="https://developer.truecaller.com/" target="_blank" class="text-cyan-600 hover:underline">Get partner key ↗</a></p>
+        </div>
+        <span :class="keys.truecaller?.configured ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'"
+              class="px-2 py-1 rounded-full text-xs font-medium"
+              x-text="keys.truecaller?.configured ? 'Configured' : 'Not set'"></span>
+      </div>
+      <div x-show="keys.truecaller?.maskedKey" class="text-xs text-slate-500 font-mono bg-slate-50 border border-slate-200 rounded px-3 py-2" x-text="'Current: ' + keys.truecaller?.maskedKey"></div>
+      <div class="flex gap-3">
+        <input type="password" x-model="inputs.truecaller" class="flex-1 px-4 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-cyan-500" placeholder="Truecaller Partner Key">
+        <button @click="saveKey('truecaller', inputs.truecaller, '/api/settings/truecaller/')" class="px-4 py-2 bg-cyan-600 text-white text-sm rounded-lg hover:bg-cyan-700 transition whitespace-nowrap">Save Key</button>
+        <button @click="deleteKey('truecaller', '/api/settings/truecaller/')" x-show="keys.truecaller?.configured" class="px-3 py-2 border border-red-200 text-red-600 text-sm rounded-lg hover:bg-red-50 transition">Remove</button>
+      </div>
+    </div>
   </div>
 
   <!-- ── General ────────────────────────────────────────────────────── -->
@@ -339,7 +361,7 @@ function settingsApp() {
   return {
     tab: 'LLM Providers',
     keys: {{ all_keys|safe }},
-    inputs: { groq:'', openai:'', anthropic:'', gemini:'', elevenlabs:'', sarvam:'', deepgram:'', assemblyai:'' },
+    inputs: { groq:'', openai:'', anthropic:'', gemini:'', elevenlabs:'', sarvam:'', deepgram:'', assemblyai:'', truecaller:'' },
     twilio: { accountSid: '', authToken: '' },
     exotel: { sid: '', apiKey: '', apiToken: '' },
     sip: { server: '', username: '', password: '', fromNumber: '' },

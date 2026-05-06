@@ -48,6 +48,7 @@ class Tenant(Base):
     webhook_endpoints = relationship("WebhookEndpoint", back_populates="tenant", cascade="all, delete-orphan")
     cloned_voices = relationship("ClonedVoice", back_populates="tenant", cascade="all, delete-orphan")
     kb_attachments = relationship("KbAttachment", back_populates="tenant", cascade="all, delete-orphan")
+    voice_prints = relationship("VoicePrint", back_populates="tenant", cascade="all, delete-orphan")
 
 
 # ── User ──────────────────────────────────────────────────────────────────────
@@ -346,6 +347,33 @@ class KbAttachment(Base):
     tenant = relationship("Tenant", back_populates="kb_attachments")
     agent = relationship("Agent", back_populates="kb_attachments")
     document = relationship("Document", back_populates="kb_attachments")
+
+
+# ── VoicePrint ────────────────────────────────────────────────────────────────
+
+class VoicePrint(Base):
+    """
+    Voice biometric voiceprint for speaker verification.
+    Stores a 256-dim ECAPA-TDNN embedding per enrolled phone number.
+    """
+    __tablename__ = "voice_prints"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    tenantId: Mapped[str] = mapped_column(
+        "tenantId", String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    contactId: Mapped[Optional[str]] = mapped_column(
+        "contactId", String, ForeignKey("contacts.id", ondelete="SET NULL"), nullable=True
+    )
+    phoneNumber: Mapped[Optional[str]] = mapped_column("phoneNumber", String, nullable=True)
+    # 256-dim float list (ECAPA-TDNN via resemblyzer)
+    embedding: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)
+    label: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # friendly name
+    createdAt: Mapped[datetime] = mapped_column(
+        "createdAt", DateTime(timezone=True), server_default=func.now()
+    )
+
+    tenant = relationship("Tenant", back_populates="voice_prints")
 
 
 # ── CallLog ───────────────────────────────────────────────────────────────────

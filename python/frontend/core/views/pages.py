@@ -335,3 +335,15 @@ def coaching(request):
     """AI Coaching Cards — approve/reject AI-generated prompt improvements."""
     return render(request, "dashboard/coaching.html")
 
+
+@login_required
+def phone_numbers(request):
+    """Phone Numbers Shop — search, buy, assign phone numbers."""
+    return render(request, "dashboard/phone_numbers.html")
+
+
+@login_required
+def live_monitor(request):
+    """Live Call Monitor — real-time supervisor view of active calls."""
+    return render(request, "dashboard/live_monitor.html")
+

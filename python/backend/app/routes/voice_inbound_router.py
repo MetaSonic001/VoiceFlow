@@ -16,6 +16,7 @@ from twilio.twiml.voice_response import VoiceResponse
 
 from app.database import AsyncSessionLocal
 from app.models import Agent
+from app.services.caller_enrichment import caller_enrichment
 
 logger = logging.getLogger("voiceflow.inbound_router")
 router = APIRouter()
@@ -33,6 +34,19 @@ async def inbound_router(agent_id: str, request: Request) -> Response:
         resp.say("Agent not found.")
         resp.hangup()
         return Response(content=str(resp), media_type="application/xml")
+
+    # Enrich the caller with name/carrier/returning-caller info (non-blocking).
+    form = await request.form()
+    from_number = form.get("From", "")
+    if from_number and agent.tenantId:
+        try:
+            caller_info = await caller_enrichment.enrich(from_number, agent.tenantId)
+            # Stash in request state so downstream handlers can access it.
+            request.state.caller_info = caller_info
+        except Exception:
+            request.state.caller_info = None
+    else:
+        request.state.caller_info = None
 
     provider = (agent.telephony_provider or "twilio-gather").lower()
 

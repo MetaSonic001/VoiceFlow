@@ -1,0 +1,373 @@
+{% extends "base_dashboard.html" %}{% block title %}Phone Numbers — VoiceFlow AI{% endblock %}
+{% block content %}
+<div x-data="phoneNumbersApp()" x-init="init()" class="space-y-8 fade-in-up">
+
+  <!-- Header -->
+  <div class="flex items-center justify-between">
+    <div>
+      <h1 class="text-3xl font-bold vf-heading bg-gradient-to-r from-gray-900 via-gray-700 to-gray-900 dark:from-white dark:via-gray-200 dark:to-white bg-clip-text text-transparent">Phone Numbers</h1>
+      <p class="text-slate-500 dark:text-gray-400 text-sm mt-1">Buy, manage, and assign phone numbers to your agents.</p>
+    </div>
+    <button @click="showSearch=true" class="vf-btn-primary flex items-center gap-2 text-sm px-4 py-2">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+      Buy Number
+    </button>
+  </div>
+
+  <!-- Your Numbers -->
+  <div>
+    <h2 class="text-lg font-semibold mb-3">Your Numbers</h2>
+    <template x-if="ownedLoading">
+      <div class="vf-card p-8 text-center text-slate-400 dark:text-gray-500 text-sm">Loading numbers…</div>
+    </template>
+    <template x-if="!ownedLoading && owned.length === 0">
+      <div class="vf-card p-8 text-center">
+        <div class="w-12 h-12 rounded-full bg-slate-100 dark:bg-gray-800 flex items-center justify-center mx-auto mb-3">
+          <svg class="w-6 h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"/></svg>
+        </div>
+        <p class="text-slate-500 dark:text-gray-400 text-sm mb-4">No phone numbers yet.</p>
+        <button @click="showSearch=true" class="vf-btn-primary text-sm px-4 py-2">Buy your first number</button>
+      </div>
+    </template>
+    <template x-if="!ownedLoading && owned.length > 0">
+      <div class="overflow-x-auto vf-card">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-slate-200 dark:border-gray-700">
+              <th class="text-left px-4 py-3 font-medium text-slate-500 dark:text-gray-400">Number</th>
+              <th class="text-left px-4 py-3 font-medium text-slate-500 dark:text-gray-400">Provider</th>
+              <th class="text-left px-4 py-3 font-medium text-slate-500 dark:text-gray-400">Capabilities</th>
+              <th class="text-left px-4 py-3 font-medium text-slate-500 dark:text-gray-400">Assigned Agent</th>
+              <th class="text-left px-4 py-3 font-medium text-slate-500 dark:text-gray-400">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="n in owned" :key="n.sid || n.phone_number">
+              <tr class="border-b border-slate-100 dark:border-gray-800 hover:bg-slate-50 dark:hover:bg-gray-800/50">
+                <td class="px-4 py-3">
+                  <div class="font-mono font-medium" x-text="n.phone_number"></div>
+                  <div class="text-xs text-slate-400" x-text="n.friendly_name"></div>
+                </td>
+                <td class="px-4 py-3">
+                  <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400" x-text="n.provider || 'Twilio'"></span>
+                </td>
+                <td class="px-4 py-3">
+                  <div class="flex gap-1">
+                    <template x-if="n.capabilities && n.capabilities.voice">
+                      <span class="px-1.5 py-0.5 text-xs rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">Voice</span>
+                    </template>
+                    <template x-if="n.capabilities && n.capabilities.SMS">
+                      <span class="px-1.5 py-0.5 text-xs rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400">SMS</span>
+                    </template>
+                  </div>
+                </td>
+                <td class="px-4 py-3">
+                  <template x-if="n.assigned_agent_name">
+                    <div class="flex items-center gap-2">
+                      <span class="w-2 h-2 rounded-full bg-green-400 flex-shrink-0"></span>
+                      <span class="text-sm" x-text="n.assigned_agent_name"></span>
+                    </div>
+                  </template>
+                  <template x-if="!n.assigned_agent_name">
+                    <select @change="assignNumber(n.phone_number, $event.target.value)" class="text-xs border dark:border-gray-700 rounded px-2 py-1 dark:bg-gray-800 dark:text-gray-300">
+                      <option value="">— Assign agent —</option>
+                      <template x-for="a in agents" :key="a.id">
+                        <option :value="a.id" x-text="a.name"></option>
+                      </template>
+                    </select>
+                  </template>
+                </td>
+                <td class="px-4 py-3">
+                  <div class="flex gap-2">
+                    <template x-if="n.assigned_agent_id">
+                      <button @click="unassignNumber(n.phone_number)" class="text-xs text-slate-500 hover:text-red-500 transition">Unassign</button>
+                    </template>
+                    <button @click="confirmRelease(n)" class="text-xs text-red-500 hover:text-red-700 transition font-medium">Release</button>
+                  </div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </template>
+  </div>
+
+  <!-- Search / Buy Modal -->
+  <div x-show="showSearch" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" @click.self="showSearch=false">
+    <div class="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+      <div class="flex items-center justify-between p-5 border-b border-slate-200 dark:border-gray-700">
+        <h3 class="text-lg font-semibold">Buy a Phone Number</h3>
+        <button @click="showSearch=false" class="text-slate-400 hover:text-slate-600 dark:hover:text-gray-300">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <div class="p-5 space-y-4">
+        <!-- Search filters -->
+        <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div>
+            <label class="block text-xs font-medium text-slate-500 dark:text-gray-400 mb-1">Country</label>
+            <select x-model="search.country" class="w-full border dark:border-gray-700 rounded-lg px-3 py-2 text-sm dark:bg-gray-800 dark:text-white">
+              <option value="US">🇺🇸 United States</option>
+              <option value="GB">🇬🇧 United Kingdom</option>
+              <option value="IN">🇮🇳 India</option>
+              <option value="AU">🇦🇺 Australia</option>
+              <option value="CA">🇨🇦 Canada</option>
+              <option value="DE">🇩🇪 Germany</option>
+              <option value="SG">🇸🇬 Singapore</option>
+              <option value="AE">🇦🇪 UAE</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-500 dark:text-gray-400 mb-1">Type</label>
+            <select x-model="search.type" class="w-full border dark:border-gray-700 rounded-lg px-3 py-2 text-sm dark:bg-gray-800 dark:text-white">
+              <option value="local">Local</option>
+              <option value="toll_free">Toll-Free</option>
+              <option value="mobile">Mobile</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-500 dark:text-gray-400 mb-1">Area Code</label>
+            <input x-model="search.area_code" type="text" placeholder="e.g. 415" class="w-full border dark:border-gray-700 rounded-lg px-3 py-2 text-sm dark:bg-gray-800 dark:text-white" maxlength="5">
+          </div>
+          <div class="flex items-end">
+            <button @click="searchNumbers()" :disabled="searchLoading" class="w-full vf-btn-primary text-sm py-2 flex items-center justify-center gap-2">
+              <svg x-show="!searchLoading" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+              <svg x-show="searchLoading" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+              <span x-text="searchLoading ? 'Searching…' : 'Search'"></span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Price disclaimer -->
+        <p class="text-xs text-slate-400 dark:text-gray-500">Numbers are charged to your Twilio account. Pricing shown is an estimate. <a href="https://www.twilio.com/en-us/voice/pricing" target="_blank" class="text-indigo-500 hover:underline">View Twilio pricing →</a></p>
+
+        <!-- Results -->
+        <div class="overflow-y-auto max-h-72 -mx-1 px-1">
+          <template x-if="searchError">
+            <div class="p-4 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm" x-text="searchError"></div>
+          </template>
+          <template x-if="!searchLoading && searchResults.length === 0 && searchDone">
+            <div class="text-center py-8 text-slate-400 dark:text-gray-500 text-sm">No numbers found. Try a different area code or type.</div>
+          </template>
+          <div class="space-y-2">
+            <template x-for="n in searchResults" :key="n.phone_number">
+              <div class="flex items-center justify-between p-3 rounded-lg border border-slate-200 dark:border-gray-700 hover:border-indigo-300 dark:hover:border-indigo-700 transition">
+                <div>
+                  <div class="font-mono font-medium text-sm" x-text="n.phone_number"></div>
+                  <div class="text-xs text-slate-400" x-text="[n.city, n.region, n.iso_country].filter(Boolean).join(', ')"></div>
+                </div>
+                <div class="flex items-center gap-3">
+                  <div class="text-right">
+                    <div class="text-sm font-semibold text-green-600" x-text="n.monthly_price + '/mo'"></div>
+                    <div class="flex gap-1 justify-end mt-0.5">
+                      <template x-if="n.voice"><span class="text-[10px] px-1 rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">Voice</span></template>
+                      <template x-if="n.sms"><span class="text-[10px] px-1 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400">SMS</span></template>
+                    </div>
+                  </div>
+                  <button @click="purchaseNumber(n)" :disabled="purchasing === n.phone_number" class="text-sm vf-btn-primary px-3 py-1.5 disabled:opacity-60">
+                    <span x-text="purchasing === n.phone_number ? 'Buying…' : 'Buy'"></span>
+                  </button>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Release confirmation modal -->
+  <div x-show="releaseTarget" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" @click.self="releaseTarget=null">
+    <div class="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-md p-6">
+      <h3 class="text-lg font-semibold mb-2">Release Number?</h3>
+      <p class="text-sm text-slate-500 dark:text-gray-400 mb-4">
+        Are you sure you want to release <strong class="text-slate-700 dark:text-gray-200" x-text="releaseTarget?.phone_number"></strong>? This will permanently delete it from your Twilio account and stop billing.
+      </p>
+      <div class="flex gap-3 justify-end">
+        <button @click="releaseTarget=null" class="px-4 py-2 text-sm border border-slate-300 dark:border-gray-600 rounded-lg hover:bg-slate-50 dark:hover:bg-gray-800 transition">Cancel</button>
+        <button @click="releaseNumber()" :disabled="releasing" class="px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 transition disabled:opacity-60">
+          <span x-text="releasing ? 'Releasing…' : 'Yes, Release'"></span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- India / Exotel section -->
+  <div class="vf-card p-5">
+    <div class="flex items-start gap-4">
+      <div class="w-10 h-10 rounded-xl bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center flex-shrink-0">
+        <span class="text-lg">🇮🇳</span>
+      </div>
+      <div>
+        <h3 class="font-semibold mb-1">India Numbers (Exotel)</h3>
+        <p class="text-sm text-slate-500 dark:text-gray-400 mb-3">
+          Indian PSTN numbers require DLT (Distributed Ledger Technology) registration per TRAI regulations. Provision your Exotel DID via the Exotel dashboard, then configure it in your agent's telephony settings.
+        </p>
+        <div class="flex gap-3 flex-wrap">
+          <a href="https://my.exotel.com/" target="_blank" class="text-sm text-indigo-500 hover:underline flex items-center gap-1">
+            Exotel Dashboard
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+          </a>
+          <a href="{% url 'settings' %}" class="text-sm text-indigo-500 hover:underline">Configure Exotel credentials →</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<style>
+[x-cloak] { display: none !important; }
+</style>
+
+<script>
+function phoneNumbersApp() {
+  return {
+    owned: [],
+    agents: [],
+    ownedLoading: true,
+    showSearch: false,
+    search: { country: 'US', type: 'local', area_code: '' },
+    searchResults: [],
+    searchLoading: false,
+    searchDone: false,
+    searchError: null,
+    purchasing: null,
+    releaseTarget: null,
+    releasing: false,
+
+    async init() {
+      await Promise.all([this.loadOwned(), this.loadAgents()]);
+    },
+
+    async loadOwned() {
+      this.ownedLoading = true;
+      try {
+        const r = await fetch('/api/phone-numbers/owned', { credentials: 'include' });
+        if (!r.ok) throw new Error('Failed to load');
+        const d = await r.json();
+        this.owned = d.numbers || [];
+      } catch (e) {
+        this.owned = [];
+      } finally {
+        this.ownedLoading = false;
+      }
+    },
+
+    async loadAgents() {
+      try {
+        const r = await fetch('/api/agents/', { credentials: 'include' });
+        if (!r.ok) return;
+        const d = await r.json();
+        this.agents = d.agents || d || [];
+      } catch { }
+    },
+
+    async searchNumbers() {
+      this.searchLoading = true;
+      this.searchError = null;
+      this.searchDone = false;
+      try {
+        const params = new URLSearchParams({
+          country: this.search.country,
+          number_type: this.search.type,
+          limit: '20',
+          provider: 'twilio',
+        });
+        if (this.search.area_code) params.set('area_code', this.search.area_code);
+        const r = await fetch(`/api/phone-numbers/search?${params}`, { credentials: 'include' });
+        const d = await r.json();
+        if (!r.ok) {
+          this.searchError = d.detail || 'Search failed. Check your Twilio credentials in Settings.';
+          this.searchResults = [];
+          return;
+        }
+        if (d.message) {
+          this.searchError = d.message;
+          this.searchResults = [];
+          return;
+        }
+        this.searchResults = d.numbers || [];
+      } catch (e) {
+        this.searchError = 'Network error. Please try again.';
+      } finally {
+        this.searchLoading = false;
+        this.searchDone = true;
+      }
+    },
+
+    async purchaseNumber(n) {
+      if (!confirm(`Buy ${n.phone_number} for approx ${n.monthly_price}/month? This will charge your Twilio account.`)) return;
+      this.purchasing = n.phone_number;
+      try {
+        const r = await fetch('/api/phone-numbers/purchase', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ phone_number: n.phone_number, provider: 'twilio' }),
+        });
+        const d = await r.json();
+        if (!r.ok) { alert(d.detail || 'Purchase failed'); return; }
+        alert(`✓ Purchased ${n.phone_number}! It now appears in "Your Numbers".`);
+        this.showSearch = false;
+        this.searchResults = this.searchResults.filter(x => x.phone_number !== n.phone_number);
+        await this.loadOwned();
+      } catch (e) {
+        alert('Network error during purchase');
+      } finally {
+        this.purchasing = null;
+      }
+    },
+
+    async assignNumber(phone, agentId) {
+      if (!agentId) return;
+      try {
+        const encoded = encodeURIComponent(phone);
+        const r = await fetch(`/api/phone-numbers/${encoded}/assign`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ agent_id: agentId }),
+        });
+        const d = await r.json();
+        if (!r.ok) { alert(d.detail || 'Assignment failed'); return; }
+        await this.loadOwned();
+      } catch (e) {
+        alert('Error assigning number');
+      }
+    },
+
+    async unassignNumber(phone) {
+      try {
+        const encoded = encodeURIComponent(phone);
+        await fetch(`/api/phone-numbers/${encoded}/unassign`, { method: 'POST', credentials: 'include' });
+        await this.loadOwned();
+      } catch { }
+    },
+
+    confirmRelease(n) { this.releaseTarget = n; },
+
+    async releaseNumber() {
+      if (!this.releaseTarget) return;
+      this.releasing = true;
+      try {
+        const r = await fetch(`/api/phone-numbers/${this.releaseTarget.sid}`, {
+          method: 'DELETE',
+          credentials: 'include',
+        });
+        const d = await r.json();
+        if (!r.ok) { alert(d.detail || 'Release failed'); return; }
+        this.releaseTarget = null;
+        await this.loadOwned();
+      } catch (e) {
+        alert('Error releasing number');
+      } finally {
+        this.releasing = false;
+      }
+    },
+  };
+}
+</script>
+{% endblock %}

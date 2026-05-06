@@ -350,6 +350,15 @@ class BackendClient:
     def delete_assemblyai_api_key(self):
         return self._delete("/api/settings/assemblyai")
 
+    def save_truecaller_api_key(self, data: dict):
+        return self._post("/api/settings/truecaller", json=data)
+
+    def get_truecaller_key_status(self):
+        return self._get("/api/settings/truecaller")
+
+    def delete_truecaller_api_key(self):
+        return self._delete("/api/settings/truecaller")
+
     def get_twilio_numbers(self):
         return self._get("/twilio/numbers")
 
@@ -618,6 +627,42 @@ class BackendClient:
 
     def run_delivery(self, agent_id: str, call_log_id: str):
         return self._post(f"/api/integrations/{agent_id}/run-delivery/{call_log_id}")
+
+    # ── Phone Numbers Shop ──────────────────────────────────────────────
+    def search_phone_numbers(self, country="US", number_type="local", area_code="", provider="twilio"):
+        return self._get("/api/phone-numbers/search", params={
+            "country": country, "number_type": number_type,
+            "area_code": area_code, "provider": provider,
+        })
+
+    def list_owned_phone_numbers(self):
+        return self._get("/api/phone-numbers/owned")
+
+    def purchase_phone_number(self, phone_number: str, provider: str = "twilio"):
+        return self._post("/api/phone-numbers/purchase", json={"phone_number": phone_number, "provider": provider})
+
+    def release_phone_number(self, number_id: str):
+        return self._delete(f"/api/phone-numbers/{number_id}")
+
+    def assign_phone_number(self, phone_encoded: str, agent_id: str):
+        return self._post(f"/api/phone-numbers/{phone_encoded}/assign", json={"agent_id": agent_id})
+
+    def unassign_phone_number(self, phone_encoded: str):
+        return self._post(f"/api/phone-numbers/{phone_encoded}/unassign")
+
+    # ── Live Call Monitor ───────────────────────────────────────────────
+    def list_live_calls(self):
+        return self._get("/api/live-monitor/calls")
+
+    def live_monitor_takeover(self, call_sid: str, transfer_to: str, whisper_message: str = ""):
+        return self._post(f"/api/live-monitor/calls/{call_sid}/takeover",
+                          json={"transfer_to": transfer_to, "whisper_message": whisper_message})
+
+    def live_monitor_end(self, call_sid: str):
+        return self._post(f"/api/live-monitor/calls/{call_sid}/end")
+
+    def live_monitor_note(self, call_sid: str, note: str):
+        return self._post(f"/api/live-monitor/calls/{call_sid}/note", json={"note": note})
 
 
 def get_client(request) -> BackendClient:

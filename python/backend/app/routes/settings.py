@@ -220,13 +220,14 @@ async def delete_groq(auth: AuthContext = Depends(get_auth), db: AsyncSession = 
 def _make_byok_key_name(provider: str) -> str:
     """Map provider slug → tenant.settings JSON key name."""
     return {
-        "openai":     "openaiApiKey",
-        "anthropic":  "anthropicApiKey",
-        "gemini":     "geminiApiKey",
-        "elevenlabs": "elevenlabsApiKey",
-        "sarvam":     "sarvamApiKey",
-        "deepgram":   "deepgramApiKey",
-        "assemblyai": "assemblyaiApiKey",
+        "openai":      "openaiApiKey",
+        "anthropic":   "anthropicApiKey",
+        "gemini":      "geminiApiKey",
+        "elevenlabs":  "elevenlabsApiKey",
+        "sarvam":      "sarvamApiKey",
+        "deepgram":    "deepgramApiKey",
+        "assemblyai":  "assemblyaiApiKey",
+        "truecaller":  "truecallerPartnerKey",
     }[provider]
 
 
@@ -327,6 +328,7 @@ async def get_all_key_statuses(auth: AuthContext = Depends(get_auth), db: AsyncS
             "configured": bool(s.get("exotelSid") and s.get("exotelApiKey") and s.get("exotelApiToken")),
             "exotelSid": s.get("exotelSid"),
         },
+        "truecaller": _status("truecallerPartnerKey", "truecaller"),
     }
 
 
@@ -701,3 +703,26 @@ async def delete_exotel(auth: AuthContext = Depends(get_auth), db: AsyncSession 
         tenant.settings = s
         await db.commit()
     return {"success": True, "message": "Exotel credentials removed."}
+
+
+# ── Truecaller Business API (caller enrichment) ───────────────────────────────
+
+@router.post("/truecaller")
+async def save_truecaller(body: dict, auth: AuthContext = Depends(get_auth), db: AsyncSession = Depends(get_db)):
+    api_key = (body.get("apiKey") or "").strip()
+    if not api_key:
+        return JSONResponse({"error": "A Truecaller Partner Key is required."}, status_code=400)
+    result = await _save_byok_key("truecaller", api_key, auth, db)
+    if "error" in result:
+        return JSONResponse(result, status_code=404)
+    return {**result, "message": "Truecaller Partner Key saved (encrypted)."}
+
+
+@router.get("/truecaller")
+async def get_truecaller(auth: AuthContext = Depends(get_auth), db: AsyncSession = Depends(get_db)):
+    return await _get_byok_status("truecaller", auth, db)
+
+
+@router.delete("/truecaller")
+async def delete_truecaller(auth: AuthContext = Depends(get_auth), db: AsyncSession = Depends(get_db)):
+    return await _delete_byok_key("truecaller", auth, db)

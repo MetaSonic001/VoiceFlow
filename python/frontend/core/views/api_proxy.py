@@ -453,6 +453,7 @@ elevenlabs_api_key = _byok_provider_view("save_elevenlabs_api_key", "delete_elev
 sarvam_api_key    = _byok_provider_view("save_sarvam_api_key",    "delete_sarvam_api_key")
 deepgram_api_key  = _byok_provider_view("save_deepgram_api_key",  "delete_deepgram_api_key")
 assemblyai_api_key = _byok_provider_view("save_assemblyai_api_key", "delete_assemblyai_api_key")
+truecaller_api_key = _byok_provider_view("save_truecaller_api_key", "delete_truecaller_api_key")
 
 
 # ── Analytics / Call Logs / Retraining / System / Users / Billing ──────
@@ -1362,5 +1363,112 @@ def integrations_variables(request, agent_id):
 def integrations_run_delivery(request, agent_id, call_log_id):
     try:
         return JsonResponse(get_client(request).run_delivery(agent_id, call_log_id))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+# ── Phone Numbers Shop ─────────────────────────────────────────────────────────
+
+@login_required
+@require_http_methods(["GET"])
+def phone_numbers_search(request):
+    try:
+        return JsonResponse(get_client(request).search_phone_numbers(
+            country=request.GET.get("country", "US"),
+            number_type=request.GET.get("number_type", "local"),
+            area_code=request.GET.get("area_code", ""),
+            provider=request.GET.get("provider", "twilio"),
+        ))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@require_http_methods(["GET"])
+def phone_numbers_owned(request):
+    try:
+        return JsonResponse(get_client(request).list_owned_phone_numbers())
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@require_http_methods(["POST"])
+def phone_numbers_purchase(request):
+    try:
+        body = _json_body(request)
+        return JsonResponse(get_client(request).purchase_phone_number(
+            body.get("phone_number", ""), body.get("provider", "twilio")
+        ), status=201)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@require_http_methods(["DELETE"])
+def phone_number_release(request, number_id):
+    try:
+        return JsonResponse(get_client(request).release_phone_number(number_id))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@require_http_methods(["POST"])
+def phone_number_assign(request, phone_encoded):
+    try:
+        body = _json_body(request)
+        return JsonResponse(get_client(request).assign_phone_number(phone_encoded, body.get("agent_id", "")))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@require_http_methods(["POST"])
+def phone_number_unassign(request, phone_encoded):
+    try:
+        return JsonResponse(get_client(request).unassign_phone_number(phone_encoded))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+# ── Live Call Monitor ──────────────────────────────────────────────────────────
+
+@login_required
+@require_http_methods(["GET"])
+def live_monitor_calls(request):
+    try:
+        return JsonResponse(get_client(request).list_live_calls())
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@require_http_methods(["POST"])
+def live_monitor_takeover(request, call_sid):
+    try:
+        body = _json_body(request)
+        return JsonResponse(get_client(request).live_monitor_takeover(
+            call_sid, body.get("transfer_to", ""), body.get("whisper_message", "")
+        ))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@require_http_methods(["POST"])
+def live_monitor_end(request, call_sid):
+    try:
+        return JsonResponse(get_client(request).live_monitor_end(call_sid))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@require_http_methods(["POST"])
+def live_monitor_note(request, call_sid):
+    try:
+        body = _json_body(request)
+        return JsonResponse(get_client(request).live_monitor_note(call_sid, body.get("note", "")))
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)

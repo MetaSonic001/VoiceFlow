@@ -99,6 +99,7 @@ urlpatterns = [
     path("api/settings/sarvam/", api_proxy.sarvam_api_key, name="api_sarvam_key"),
     path("api/settings/deepgram/", api_proxy.deepgram_api_key, name="api_deepgram_key"),
     path("api/settings/assemblyai/", api_proxy.assemblyai_api_key, name="api_assemblyai_key"),
+    path("api/settings/truecaller/", api_proxy.truecaller_api_key, name="api_truecaller_key"),
     path("api/analytics/overview/", api_proxy.analytics_overview, name="api_analytics"),
     path("api/call-logs/", api_proxy.call_logs_api, name="api_call_logs"),
     path("api/retraining/", api_proxy.retraining_api, name="api_retraining"),
@@ -196,4 +197,20 @@ urlpatterns = [
     path("api/integrations/<str:agent_id>/test/<str:int_type>/",          api_proxy.integrations_test,         name="api_integrations_test"),
     path("api/integrations/<str:agent_id>/run-delivery/<str:call_log_id>/", api_proxy.integrations_run_delivery, name="api_integrations_run_delivery"),
     path("api/integrations/<str:agent_id>/<str:int_type>/",               api_proxy.integrations_remove,       name="api_integrations_remove"),
+
+    # ── Phone Numbers Shop ────────────────────────────────────────────────────
+    path("dashboard/phone-numbers/", pages.phone_numbers, name="phone_numbers"),
+    path("api/phone-numbers/search/", api_proxy.phone_numbers_search, name="api_phone_numbers_search"),
+    path("api/phone-numbers/owned/", api_proxy.phone_numbers_owned, name="api_phone_numbers_owned"),
+    path("api/phone-numbers/purchase/", api_proxy.phone_numbers_purchase, name="api_phone_numbers_purchase"),
+    path("api/phone-numbers/<str:number_id>/release/", api_proxy.phone_number_release, name="api_phone_number_release"),
+    path("api/phone-numbers/<str:phone_encoded>/assign/", api_proxy.phone_number_assign, name="api_phone_number_assign"),
+    path("api/phone-numbers/<str:phone_encoded>/unassign/", api_proxy.phone_number_unassign, name="api_phone_number_unassign"),
+
+    # ── Live Call Monitor ─────────────────────────────────────────────────────
+    path("dashboard/live-monitor/", pages.live_monitor, name="live_monitor"),
+    path("api/live-monitor/calls/", api_proxy.live_monitor_calls, name="api_live_monitor_calls"),
+    path("api/live-monitor/calls/<str:call_sid>/takeover/", api_proxy.live_monitor_takeover, name="api_live_monitor_takeover"),
+    path("api/live-monitor/calls/<str:call_sid>/end/", api_proxy.live_monitor_end, name="api_live_monitor_end"),
+    path("api/live-monitor/calls/<str:call_sid>/note/", api_proxy.live_monitor_note, name="api_live_monitor_note"),
 ]
