@@ -118,6 +118,21 @@ class Agent(Base):
     telephony_provider: Mapped[Optional[str]] = mapped_column(
         "telephonyProvider", String, nullable=True, default="twilio-gather"
     )
+    # ── Prompt-to-Agent structured fields ────────────────────────────────────
+    context_breakdown: Mapped[Optional[Any]] = mapped_column("contextBreakdown", JSON, nullable=True)
+    # [{id, title, body, is_enabled, quality_score, auto_compliance}]
+    welcome_message: Mapped[Optional[str]] = mapped_column("welcomeMessage", Text, nullable=True)
+    post_call_actions: Mapped[Optional[Any]] = mapped_column("postCallActions", JSON, nullable=True)
+    # [{variable, extraction_prompt, data_type}]
+    language_config: Mapped[Optional[Any]] = mapped_column("languageConfig", JSON, nullable=True)
+    # {primary_language, secondary_languages, geography, formality_level}
+    caller_personas: Mapped[Optional[Any]] = mapped_column("callerPersonas", JSON, nullable=True)
+    # [{name, intent, frustration_level, vocabulary_level}]
+    simulation_suite: Mapped[Optional[Any]] = mapped_column("simulationSuite", JSON, nullable=True)
+    # [{utterance, expected_intent, expected_keywords, must_not_contain, persona}]
+    deployment_readiness_score: Mapped[Optional[int]] = mapped_column("deploymentReadinessScore", Integer, nullable=True)
+    version_number: Mapped[int] = mapped_column("versionNumber", Integer, default=1)
+    # ─────────────────────────────────────────────────────────────────────────
     createdAt: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
     updatedAt: Mapped[datetime] = mapped_column("updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -130,6 +145,7 @@ class Agent(Base):
     call_logs = relationship("CallLog", back_populates="agent", cascade="all, delete-orphan")
     retraining_examples = relationship("RetrainingExample", back_populates="agent", cascade="all, delete-orphan")
     campaigns = relationship("Campaign", back_populates="agent", cascade="all, delete-orphan")
+    versions = relationship("AgentVersion", back_populates="agent", cascade="all, delete-orphan", order_by="AgentVersion.versionNumber.desc()")
 
 
 # ── AgentConfiguration ────────────────────────────────────────────────────────
@@ -188,6 +204,26 @@ class AgentTemplate(Base):
 
     agents = relationship("Agent", back_populates="template")
     configurations = relationship("AgentConfiguration", back_populates="template")
+
+
+# ── AgentVersion ──────────────────────────────────────────────────────────────
+
+class AgentVersion(Base):
+    """Immutable snapshot of an agent configuration at a point in time."""
+    __tablename__ = "agent_versions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    agentId: Mapped[str] = mapped_column("agentId", String, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False)
+    tenantId: Mapped[str] = mapped_column("tenantId", String, nullable=False)
+    versionNumber: Mapped[int] = mapped_column("versionNumber", Integer, default=1)
+    changeDescription: Mapped[Optional[str]] = mapped_column("changeDescription", Text, nullable=True)
+    snapshot: Mapped[Any] = mapped_column(JSON, nullable=False)
+    # Full agent config at this version: {name, description, systemPrompt, voiceType,
+    #   context_breakdown, welcome_message, post_call_actions, language_config,
+    #   caller_personas, simulation_suite, ...}
+    createdAt: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+
+    agent = relationship("Agent", back_populates="versions")
 
 
 # ── OnboardingProgress ────────────────────────────────────────────────────────

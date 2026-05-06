@@ -294,6 +294,12 @@ def agent_builder(request):
     return render(request, "agents/builder.html", {"agent_id": agent_id})
 
 
+@login_required
+def agent_creator(request):
+    """Prompt-to-Agent 5-step wizard."""
+    return render(request, "agents/creator.html", {})
+
+
 # ── New pages added in Architecture Bible ─────────────────────────────
 
 @login_required

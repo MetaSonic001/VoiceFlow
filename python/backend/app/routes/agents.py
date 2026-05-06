@@ -40,6 +40,15 @@ def _agent_to_dict(agent: Agent, doc_count: int = 0) -> dict:
         "avgResponseTime": agent.avgResponseTime,
         "chromaCollection": agent.chromaCollection,
         "configPath": agent.configPath,
+        # Prompt-to-Agent structured fields
+        "contextBreakdown": agent.context_breakdown,
+        "welcomeMessage": agent.welcome_message,
+        "postCallActions": agent.post_call_actions,
+        "languageConfig": agent.language_config,
+        "callerPersonas": agent.caller_personas,
+        "simulationSuite": agent.simulation_suite,
+        "deploymentReadinessScore": agent.deployment_readiness_score,
+        "versionNumber": agent.version_number,
         "createdAt": agent.createdAt.isoformat() if agent.createdAt else None,
         "updatedAt": agent.updatedAt.isoformat() if agent.updatedAt else None,
         "_count": {"documents": doc_count},
@@ -619,4 +628,402 @@ async def pause_agent(agent_id: str, auth: AuthContext = Depends(get_auth), db: 
     agent.status = "paused"
     await db.commit()
     return {"success": True}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PROMPT-TO-AGENT 2.0 — Structured generation endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/generate-from-prompt/preview")
+async def preview_agent_from_prompt(
+    request: Request,
+    auth: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Step 1 + 2 of Prompt-to-Agent: extract intent, generate full structured config.
+    Does NOT write to the database — returns a preview for the wizard UI.
+
+    Optionally pass extract_only=true to skip full config generation (live intent chips).
+
+    Body:
+    {
+      "prompt": "A dental clinic agent that books appointments in Hindi",
+      "extract_only": false   // true → returns just intent extraction (fast, for live chips)
+    }
+    """
+    from app.models import Tenant
+    from app.services.credentials import decrypt_safe
+    from app.config import settings as app_settings
+    from app.services.agent_builder_service import (
+        extract_intent, generate_full_config, score_all_sections,
+    )
+
+    body = await request.json()
+    prompt = (body.get("prompt") or "").strip()[:1000]
+    extract_only = bool(body.get("extract_only", False))
+
+    if not prompt:
+        return JSONResponse({"error": "prompt is required"}, status_code=400)
+
+    tenant_res = await db.execute(select(Tenant).where(Tenant.id == auth.tenant_id))
+    tenant = tenant_res.scalar_one_or_none()
+    groq_key = app_settings.GROQ_API_KEY
+    if tenant and tenant.settings:
+        from app.services.credentials import decrypt_safe as _ds
+        enc = tenant.settings.get("groqApiKey")
+        if enc:
+            decrypted = _ds(enc)
+            if decrypted and decrypted.startswith("gsk_"):
+                groq_key = decrypted
+
+    if not groq_key:
+        return JSONResponse({"error": "No Groq API key configured"}, status_code=503)
+
+    intent = await extract_intent(prompt, groq_key)
+
+    if extract_only:
+        return JSONResponse({"intent": intent}, status_code=200)
+
+    try:
+        config = await generate_full_config(intent, prompt, groq_key)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+    # Score sections in parallel
+    sections = config.get("context_breakdown") or []
+    if sections:
+        config["context_breakdown"] = await score_all_sections(sections, groq_key)
+
+    return JSONResponse({"intent": intent, "config": config}, status_code=200)
+
+
+@router.post("/generate-from-prompt/create")
+async def create_agent_from_preview(
+    request: Request,
+    auth: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Step 4 of Prompt-to-Agent: create the agent from a confirmed preview config,
+    then auto-generate a simulation suite and compute deployment readiness score.
+
+    Body:
+    {
+      "config": { ... full preview config returned by /preview ... },
+      "auto_simulate": true   // auto-generate simulation suite after creation
+    }
+    """
+    from app.models import AgentVersion
+    from app.services.agent_builder_service import (
+        generate_simulation_suite, score_deployment_readiness, build_snapshot,
+    )
+    import json as _json
+
+    body = await request.json()
+    config = body.get("config") or {}
+    auto_simulate = bool(body.get("auto_simulate", True))
+
+    name = (config.get("name") or "New Agent")[:100]
+    if not name:
+        return JSONResponse({"error": "config.name is required"}, status_code=400)
+
+    # Build flat systemPrompt from context_breakdown sections
+    sections = config.get("context_breakdown") or []
+    if sections:
+        system_prompt_parts = []
+        for s in sections:
+            if s.get("is_enabled", True):
+                system_prompt_parts.append(f"## {s['title']}\n{s.get('body', '')}")
+        system_prompt = "\n\n".join(system_prompt_parts)
+    else:
+        system_prompt = config.get("system_prompt") or config.get("systemPrompt") or ""
+
+    agent = Agent(
+        name=name,
+        description=config.get("description", ""),
+        systemPrompt=system_prompt,
+        voiceType=config.get("voice_type") or config.get("voiceType") or "female",
+        templateId=config.get("template_id") or config.get("templateId"),
+        llmPreferences=config.get("llm_preferences") or {"model": "llama-3.3-70b-versatile"},
+        tokenLimit=4096,
+        context_breakdown=sections,
+        welcome_message=config.get("welcome_message", ""),
+        post_call_actions=config.get("post_call_actions", []),
+        language_config=config.get("language_config"),
+        caller_personas=config.get("caller_personas", []),
+        version_number=1,
+        tenantId=auth.tenant_id,
+        userId=auth.user_id,
+    )
+    db.add(agent)
+    await db.flush()
+
+    sim_suite: list = []
+    readiness: dict = {}
+
+    if auto_simulate:
+        from app.models import Tenant
+        from app.services.credentials import decrypt_safe
+        from app.config import settings as app_settings
+
+        tenant_res = await db.execute(select(Tenant).where(Tenant.id == auth.tenant_id))
+        tenant = tenant_res.scalar_one_or_none()
+        groq_key = app_settings.GROQ_API_KEY
+        if tenant and tenant.settings:
+            enc = tenant.settings.get("groqApiKey")
+            if enc:
+                decrypted = decrypt_safe(enc)
+                if decrypted and decrypted.startswith("gsk_"):
+                    groq_key = decrypted
+
+        if groq_key:
+            sim_suite = await generate_simulation_suite(
+                {**config, "use_cases": (config.get("language_config") or {}).get("use_cases") or []},
+                groq_key,
+                count=10,
+            )
+            agent.simulation_suite = sim_suite
+            agent_dict_for_readiness = {**config, "simulation_suite": sim_suite}
+            readiness = await score_deployment_readiness(agent_dict_for_readiness, groq_key=groq_key)
+            agent.deployment_readiness_score = readiness.get("score")
+
+    # Save initial version snapshot
+    snapshot = build_snapshot(agent)
+    version = AgentVersion(
+        agentId=agent.id,
+        tenantId=auth.tenant_id,
+        versionNumber=1,
+        changeDescription="Initial creation via Prompt-to-Agent",
+        snapshot=snapshot,
+    )
+    db.add(version)
+
+    await db.commit()
+    await db.refresh(agent)
+
+    return JSONResponse({
+        "agentId": agent.id,
+        "agent": _agent_to_dict(agent),
+        "simulation_suite": sim_suite,
+        "deployment_readiness": readiness,
+    }, status_code=201)
+
+
+@router.get("/{agent_id}/versions")
+async def list_agent_versions(
+    agent_id: str,
+    auth: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all saved versions for an agent."""
+    from app.models import AgentVersion
+
+    agent_res = await db.execute(
+        select(Agent).where(Agent.id == agent_id, Agent.tenantId == auth.tenant_id)
+    )
+    if not agent_res.scalar_one_or_none():
+        return JSONResponse({"error": "Agent not found"}, status_code=404)
+
+    versions_res = await db.execute(
+        select(AgentVersion)
+        .where(AgentVersion.agentId == agent_id)
+        .order_by(AgentVersion.versionNumber.desc())
+    )
+    versions = versions_res.scalars().all()
+    return JSONResponse([{
+        "id": v.id,
+        "versionNumber": v.versionNumber,
+        "changeDescription": v.changeDescription,
+        "createdAt": v.createdAt.isoformat() if v.createdAt else None,
+    } for v in versions])
+
+
+@router.post("/{agent_id}/versions")
+async def save_agent_version(
+    agent_id: str,
+    request: Request,
+    auth: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Save the current agent state as a named version snapshot."""
+    from app.models import AgentVersion
+    from app.services.agent_builder_service import build_snapshot
+
+    body = await request.json()
+    description = (body.get("description") or "Manual save")[:255]
+
+    agent_res = await db.execute(
+        select(Agent).where(Agent.id == agent_id, Agent.tenantId == auth.tenant_id)
+    )
+    agent = agent_res.scalar_one_or_none()
+    if not agent:
+        return JSONResponse({"error": "Agent not found"}, status_code=404)
+
+    # Increment version number
+    agent.version_number = (agent.version_number or 1) + 1
+    version = AgentVersion(
+        agentId=agent.id,
+        tenantId=auth.tenant_id,
+        versionNumber=agent.version_number,
+        changeDescription=description,
+        snapshot=build_snapshot(agent),
+    )
+    db.add(version)
+    await db.commit()
+    await db.refresh(version)
+
+    return JSONResponse({
+        "id": version.id,
+        "versionNumber": version.versionNumber,
+        "changeDescription": version.changeDescription,
+        "createdAt": version.createdAt.isoformat() if version.createdAt else None,
+    }, status_code=201)
+
+
+@router.post("/{agent_id}/versions/{version_id}/restore")
+async def restore_agent_version(
+    agent_id: str,
+    version_id: str,
+    auth: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Restore an agent to a specific version snapshot."""
+    from app.models import AgentVersion
+
+    agent_res = await db.execute(
+        select(Agent).where(Agent.id == agent_id, Agent.tenantId == auth.tenant_id)
+    )
+    agent = agent_res.scalar_one_or_none()
+    if not agent:
+        return JSONResponse({"error": "Agent not found"}, status_code=404)
+
+    ver_res = await db.execute(
+        select(AgentVersion).where(AgentVersion.id == version_id, AgentVersion.agentId == agent_id)
+    )
+    version = ver_res.scalar_one_or_none()
+    if not version:
+        return JSONResponse({"error": "Version not found"}, status_code=404)
+
+    snap = version.snapshot or {}
+    for field, col in [
+        ("name", "name"), ("description", "description"), ("systemPrompt", "systemPrompt"),
+        ("voiceType", "voiceType"), ("channels", "channels"), ("llmPreferences", "llmPreferences"),
+        ("tokenLimit", "tokenLimit"), ("contextWindowStrategy", "contextWindowStrategy"),
+        ("context_breakdown", "context_breakdown"), ("welcome_message", "welcome_message"),
+        ("post_call_actions", "post_call_actions"), ("language_config", "language_config"),
+        ("caller_personas", "caller_personas"), ("simulation_suite", "simulation_suite"),
+    ]:
+        if field in snap:
+            setattr(agent, col, snap[field])
+
+    await db.commit()
+    await db.refresh(agent)
+    return JSONResponse({"success": True, "restoredVersion": version.versionNumber, "agent": _agent_to_dict(agent)})
+
+
+@router.post("/{agent_id}/revision-diff")
+async def get_revision_diff(
+    agent_id: str,
+    request: Request,
+    auth: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Compute a structured diff for a revision prompt without applying changes.
+    Returns change list per field/section so the UI can show a diff view.
+
+    Body: {"revision_prompt": "make it more formal and add insurance query handling"}
+    """
+    from app.models import Tenant
+    from app.services.credentials import decrypt_safe
+    from app.config import settings as app_settings
+    from app.services.agent_builder_service import compute_revision_diff, build_snapshot
+
+    body = await request.json()
+    revision_prompt = (body.get("revision_prompt") or "").strip()[:500]
+    if not revision_prompt:
+        return JSONResponse({"error": "revision_prompt is required"}, status_code=400)
+
+    agent_res = await db.execute(
+        select(Agent).where(Agent.id == agent_id, Agent.tenantId == auth.tenant_id)
+    )
+    agent = agent_res.scalar_one_or_none()
+    if not agent:
+        return JSONResponse({"error": "Agent not found"}, status_code=404)
+
+    tenant_res = await db.execute(select(Tenant).where(Tenant.id == auth.tenant_id))
+    tenant = tenant_res.scalar_one_or_none()
+    groq_key = app_settings.GROQ_API_KEY
+    if tenant and tenant.settings:
+        enc = tenant.settings.get("groqApiKey")
+        if enc:
+            decrypted = decrypt_safe(enc)
+            if decrypted and decrypted.startswith("gsk_"):
+                groq_key = decrypted
+
+    if not groq_key:
+        return JSONResponse({"error": "No Groq API key configured"}, status_code=503)
+
+    current = build_snapshot(agent)
+    diff = await compute_revision_diff(current, revision_prompt, groq_key)
+    return JSONResponse(diff)
+
+
+@router.post("/{agent_id}/auto-simulate")
+async def auto_simulate_agent(
+    agent_id: str,
+    request: Request,
+    auth: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    (Re-)generate a simulation suite for an existing agent and store it.
+    Also recomputes deployment readiness score.
+
+    Body: {"count": 10}
+    """
+    from app.models import Tenant
+    from app.services.credentials import decrypt_safe
+    from app.config import settings as app_settings
+    from app.services.agent_builder_service import (
+        generate_simulation_suite, score_deployment_readiness, build_snapshot,
+    )
+
+    body = await request.json()
+    count = min(int(body.get("count", 10)), 20)
+
+    agent_res = await db.execute(
+        select(Agent).where(Agent.id == agent_id, Agent.tenantId == auth.tenant_id)
+    )
+    agent = agent_res.scalar_one_or_none()
+    if not agent:
+        return JSONResponse({"error": "Agent not found"}, status_code=404)
+
+    tenant_res = await db.execute(select(Tenant).where(Tenant.id == auth.tenant_id))
+    tenant = tenant_res.scalar_one_or_none()
+    groq_key = app_settings.GROQ_API_KEY
+    if tenant and tenant.settings:
+        enc = tenant.settings.get("groqApiKey")
+        if enc:
+            decrypted = decrypt_safe(enc)
+            if decrypted and decrypted.startswith("gsk_"):
+                groq_key = decrypted
+
+    if not groq_key:
+        return JSONResponse({"error": "No Groq API key configured"}, status_code=503)
+
+    config = build_snapshot(agent)
+    sim_suite = await generate_simulation_suite(config, groq_key, count=count)
+    agent.simulation_suite = sim_suite
+
+    config_with_suite = {**config, "simulation_suite": sim_suite}
+    readiness = await score_deployment_readiness(config_with_suite, groq_key=groq_key)
+    agent.deployment_readiness_score = readiness.get("score")
+
+    await db.commit()
+    return JSONResponse({
+        "simulation_suite": sim_suite,
+        "deployment_readiness": readiness,
+    })
 

@@ -1,0 +1,704 @@
+{% extends "base_dashboard.html" %}
+{% block title %}Create Agent — VoiceFlow AI{% endblock %}
+
+{% block content %}
+<div x-data="agentCreator()" x-init="init()" class="max-w-5xl mx-auto pb-24">
+
+  <!-- ── Header ── -->
+  <div class="flex items-center justify-between mb-8">
+    <div>
+      <h1 class="text-3xl font-bold vf-heading">Create Agent</h1>
+      <p class="text-slate-500 text-sm mt-1">Describe your agent in plain language — we handle the rest.</p>
+    </div>
+    <a href="/dashboard/agents/" class="text-sm text-slate-500 hover:text-teal-600 transition flex items-center gap-1">
+      ← Back to Agents
+    </a>
+  </div>
+
+  <!-- ── Step progress bar ── -->
+  <div class="flex items-center gap-0 mb-10">
+    <template x-for="(label, i) in steps" :key="i">
+      <div class="flex items-center flex-1">
+        <div class="flex flex-col items-center">
+          <div class="w-9 h-9 rounded-full flex items-center justify-center text-sm font-semibold border-2 transition-all"
+               :class="step > i ? 'bg-teal-600 border-teal-600 text-white' :
+                       step === i ? 'border-teal-600 text-teal-600 bg-teal-50' :
+                                    'border-slate-300 text-slate-400 bg-white'"
+               x-text="step > i ? '✓' : i + 1">
+          </div>
+          <span class="text-[10px] mt-1 font-medium whitespace-nowrap"
+                :class="step === i ? 'text-teal-600' : 'text-slate-400'"
+                x-text="label"></span>
+        </div>
+        <div x-show="i < steps.length - 1"
+             class="flex-1 h-0.5 mx-2 mt-[-1.2rem] transition-all"
+             :class="step > i ? 'bg-teal-500' : 'bg-slate-200'"></div>
+      </div>
+    </template>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       STEP 0 — Describe your agent
+  ══════════════════════════════════════════════════════════ -->
+  <div x-show="step === 0" x-transition>
+    <div class="vf-card p-8">
+      <h2 class="text-xl font-bold text-slate-800 mb-2">Describe your agent</h2>
+      <p class="text-slate-500 text-sm mb-6">
+        Write 1–3 sentences. Include your business type, what callers need, and any language or tone preferences.
+      </p>
+
+      <!-- Prompt textarea -->
+      <textarea
+        x-model="prompt"
+        @input.debounce.400ms="liveIntentExtract()"
+        placeholder="e.g. A dental clinic receptionist agent for Dr. Mehta's Mumbai clinic. It should book, reschedule, and cancel appointments. Callers speak Hindi and English. Warm and friendly tone."
+        rows="5"
+        class="w-full px-4 py-3 border border-slate-200 rounded-xl text-sm text-slate-700 resize-none
+               focus:outline-none focus:ring-2 focus:ring-teal-400 focus:border-transparent transition
+               placeholder-slate-400"
+      ></textarea>
+
+      <!-- Live intent chips -->
+      <div x-show="intent && Object.keys(intent).length > 0" class="mt-4 flex flex-wrap gap-2 items-center">
+        <span class="text-xs text-slate-400 font-medium">Detected:</span>
+        <template x-if="intent.business_type">
+          <span class="px-2 py-0.5 bg-teal-50 border border-teal-200 text-teal-700 text-xs rounded-full font-medium"
+                x-text="'🏢 ' + intent.business_type"></span>
+        </template>
+        <template x-if="intent.industry && intent.industry !== 'other'">
+          <span class="px-2 py-0.5 bg-violet-50 border border-violet-200 text-violet-700 text-xs rounded-full font-medium"
+                x-text="'⚙ ' + intent.industry"></span>
+        </template>
+        <template x-if="intent.primary_language">
+          <span class="px-2 py-0.5 bg-blue-50 border border-blue-200 text-blue-700 text-xs rounded-full font-medium"
+                x-text="'🌐 ' + intent.primary_language"></span>
+        </template>
+        <template x-for="uc in (intent.use_cases || []).slice(0,4)" :key="uc">
+          <span class="px-2 py-0.5 bg-amber-50 border border-amber-200 text-amber-700 text-xs rounded-full font-medium"
+                x-text="'✓ ' + uc.replace(/_/g,' ')"></span>
+        </template>
+        <template x-if="intent.geography">
+          <span class="px-2 py-0.5 bg-green-50 border border-green-200 text-green-700 text-xs rounded-full font-medium"
+                x-text="'📍 ' + intent.geography"></span>
+        </template>
+        <span x-show="intentLoading" class="text-xs text-slate-400 animate-pulse ml-1">analysing…</span>
+      </div>
+
+      <!-- Error -->
+      <div x-show="error" class="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700"
+           x-text="error"></div>
+
+      <!-- CTA -->
+      <div class="mt-8 flex justify-end">
+        <button
+          @click="generatePreview()"
+          :disabled="!prompt.trim() || generating"
+          class="px-8 py-3 bg-gradient-to-r from-teal-600 to-cyan-600 text-white font-semibold rounded-xl
+                 hover:shadow-lg hover:shadow-teal-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed
+                 flex items-center gap-2"
+        >
+          <span x-show="!generating">Generate Agent →</span>
+          <span x-show="generating" class="flex items-center gap-2">
+            <svg class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 010 16v-4l-3 3 3 3v-4a8 8 0 01-8-8z"/>
+            </svg>
+            <span x-text="generatingStage"></span>
+          </span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       STEP 1 — Preview: Context Breakdown + Personas
+  ══════════════════════════════════════════════════════════ -->
+  <div x-show="step === 1" x-transition>
+
+    <!-- Config name + description -->
+    <div class="vf-card p-6 mb-4 flex items-start justify-between gap-4">
+      <div class="flex-1">
+        <div class="flex items-center gap-3 mb-1">
+          <input x-model="config.name" class="text-2xl font-bold text-slate-800 bg-transparent border-b-2 border-transparent
+                         hover:border-slate-300 focus:border-teal-400 focus:outline-none w-full transition" />
+        </div>
+        <input x-model="config.description" class="text-sm text-slate-500 bg-transparent border-b border-transparent
+                       hover:border-slate-200 focus:border-teal-400 focus:outline-none w-full transition" />
+      </div>
+      <div class="flex items-center gap-2 shrink-0">
+        <!-- Detected intent summary -->
+        <template x-if="intent.industry && intent.industry !== 'other'">
+          <span class="px-2 py-1 bg-violet-100 text-violet-700 text-xs font-semibold rounded-full"
+                x-text="intent.industry"></span>
+        </template>
+        <template x-if="intent.call_type">
+          <span class="px-2 py-1 bg-slate-100 text-slate-600 text-xs font-semibold rounded-full"
+                x-text="intent.call_type + ' calls'"></span>
+        </template>
+      </div>
+    </div>
+
+    <!-- Context Breakdown sections (sortable) -->
+    <div class="mb-4">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="font-semibold text-slate-700">Context Sections
+          <span class="text-xs text-slate-400 font-normal ml-2">drag to reorder · click to edit</span>
+        </h3>
+        <button @click="addSection()"
+                class="text-xs px-3 py-1.5 border border-teal-300 text-teal-700 rounded-lg hover:bg-teal-50 transition">
+          + Add Section
+        </button>
+      </div>
+
+      <div id="sections-list" class="space-y-3">
+        <template x-for="(section, idx) in config.context_breakdown" :key="section.id">
+          <div class="vf-card p-4 cursor-pointer"
+               :class="editingSectionId === section.id ? 'ring-2 ring-teal-400' : ''"
+               draggable="true"
+               @dragstart="dragIdx = idx"
+               @dragover.prevent
+               @drop="reorderSection(idx)">
+
+            <div class="flex items-start gap-3">
+              <!-- Drag handle -->
+              <span class="text-slate-300 mt-1 select-none cursor-grab active:cursor-grabbing text-lg">⠿</span>
+
+              <div class="flex-1 min-w-0">
+                <!-- Title row -->
+                <div class="flex items-center gap-2 mb-1">
+                  <template x-if="editingSectionId !== section.id">
+                    <h4 class="font-semibold text-slate-800 text-sm" x-text="section.title"></h4>
+                  </template>
+                  <template x-if="editingSectionId === section.id">
+                    <input x-model="section.title"
+                           class="font-semibold text-slate-800 text-sm bg-transparent border-b border-teal-400 focus:outline-none w-full" />
+                  </template>
+
+                  <!-- Compliance badge -->
+                  <template x-if="section.auto_compliance">
+                    <span class="px-1.5 py-0.5 bg-teal-100 text-teal-700 text-[10px] font-semibold rounded uppercase tracking-wide">
+                      Auto-Compliance
+                    </span>
+                  </template>
+
+                  <!-- Quality stars -->
+                  <div class="flex gap-0.5 ml-1">
+                    <template x-for="star in 5" :key="star">
+                      <span class="text-xs" :class="star <= (section.quality_score || 3) ? 'text-amber-400' : 'text-slate-200'">★</span>
+                    </template>
+                  </div>
+                </div>
+
+                <!-- Body text -->
+                <template x-if="editingSectionId !== section.id">
+                  <p class="text-xs text-slate-600 line-clamp-3 leading-relaxed" x-text="section.body"></p>
+                </template>
+                <template x-if="editingSectionId === section.id">
+                  <textarea x-model="section.body" rows="5"
+                            class="w-full text-xs text-slate-700 border border-slate-200 rounded-lg p-2 mt-2
+                                   focus:outline-none focus:ring-1 focus:ring-teal-400 resize-y"></textarea>
+                </template>
+              </div>
+
+              <!-- Right actions -->
+              <div class="flex flex-col items-end gap-1.5 shrink-0">
+                <!-- Enable toggle -->
+                <label class="flex items-center gap-1 cursor-pointer">
+                  <input type="checkbox" x-model="section.is_enabled" class="sr-only peer" />
+                  <div class="w-8 h-4 rounded-full transition peer-checked:bg-teal-500 bg-slate-200 relative">
+                    <div class="w-3 h-3 rounded-full bg-white absolute top-0.5 left-0.5 transition-all peer-checked:translate-x-4"
+                         :class="section.is_enabled ? 'translate-x-4' : 'translate-x-0'"></div>
+                  </div>
+                </label>
+                <!-- Edit / Done -->
+                <button @click="toggleEditSection(section.id)"
+                        class="text-xs text-teal-600 hover:text-teal-800 font-medium"
+                        x-text="editingSectionId === section.id ? 'Done' : 'Edit'">
+                </button>
+                <!-- Delete (not for compliance sections) -->
+                <button x-show="!section.auto_compliance"
+                        @click="removeSection(idx)"
+                        class="text-xs text-red-400 hover:text-red-600">✕</button>
+              </div>
+            </div>
+
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- Caller Personas -->
+    <div class="vf-card p-5 mb-4" x-show="(config.caller_personas || []).length > 0">
+      <h3 class="font-semibold text-slate-700 mb-3">Caller Personas
+        <span class="text-xs text-slate-400 font-normal ml-1">who will call this agent?</span>
+      </h3>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <template x-for="persona in config.caller_personas" :key="persona.name">
+          <div class="p-4 border border-slate-200 rounded-xl bg-slate-50">
+            <div class="flex items-start justify-between mb-2">
+              <p class="font-semibold text-sm text-slate-800" x-text="persona.name"></p>
+              <span class="text-xs px-1.5 py-0.5 rounded-full font-medium"
+                    :class="{
+                      'bg-green-100 text-green-700': persona.frustration_level === 'low',
+                      'bg-amber-100 text-amber-700': persona.frustration_level === 'medium',
+                      'bg-red-100 text-red-700': persona.frustration_level === 'high'
+                    }"
+                    x-text="persona.frustration_level + ' frustration'"></span>
+            </div>
+            <p class="text-xs text-slate-500 mb-1">
+              <span class="font-medium">Goal:</span> <span x-text="persona.intent"></span>
+            </p>
+            <p class="text-xs text-slate-400 italic line-clamp-2" x-text="'\"' + persona.typical_utterance + '\"'"></p>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- Navigation -->
+    <div class="flex justify-between mt-6">
+      <button @click="step = 0" class="px-5 py-2 text-sm text-slate-500 border border-slate-200 rounded-xl hover:bg-slate-50 transition">← Back</button>
+      <button @click="step = 2" class="px-8 py-2.5 bg-gradient-to-r from-teal-600 to-cyan-600 text-white font-semibold rounded-xl hover:shadow-lg transition">Next: Voice & Welcome →</button>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       STEP 2 — Welcome Message + Voice
+  ══════════════════════════════════════════════════════════ -->
+  <div x-show="step === 2" x-transition>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+
+      <!-- Welcome message -->
+      <div class="vf-card p-6">
+        <h3 class="font-semibold text-slate-700 mb-1">Welcome Message</h3>
+        <p class="text-xs text-slate-400 mb-3">What the agent says first when a call connects.</p>
+        <textarea x-model="config.welcome_message" rows="4"
+                  class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 resize-none
+                         focus:outline-none focus:ring-2 focus:ring-teal-400 transition"></textarea>
+        <button @click="previewTTS()"
+                class="mt-3 flex items-center gap-2 text-sm text-teal-600 hover:text-teal-800 font-medium transition">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+          Preview Voice
+        </button>
+        <audio id="tts-preview" class="hidden mt-2 w-full" controls></audio>
+      </div>
+
+      <!-- Voice selector -->
+      <div class="vf-card p-6">
+        <h3 class="font-semibold text-slate-700 mb-1">Voice Type</h3>
+        <p class="text-xs text-slate-400 mb-4">Recommended based on your agent's tone.</p>
+        <div class="grid grid-cols-2 gap-3">
+          <template x-for="voice in ['female', 'male']" :key="voice">
+            <button @click="config.voice_type = voice"
+                    class="p-4 border-2 rounded-xl text-sm font-medium transition"
+                    :class="config.voice_type === voice
+                            ? 'border-teal-500 bg-teal-50 text-teal-700'
+                            : 'border-slate-200 text-slate-600 hover:border-slate-300'">
+              <div class="text-2xl mb-1" x-text="voice === 'female' ? '👩' : '👨'"></div>
+              <span x-text="voice.charAt(0).toUpperCase() + voice.slice(1)"></span>
+            </button>
+          </template>
+        </div>
+
+        <!-- Language config display -->
+        <div class="mt-4 p-3 bg-slate-50 rounded-lg" x-show="config.language_config">
+          <p class="text-xs font-semibold text-slate-500 mb-2">Language Config</p>
+          <div class="flex flex-wrap gap-1">
+            <span class="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full"
+                  x-text="'Primary: ' + (config.language_config?.primary_language || 'en-IN')"></span>
+            <template x-for="lang in (config.language_config?.secondary_languages || [])" :key="lang">
+              <span class="text-xs px-2 py-0.5 bg-slate-200 text-slate-600 rounded-full"
+                    x-text="lang"></span>
+            </template>
+            <template x-if="config.language_config?.geography">
+              <span class="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded-full"
+                    x-text="'📍 ' + config.language_config.geography"></span>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="flex justify-between mt-6">
+      <button @click="step = 1" class="px-5 py-2 text-sm text-slate-500 border border-slate-200 rounded-xl hover:bg-slate-50 transition">← Back</button>
+      <button @click="step = 3" class="px-8 py-2.5 bg-gradient-to-r from-teal-600 to-cyan-600 text-white font-semibold rounded-xl hover:shadow-lg transition">Next: Data Extraction →</button>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       STEP 3 — Post-Call Data Extraction Variables
+  ══════════════════════════════════════════════════════════ -->
+  <div x-show="step === 3" x-transition>
+    <div class="vf-card p-6 mb-4">
+      <h3 class="font-semibold text-slate-700 mb-1">Post-Call Data Extraction</h3>
+      <p class="text-sm text-slate-500 mb-5">
+        After each call, the AI will extract these variables from the conversation.
+        Used for CRM sync, follow-ups, and analytics.
+      </p>
+
+      <div class="space-y-3">
+        <template x-for="(action, idx) in config.post_call_actions" :key="idx">
+          <div class="flex items-center gap-3 p-3 border border-slate-200 rounded-xl group">
+            <div class="w-6 h-6 rounded bg-teal-100 text-teal-700 flex items-center justify-center text-xs font-bold shrink-0"
+                 x-text="idx + 1"></div>
+            <div class="flex-1 grid grid-cols-3 gap-2">
+              <input x-model="action.variable" placeholder="variable_name"
+                     class="col-span-1 text-xs px-2 py-1.5 border border-slate-200 rounded-lg bg-slate-50
+                            font-mono focus:outline-none focus:ring-1 focus:ring-teal-400" />
+              <input x-model="action.extraction_prompt" placeholder="What was the caller's name?"
+                     class="col-span-2 text-xs px-2 py-1.5 border border-slate-200 rounded-lg
+                            focus:outline-none focus:ring-1 focus:ring-teal-400" />
+            </div>
+            <select x-model="action.data_type"
+                    class="text-xs px-2 py-1.5 border border-slate-200 rounded-lg bg-white
+                           focus:outline-none focus:ring-1 focus:ring-teal-400">
+              <option value="string">text</option>
+              <option value="date">date</option>
+              <option value="phone">phone</option>
+              <option value="number">number</option>
+              <option value="boolean">yes/no</option>
+            </select>
+            <button @click="config.post_call_actions.splice(idx, 1)"
+                    class="text-slate-300 hover:text-red-400 transition opacity-0 group-hover:opacity-100">✕</button>
+          </div>
+        </template>
+      </div>
+
+      <button @click="config.post_call_actions.push({variable:'', extraction_prompt:'', data_type:'string'})"
+              class="mt-4 text-sm text-teal-600 hover:text-teal-800 font-medium flex items-center gap-1 transition">
+        + Add Variable
+      </button>
+    </div>
+
+    <div class="flex justify-between mt-4">
+      <button @click="step = 2" class="px-5 py-2 text-sm text-slate-500 border border-slate-200 rounded-xl hover:bg-slate-50 transition">← Back</button>
+      <button @click="createAgent()"
+              :disabled="creating"
+              class="px-8 py-2.5 bg-gradient-to-r from-teal-600 to-cyan-600 text-white font-semibold rounded-xl
+                     hover:shadow-lg transition disabled:opacity-50 flex items-center gap-2">
+        <span x-show="!creating">Create Agent →</span>
+        <span x-show="creating" class="flex items-center gap-2">
+          <svg class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 010 16v-4l-3 3 3 3v-4a8 8 0 01-8-8z"/>
+          </svg>
+          <span x-text="creatingStage"></span>
+        </span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       STEP 4 — Done: Simulation Suite + Readiness Score
+  ══════════════════════════════════════════════════════════ -->
+  <div x-show="step === 4" x-transition>
+
+    <!-- Readiness Score hero -->
+    <div class="vf-card p-8 mb-5 text-center">
+      <template x-if="readiness.score !== undefined">
+        <div>
+          <div class="relative inline-flex items-center justify-center mb-4">
+            <!-- Circle arc -->
+            <svg class="w-32 h-32 -rotate-90" viewBox="0 0 100 100">
+              <circle cx="50" cy="50" r="42" stroke="#e2e8f0" stroke-width="10" fill="none"/>
+              <circle cx="50" cy="50" r="42" stroke="#0d9488" stroke-width="10" fill="none"
+                      stroke-dasharray="263.9"
+                      :stroke-dashoffset="263.9 - (263.9 * (readiness.score / 100))"
+                      stroke-linecap="round"
+                      class="transition-all duration-1000"/>
+            </svg>
+            <div class="absolute text-center">
+              <div class="text-3xl font-bold text-slate-800" x-text="readiness.score + '/100'"></div>
+              <div class="text-xs font-semibold text-teal-600 uppercase tracking-wide" x-text="readiness.grade"></div>
+            </div>
+          </div>
+          <h2 class="text-xl font-bold text-slate-800 mb-1">Agent Created!</h2>
+          <p class="text-slate-500 text-sm" x-text="readiness.summary"></p>
+        </div>
+      </template>
+      <template x-if="readiness.score === undefined">
+        <div>
+          <div class="text-5xl mb-3">🎉</div>
+          <h2 class="text-xl font-bold text-slate-800 mb-1">Agent Created Successfully!</h2>
+          <p class="text-slate-500 text-sm" x-text="'Your agent «' + config.name + '» is ready.'"></p>
+        </div>
+      </template>
+    </div>
+
+    <!-- Gap analysis -->
+    <template x-if="(readiness.gaps || []).length > 0">
+      <div class="vf-card p-5 mb-5">
+        <h3 class="font-semibold text-slate-700 mb-3">Improvement Opportunities</h3>
+        <div class="space-y-2">
+          <template x-for="gap in readiness.gaps" :key="gap.area + gap.issue">
+            <div class="flex items-start gap-3 p-3 rounded-lg"
+                 :class="{
+                   'bg-red-50 border border-red-100': gap.priority === 'critical',
+                   'bg-amber-50 border border-amber-100': gap.priority === 'high',
+                   'bg-yellow-50 border border-yellow-100': gap.priority === 'medium',
+                   'bg-slate-50 border border-slate-100': gap.priority === 'low'
+                 }">
+              <span class="text-sm mt-0.5"
+                    x-text="gap.priority === 'critical' ? '🔴' : gap.priority === 'high' ? '🟠' : gap.priority === 'medium' ? '🟡' : '🟢'">
+              </span>
+              <div>
+                <p class="text-xs font-semibold text-slate-700" x-text="gap.area"></p>
+                <p class="text-xs text-slate-500" x-text="gap.issue"></p>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </template>
+
+    <!-- Simulation scenarios -->
+    <div class="vf-card p-5 mb-5" x-show="(simulationSuite || []).length > 0">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="font-semibold text-slate-700">Auto-Generated Test Suite
+          <span class="text-xs text-slate-400 font-normal ml-1" x-text="simulationSuite.length + ' scenarios'"></span>
+        </h3>
+        <span class="text-xs text-teal-600 font-medium">Run in Agent → Test tab</span>
+      </div>
+      <div class="space-y-2">
+        <template x-for="(sim, idx) in simulationSuite" :key="sim.id || idx">
+          <div class="flex items-start gap-3 p-3 border border-slate-100 rounded-xl bg-slate-50 hover:bg-white transition">
+            <span class="text-xs px-1.5 py-0.5 rounded font-semibold mt-0.5 shrink-0"
+                  :class="{
+                    'bg-green-100 text-green-700': sim.difficulty === 'easy',
+                    'bg-amber-100 text-amber-700': sim.difficulty === 'medium',
+                    'bg-red-100 text-red-700': sim.difficulty === 'hard'
+                  }"
+                  x-text="sim.difficulty || 'medium'"></span>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm text-slate-700 font-medium" x-text="sim.utterance"></p>
+              <p class="text-xs text-slate-400 mt-0.5" x-text="'→ ' + (sim.expected_intent || '')"></p>
+            </div>
+            <span class="text-xs text-slate-400 shrink-0" x-text="sim.scenario_type || ''"></span>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- Action buttons -->
+    <div class="flex flex-wrap gap-3 justify-center">
+      <a :href="'/dashboard/agents/' + createdAgentId + '/'"
+         class="px-8 py-3 bg-gradient-to-r from-teal-600 to-cyan-600 text-white font-semibold rounded-xl hover:shadow-lg transition">
+        Open Agent Dashboard →
+      </a>
+      <a :href="'/dashboard/agents/' + createdAgentId + '/builder/'"
+         class="px-6 py-3 border border-slate-200 text-slate-600 font-medium rounded-xl hover:bg-slate-50 transition">
+        Open Flow Builder
+      </a>
+      <a href="/dashboard/agents/create/"
+         class="px-6 py-3 border border-slate-200 text-slate-600 font-medium rounded-xl hover:bg-slate-50 transition">
+        Create Another Agent
+      </a>
+    </div>
+  </div>
+
+</div>
+
+<script>
+function agentCreator() {
+  return {
+    // ── State ──
+    step: 0,
+    steps: ['Describe', 'Sections', 'Voice', 'Variables', 'Done'],
+    prompt: '',
+    intent: {},
+    config: {
+      name: '',
+      description: '',
+      voice_type: 'female',
+      welcome_message: '',
+      context_breakdown: [],
+      post_call_actions: [],
+      caller_personas: [],
+      language_config: null,
+    },
+    // Generation state
+    generating: false,
+    generatingStage: 'Extracting intent…',
+    intentLoading: false,
+    intentTimer: null,
+    // Section editing
+    editingSectionId: null,
+    dragIdx: null,
+    // Create state
+    creating: false,
+    creatingStage: 'Creating agent…',
+    createdAgentId: null,
+    simulationSuite: [],
+    readiness: {},
+    error: null,
+
+    init() {
+      // Check for ?agent_id= (revision mode — not used in this flow)
+    },
+
+    // ── Live intent extraction (debounced via Alpine @input.debounce) ──
+    async liveIntentExtract() {
+      if (!this.prompt.trim() || this.prompt.length < 20) return;
+      this.intentLoading = true;
+      try {
+        const res = await fetch('/api/agents/generate-from-prompt/preview', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({prompt: this.prompt, extract_only: true}),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          this.intent = data.intent || {};
+        }
+      } catch (_) {}
+      this.intentLoading = false;
+    },
+
+    // ── Step 0 → 1: Full generation ──
+    async generatePreview() {
+      if (!this.prompt.trim()) return;
+      this.generating = true;
+      this.error = null;
+      this.generatingStage = 'Extracting intent…';
+
+      // Fake progress feel — stages shift while the real call runs
+      const stages = ['Extracting intent…', 'Generating sections…', 'Scoring quality…'];
+      let stageIdx = 0;
+      const stageTimer = setInterval(() => {
+        stageIdx = (stageIdx + 1) % stages.length;
+        this.generatingStage = stages[stageIdx];
+      }, 1400);
+
+      try {
+        const res = await fetch('/api/agents/generate-from-prompt/preview', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({prompt: this.prompt, extract_only: false}),
+        });
+        clearInterval(stageTimer);
+
+        if (!res.ok) {
+          const err = await res.json();
+          this.error = err.error || 'Generation failed. Please try again.';
+          this.generating = false;
+          return;
+        }
+
+        const data = await res.json();
+        this.intent = data.intent || {};
+        const cfg = data.config || {};
+
+        this.config.name = cfg.name || 'New Agent';
+        this.config.description = cfg.description || '';
+        this.config.voice_type = cfg.voice_type || cfg.voiceType || 'female';
+        this.config.welcome_message = cfg.welcome_message || '';
+        this.config.context_breakdown = cfg.context_breakdown || [];
+        this.config.post_call_actions = cfg.post_call_actions || [];
+        this.config.caller_personas = cfg.caller_personas || [];
+        this.config.language_config = cfg.language_config || null;
+        this.config.template_id = cfg.template_id || null;
+        this.config.llm_preferences = cfg.llm_preferences || null;
+        this.config.stt_engine = cfg.stt_engine || 'faster-whisper';
+        this.config.tts_engine = cfg.tts_engine || 'kokoro';
+
+        this.step = 1;
+      } catch (e) {
+        clearInterval(stageTimer);
+        this.error = 'Network error. Please check your connection.';
+      }
+      this.generating = false;
+    },
+
+    // ── Section management ──
+    toggleEditSection(id) {
+      this.editingSectionId = this.editingSectionId === id ? null : id;
+    },
+    addSection() {
+      this.config.context_breakdown.push({
+        id: 'sect_' + Math.random().toString(36).slice(2, 7),
+        title: 'New Section',
+        body: '',
+        is_enabled: true,
+        quality_score: 3,
+      });
+    },
+    removeSection(idx) {
+      this.config.context_breakdown.splice(idx, 1);
+    },
+    reorderSection(toIdx) {
+      if (this.dragIdx === null || this.dragIdx === toIdx) return;
+      const sections = [...this.config.context_breakdown];
+      const [moved] = sections.splice(this.dragIdx, 1);
+      sections.splice(toIdx, 0, moved);
+      this.config.context_breakdown = sections;
+      this.dragIdx = null;
+    },
+
+    // ── TTS Preview ──
+    async previewTTS() {
+      const msg = this.config.welcome_message;
+      if (!msg) return;
+      try {
+        const res = await fetch('/api/tts/', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({text: msg, voice: this.config.voice_type}),
+        });
+        if (!res.ok) return;
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const audio = document.getElementById('tts-preview');
+        if (audio) {
+          audio.src = url;
+          audio.classList.remove('hidden');
+          audio.play();
+        }
+      } catch (_) {}
+    },
+
+    // ── Step 4: Create Agent ──
+    async createAgent() {
+      this.creating = true;
+      this.creatingStage = 'Creating agent…';
+      this.error = null;
+
+      const stageTimer = setInterval(() => {
+        this.creatingStage = this.creatingStage === 'Creating agent…'
+          ? 'Generating test suite…'
+          : this.creatingStage === 'Generating test suite…'
+          ? 'Scoring readiness…'
+          : 'Finalising…';
+      }, 2000);
+
+      try {
+        const res = await fetch('/api/agents/generate-from-prompt/create', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({config: this.config, auto_simulate: true}),
+        });
+        clearInterval(stageTimer);
+
+        if (!res.ok) {
+          const err = await res.json();
+          this.error = err.error || 'Creation failed.';
+          this.creating = false;
+          return;
+        }
+
+        const data = await res.json();
+        this.createdAgentId = data.agentId;
+        this.simulationSuite = data.simulation_suite || [];
+        this.readiness = data.deployment_readiness || {};
+        this.step = 4;
+      } catch (e) {
+        clearInterval(stageTimer);
+        this.error = 'Network error during creation.';
+      }
+      this.creating = false;
+    },
+  };
+}
+</script>
+{% endblock %}

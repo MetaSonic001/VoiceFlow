@@ -951,3 +951,95 @@ def coaching_report(request, agent_id):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
+
+# ── Prompt-to-Agent 2.0 ──────────────────────────────────────────────────────
+
+@login_required
+@require_http_methods(["POST"])
+def agent_preview_from_prompt(request):
+    """Extract intent + generate full structured config (no DB write)."""
+    import json as _json
+    try:
+        body = _json.loads(request.body)
+    except Exception:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+    try:
+        return JsonResponse(get_client(request).preview_agent_from_prompt(body))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
+@require_http_methods(["POST"])
+def agent_create_from_preview(request):
+    """Create agent from confirmed preview config + auto-simulate."""
+    import json as _json
+    try:
+        body = _json.loads(request.body)
+    except Exception:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+    try:
+        return JsonResponse(get_client(request).create_agent_from_preview(body), status=201)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
+@require_http_methods(["GET"])
+def agent_versions_list(request, agent_id):
+    try:
+        return JsonResponse(get_client(request).list_agent_versions(agent_id), safe=False)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
+@require_http_methods(["POST"])
+def agent_version_save(request, agent_id):
+    import json as _json
+    try:
+        body = _json.loads(request.body or b"{}")
+    except Exception:
+        body = {}
+    try:
+        return JsonResponse(get_client(request).save_agent_version(agent_id, body), status=201)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
+@require_http_methods(["POST"])
+def agent_version_restore(request, agent_id, version_id):
+    try:
+        return JsonResponse(get_client(request).restore_agent_version(agent_id, version_id))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
+@require_http_methods(["POST"])
+def agent_revision_diff(request, agent_id):
+    import json as _json
+    try:
+        body = _json.loads(request.body)
+    except Exception:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+    try:
+        return JsonResponse(get_client(request).get_revision_diff(agent_id, body))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
+@require_http_methods(["POST"])
+def agent_auto_simulate(request, agent_id):
+    import json as _json
+    try:
+        body = _json.loads(request.body or b"{}")
+    except Exception:
+        body = {}
+    try:
+        return JsonResponse(get_client(request).auto_simulate_agent(agent_id, body))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+

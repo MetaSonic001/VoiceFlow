@@ -45,6 +45,7 @@ urlpatterns = [
     path("dashboard/whatsapp/", pages.whatsapp, name="whatsapp"),
     path("dashboard/dnd/", pages.dnd_registry, name="dnd_registry"),
     path("dashboard/agents/builder/", pages.agent_builder, name="agent_builder"),
+    path("dashboard/agents/create/", pages.agent_creator, name="agent_creator"),
 
     # ── Architecture Bible pages ─────────────────────────────────────────
     path("dashboard/ivr/", pages.ivr, name="ivr"),
@@ -148,4 +149,13 @@ urlpatterns = [
     path("api/coaching/<str:card_id>/approve/", api_proxy.coaching_approve, name="api_coaching_approve"),
     path("api/coaching/<str:card_id>/reject/", api_proxy.coaching_reject, name="api_coaching_reject"),
     path("api/coaching/agents/<str:agent_id>/report/", api_proxy.coaching_report, name="api_coaching_report"),
+
+    # ── Prompt-to-Agent 2.0 ──────────────────────────────────────────────
+    path("api/agents/generate-from-prompt/preview/", api_proxy.agent_preview_from_prompt, name="api_agent_preview"),
+    path("api/agents/generate-from-prompt/create/", api_proxy.agent_create_from_preview, name="api_agent_create_preview"),
+    path("api/agents/<str:agent_id>/versions/", api_proxy.agent_versions_list, name="api_agent_versions_list"),
+    path("api/agents/<str:agent_id>/versions/save/", api_proxy.agent_version_save, name="api_agent_version_save"),
+    path("api/agents/<str:agent_id>/versions/<str:version_id>/restore/", api_proxy.agent_version_restore, name="api_agent_version_restore"),
+    path("api/agents/<str:agent_id>/revision-diff/", api_proxy.agent_revision_diff, name="api_agent_revision_diff"),
+    path("api/agents/<str:agent_id>/auto-simulate/", api_proxy.agent_auto_simulate, name="api_agent_auto_simulate"),
 ]

@@ -435,6 +435,30 @@ class BackendClient:
     def get_coaching_report(self, agent_id: str):
         return self._get(f"/api/coaching/agents/{agent_id}/report")
 
+    # ── Prompt-to-Agent 2.0 ─────────────────────────────────────────────
+    def preview_agent_from_prompt(self, data: dict):
+        """Extract intent + generate structured config (no DB write)."""
+        return self._post("/api/agents/generate-from-prompt/preview", json=data)
+
+    def create_agent_from_preview(self, data: dict):
+        """Create agent from confirmed preview + auto-generate sim suite."""
+        return self._post("/api/agents/generate-from-prompt/create", json=data)
+
+    def list_agent_versions(self, agent_id: str):
+        return self._get(f"/api/agents/{agent_id}/versions")
+
+    def save_agent_version(self, agent_id: str, data: dict):
+        return self._post(f"/api/agents/{agent_id}/versions", json=data)
+
+    def restore_agent_version(self, agent_id: str, version_id: str):
+        return self._post(f"/api/agents/{agent_id}/versions/{version_id}/restore")
+
+    def get_revision_diff(self, agent_id: str, data: dict):
+        return self._post(f"/api/agents/{agent_id}/revision-diff", json=data)
+
+    def auto_simulate_agent(self, agent_id: str, data: dict):
+        return self._post(f"/api/agents/{agent_id}/auto-simulate", json=data)
+
 
 def get_client(request) -> BackendClient:
     """Build a BackendClient from the current Django request."""
