@@ -241,59 +241,73 @@ class VoiceToolExecutor:
 
     async def _execute_calcom(self, action: str, arguments: dict, agent_integrations: dict) -> dict:
         """
-        Execute Cal.com v1 API calls for availability checking and booking.
+        Execute Cal.com v2 API calls for availability checking and booking.
         Reads: agent_integrations.calcom.apiKey + agent_integrations.calcom.eventTypeId
+        Auth: Authorization: Bearer {api_key} header (NOT query param)
+        Docs: https://cal.com/docs/api-reference/v2/introduction
         """
         calcom_cfg = agent_integrations.get("calcom", {})
         api_key = calcom_cfg.get("apiKey", "")
         event_type_id = calcom_cfg.get("eventTypeId", "")
-        base = "https://api.cal.com/v1"
+        base = "https://api.cal.com/v2"
 
         if not api_key:
             return {"error": "Cal.com API key not configured for this agent"}
+
+        auth_headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
 
         try:
             async with httpx.AsyncClient(timeout=12) as client:
                 if action == "check_calcom_availability":
                     date = arguments.get("date", "")
-                    params = {"apiKey": api_key, "dateFrom": date, "dateTo": date}
+                    params: dict = {"start": date, "end": date}
                     if event_type_id:
                         params["eventTypeId"] = event_type_id
-                    resp = await client.get(f"{base}/slots", params=params)
+                    resp = await client.get(
+                        f"{base}/slots",
+                        headers={**auth_headers, "cal-api-version": "2024-09-04"},
+                        params=params,
+                    )
                     if resp.status_code == 200:
                         slots_data = resp.json()
-                        # Flatten slots into a readable list
+                        # v2 response: { status: "success", data: { "date": [{start: "..."}] } }
                         all_slots: list[str] = []
-                        for day_slots in slots_data.get("slots", {}).values():
+                        for day_slots in slots_data.get("data", {}).values():
                             for slot in day_slots:
-                                all_slots.append(slot.get("time", ""))
+                                all_slots.append(slot.get("start", ""))
                         return {"available_slots": all_slots, "date": date}
                     return {"error": f"Cal.com returned {resp.status_code}", "body": resp.text[:200]}
 
                 elif action == "book_calcom_appointment":
+                    # v2 booking body: attendee object replaces responses
                     booking_payload = {
-                        "eventTypeId": int(event_type_id) if event_type_id else None,
                         "start": arguments.get("start", ""),
-                        "responses": {
+                        "attendee": {
                             "name": arguments.get("name", ""),
                             "email": arguments.get("email", ""),
-                            "notes": arguments.get("notes", ""),
+                            "timeZone": "UTC",
+                            "language": "en",
                         },
-                        "timeZone": "UTC",
-                        "language": "en",
                     }
+                    if event_type_id:
+                        booking_payload["eventTypeId"] = int(event_type_id)
+                    if arguments.get("notes"):
+                        booking_payload["bookingFieldsResponses"] = {"notes": arguments["notes"]}
                     resp = await client.post(
                         f"{base}/bookings",
-                        params={"apiKey": api_key},
+                        headers={**auth_headers, "cal-api-version": "2026-02-25"},
                         json=booking_payload,
                     )
                     if resp.status_code in (200, 201):
-                        data = resp.json()
+                        data = resp.json().get("data", {})
                         return {
                             "booking_id": data.get("uid"),
                             "status": data.get("status"),
-                            "start": data.get("startTime"),
-                            "end": data.get("endTime"),
+                            "start": data.get("start"),
+                            "end": data.get("end"),
                         }
                     return {"error": f"Cal.com booking failed ({resp.status_code})", "body": resp.text[:300]}
         except Exception as exc:

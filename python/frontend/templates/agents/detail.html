@@ -699,7 +699,8 @@
       </div>
     </div>
     <div class="grid md:grid-cols-2 gap-3">
-      <div class="md:col-span-2"><label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">API Key</label><input type="password" x-model="intCfg.gohighlevel.apiKey" class="vf-input text-sm" placeholder="GHL API key"></div>
+      <div class="md:col-span-2"><label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">API Key (Private Integration Token)</label><input type="password" x-model="intCfg.gohighlevel.apiKey" class="vf-input text-sm" placeholder="GHL Private Integration Token"></div>
+      <div><label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Location ID <span class="text-red-500">*</span> (Sub-Account ID — required for API v2)</label><input x-model="intCfg.gohighlevel.locationId" class="vf-input text-sm" placeholder="ve9EPM428h8vShlRW1KT"></div>
       <div><label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Workflow ID (optional — triggers automation)</label><input x-model="intCfg.gohighlevel.workflowId" class="vf-input text-sm"></div>
     </div>
   </div>
@@ -1041,7 +1042,7 @@ function agentDetailApp() {
       hubspot:     { enabled: false, accessToken: '', createDeal: false },
       salesforce:  { enabled: false, username: '', password: '', securityToken: '', instanceUrl: '', objectType: 'Lead' },
       slack:       { enabled: false, botToken: '', channel: '#calls' },
-      gohighlevel: { enabled: false, apiKey: '', workflowId: '' },
+      gohighlevel: { enabled: false, apiKey: '', locationId: '', workflowId: '' },
       calcom:      { apiKey: '', eventTypeId: '' },
       gcal:        { calendarId: 'primary', credentialsJson: '' },
       webhooks:    [],

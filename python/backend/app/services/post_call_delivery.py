@@ -271,26 +271,26 @@ async def push_to_email(
             api_key = email_config.get("api_key", "")
             if not api_key:
                 return False
-            payload = {
-                "personalizations": [{"to": [{"email": r} for r in recipients]}],
-                "from": {"email": from_addr},
-                "subject": subject,
-                "content": [
-                    {"type": "text/plain", "value": text_body},
-                    {"type": "text/html", "value": html_body},
-                ],
-            }
-            async with httpx.AsyncClient(timeout=15) as client:
-                resp = await client.post(
-                    "https://api.sendgrid.com/v3/mail/send",
-                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                    json=payload,
+            try:
+                from sendgrid import SendGridAPIClient  # type: ignore
+                from sendgrid.helpers.mail import Mail  # type: ignore
+
+                message = Mail(
+                    from_email=from_addr,
+                    to_emails=recipients,
+                    subject=subject,
+                    html_content=html_body,
                 )
-            if resp.status_code in (200, 201, 202):
-                logger.info("[post_call] email sent via SendGrid to %d recipients", len(recipients))
-                return True
-            logger.warning("[post_call] SendGrid returned %s: %s", resp.status_code, resp.text[:200])
-            return False
+                message.plain_text_content = text_body
+                sg = SendGridAPIClient(api_key)
+                response = await asyncio.get_event_loop().run_in_executor(None, sg.send, message)
+                if response.status_code in (200, 201, 202):
+                    logger.info("[post_call] email sent via SendGrid to %d recipients", len(recipients))
+                    return True
+                logger.warning("[post_call] SendGrid returned %s", response.status_code)
+                return False
+            except ImportError:
+                logger.warning("[post_call] sendgrid not installed. Run: pip install sendgrid")
 
         # SMTP
         host = email_config.get("host", "smtp.gmail.com")
@@ -733,6 +733,7 @@ async def push_to_webhook(
 async def push_to_gohighlevel(
     *,
     api_key: str,
+    location_id: str,
     lead_data: dict,
     extracted_vars: dict,
     call_summary: str,
@@ -743,29 +744,26 @@ async def push_to_gohighlevel(
 ) -> bool:
     """
     Create/update a GoHighLevel Contact, add a Note, optionally trigger a workflow.
-    API: https://highlevel.stoplight.io/docs/integrations/
+    Uses GHL API v2 (https://services.leadconnectorhq.com).
+    location_id: The GHL sub-account Location ID (required for v2 API calls).
+    Requires: Private Integration Token or OAuth Access Token (Sub-Account scope).
     """
-    base = "https://rest.gohighlevel.com/v1"
+    base = "https://services.leadconnectorhq.com"
     phone = caller_phone or lead_data.get("phone", "")
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
+        "Version": "2023-02-21",
     }
     try:
         async with httpx.AsyncClient(timeout=15, headers=headers) as client:
-            # Search for existing contact by phone
-            contact_id: Optional[str] = None
-            if phone:
-                search_resp = await client.get(f"{base}/contacts/search", params={"phone": phone})
-                if search_resp.status_code == 200:
-                    contacts = search_resp.json().get("contacts", [])
-                    if contacts:
-                        contact_id = contacts[0].get("id")
-
+            # Build contact payload for upsert (GHL v2 native upsert handles create/update)
             contact_payload: dict = {
-                "phone": phone,
+                "locationId": location_id,
                 "source": "VoiceFlow AI Call",
             }
+            if phone:
+                contact_payload["phone"] = phone
             if lead_data.get("name"):
                 parts = (lead_data["name"] or "").split(" ", 1)
                 contact_payload["firstName"] = parts[0]
@@ -775,28 +773,29 @@ async def push_to_gohighlevel(
             if lead_data.get("company"):
                 contact_payload["companyName"] = lead_data["company"]
 
-            # Merge extracted vars as custom fields (GHL accepts arbitrary keys)
-            for k, v in extracted_vars.items():
-                if v is not None:
-                    contact_payload[k] = str(v)
+            # Extracted vars as tags for easy filtering in GHL
+            if extracted_vars:
+                tags = [f"vf_{k}:{str(v)[:40]}" for k, v in extracted_vars.items() if v is not None]
+                if tags:
+                    contact_payload["tags"] = tags[:10]
 
-            if contact_id:
-                await client.put(f"{base}/contacts/{contact_id}", json=contact_payload)
-            else:
-                create_resp = await client.post(f"{base}/contacts/", json=contact_payload)
-                if create_resp.status_code in (200, 201):
-                    contact_id = create_resp.json().get("contact", {}).get("id")
-
-            if not contact_id:
-                logger.warning("[post_call] GHL contact creation failed")
+            # Native upsert — GHL deduplicates by phone/email per location settings
+            upsert_resp = await client.post(f"{base}/contacts/upsert", json=contact_payload)
+            if upsert_resp.status_code not in (200, 201):
+                logger.warning("[post_call] GHL upsert failed: %s %s", upsert_resp.status_code, upsert_resp.text[:200])
                 return False
 
-            # Add a note
+            contact_id = upsert_resp.json().get("contact", {}).get("id")
+            if not contact_id:
+                logger.warning("[post_call] GHL upsert returned no contact id")
+                return False
+
+            # Add a note (v2 path: /contacts/{id}/notes)
             duration_str = f"{duration // 60}m {duration % 60}s" if duration else "n/a"
             note_body = f"VoiceFlow Call\nCall ID: {call_log_id} | Duration: {duration_str}\n\n{call_summary}"
             await client.post(f"{base}/contacts/{contact_id}/notes", json={"body": note_body})
 
-            # Optionally trigger a workflow
+            # Optionally trigger a workflow (v2 path: /contacts/{id}/workflow/{workflowId})
             if workflow_id:
                 await client.post(
                     f"{base}/contacts/{contact_id}/workflow/{workflow_id}",
@@ -967,9 +966,10 @@ async def deliver_post_call(
 
     # GoHighLevel
     ghl = integrations.get("gohighlevel", {})
-    if ghl.get("enabled") and ghl.get("apiKey"):
+    if ghl.get("enabled") and ghl.get("apiKey") and ghl.get("locationId"):
         tasks.append(push_to_gohighlevel(
             api_key=_decr(ghl["apiKey"]),
+            location_id=ghl["locationId"],
             lead_data=lead_data,
             extracted_vars=extracted_vars,
             call_summary=call_summary,

@@ -199,13 +199,16 @@ async def test_integration(
             import httpx
             async with httpx.AsyncClient(timeout=8) as client:
                 r = await client.get(
-                    "https://api.cal.com/v1/event-types",
-                    params={"apiKey": _d(cfg.get("apiKey", ""))},
+                    "https://api.cal.com/v2/event-types",
+                    headers={
+                        "Authorization": f"Bearer {_d(cfg.get('apiKey', ''))}",
+                        "cal-api-version": "2024-06-14",
+                    },
                 )
             ok = r.status_code == 200
             data = r.json() if ok else {}
-            n = len(data.get("event_types", []))
-            detail = f"Cal.com connected — {n} event types"
+            n = len((data.get("data", {}) or {}).get("eventTypeGroups") or data.get("event_types", []))
+            detail = f"Cal.com connected — {n} event type groups"
 
         elif integration_type == "gcal":
             import asyncio, json as _json
@@ -220,14 +223,18 @@ async def test_integration(
 
         elif integration_type == "gohighlevel":
             import httpx
+            location_id = cfg.get("locationId", "")
             async with httpx.AsyncClient(timeout=8) as client:
                 r = await client.get(
-                    "https://rest.gohighlevel.com/v1/contacts/",
-                    headers={"Authorization": f"Bearer {_d(cfg.get('apiKey', ''))}"},
-                    params={"limit": 1},
+                    "https://services.leadconnectorhq.com/contacts/",
+                    headers={
+                        "Authorization": f"Bearer {_d(cfg.get('apiKey', ''))}",
+                        "Version": "2023-02-21",
+                    },
+                    params={"locationId": location_id, "limit": 1},
                 )
             ok = r.status_code == 200
-            detail = f"GHL status: {r.status_code}"
+            detail = f"GHL connected (status: {r.status_code})" if ok else f"GHL status: {r.status_code}"
 
         elif integration_type == "webhook":
             import httpx, json as _json, hmac as _hmac, hashlib as _hs, time as _time
