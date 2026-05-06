@@ -352,3 +352,46 @@ async def add_supervisor_note(
         await r.aclose()
 
     return {"success": True}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# POST /api/live-monitor/calls/{call_sid}/whisper
+# ──────────────────────────────────────────────────────────────────────────────
+
+class WhisperRequest(BaseModel):
+    hint: str
+
+
+@router.post("/calls/{call_sid}/whisper")
+async def inject_whisper_hint(
+    call_sid: str,
+    body: WhisperRequest,
+    auth: AuthContext = Depends(get_auth),
+):
+    """
+    Supervisor whisper: silently inject a hint into the AI agent's next context
+    window so it guides the response without the caller hearing the instruction.
+
+    The hint is stored in Redis with a 90-second TTL and consumed once by the
+    voice_twilio_gather handler on the next speech turn.
+    """
+    r = _redis()
+    try:
+        raw = await r.get(f"call_state:{call_sid}")
+        if not raw:
+            raise HTTPException(404, "Call not found or already ended")
+        state = json.loads(raw)
+        if state.get("tenant_id") != auth.tenant_id:
+            raise HTTPException(403, "Access denied")
+
+        hint = body.hint[:500].strip()
+        if not hint:
+            raise HTTPException(400, "hint must not be empty")
+
+        # TTL of 90s — must be consumed within one voice turn
+        await r.setex(f"whisper_hint:{call_sid}", 90, hint)
+        logger.info("[whisper] supervisor %s injected hint for call %s", auth.user_id, call_sid)
+    finally:
+        await r.aclose()
+
+    return {"success": True, "hint": hint, "ttl_seconds": 90}

@@ -499,6 +499,8 @@ class Campaign(Base):
     # voicemail_action: leave_voicemail | hangup
     voicemailAction: Mapped[str] = mapped_column("voicemailAction", String, default="hangup")
     voicemailMessage: Mapped[Optional[str]] = mapped_column("voicemailMessage", Text, nullable=True)
+    # Webhook called on retry events
+    webhookUrl: Mapped[Optional[str]] = mapped_column("webhookUrl", String, nullable=True)
     # Aggregate counters
     totalContacts: Mapped[int] = mapped_column("totalContacts", Integer, default=0)
     dialedCount: Mapped[int] = mapped_column("dialedCount", Integer, default=0)

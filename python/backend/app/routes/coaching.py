@@ -176,3 +176,168 @@ async def get_coaching_report(
         "avg_impact_score": round(avg_impact, 3) if avg_impact else None,
         "cards": [_card_dict(c) for c in cards[:20]],  # last 20
     }
+
+
+@router.post("/from-recording")
+async def create_coaching_card_from_recording(
+    request: Request,
+    auth: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Create a coaching card manually from a recording review.
+
+    Human supervisors mark a call as Good/Bad via the Recordings UI and submit a note.
+    - "good"  → creates a positive few-shot example (RetrainingExample) for the agent
+    - "bad"   → uses Groq to generate a corrective prompt delta, creates a pending CoachingCard
+
+    Body:
+    {
+      "recording_id": "...",   // or "call_log_id"
+      "call_log_id": "...",
+      "agent_id": "...",
+      "rating": "good" | "bad",
+      "note": "Agent gave wrong refund policy"
+    }
+    """
+    from app.models import CallLog, CallRecording, RetrainingExample, Tenant
+    from app.services.credentials import decrypt_safe
+    from app.config import settings as app_settings
+    import uuid, httpx, json as json_mod
+
+    body = await request.json()
+    recording_id = body.get("recording_id", "")
+    call_log_id = body.get("call_log_id", "") or recording_id
+    agent_id = body.get("agent_id", "")
+    rating = (body.get("rating") or "").lower()
+    note = (body.get("note") or "").strip()[:1000]
+
+    if rating not in ("good", "bad"):
+        return JSONResponse({"error": "rating must be 'good' or 'bad'"}, status_code=400)
+    if not agent_id:
+        return JSONResponse({"error": "agent_id is required"}, status_code=400)
+
+    # Load the call log for transcript
+    call_log = None
+    if call_log_id:
+        log_res = await db.execute(
+            select(CallLog).where(CallLog.id == call_log_id, CallLog.tenantId == auth.tenant_id)
+        )
+        call_log = log_res.scalar_one_or_none()
+
+    transcript_text = ""
+    if call_log:
+        t = call_log.transcript
+        if isinstance(t, str):
+            try:
+                turns = json_mod.loads(t)
+                transcript_text = "\n".join(f"{turn.get('role','?')}: {turn.get('content','')}" for turn in turns[:20])
+            except Exception:
+                transcript_text = t[:1000]
+        elif isinstance(t, list):
+            transcript_text = "\n".join(f"{turn.get('role','?')}: {turn.get('content','')}" for turn in t[:20])
+
+    if rating == "good":
+        # Create a positive RetrainingExample (few-shot)
+        if call_log and transcript_text:
+            # Extract best Q&A pair from transcript
+            turns = []
+            if isinstance(call_log.transcript, list):
+                turns = call_log.transcript
+            elif isinstance(call_log.transcript, str):
+                try:
+                    turns = json_mod.loads(call_log.transcript)
+                except Exception:
+                    pass
+            # Find last user→assistant exchange
+            user_q, agent_a = "", ""
+            for i, turn in enumerate(turns):
+                if turn.get("role") == "user":
+                    user_q = turn.get("content", "")
+                elif turn.get("role") == "assistant" and user_q:
+                    agent_a = turn.get("content", "")
+            if user_q and agent_a:
+                example = RetrainingExample(
+                    id=str(uuid.uuid4()),
+                    tenantId=auth.tenant_id,
+                    agentId=agent_id,
+                    callLogId=call_log_id or None,
+                    userQuery=user_q[:500],
+                    idealResponse=agent_a[:1000],
+                    sourceType="recording_review",
+                    status="approved",
+                    notes=note or "Marked as good example via recording review",
+                    approvedAt=datetime.now(timezone.utc),
+                )
+                db.add(example)
+                await db.commit()
+                return JSONResponse({
+                    "status": "good_example_saved",
+                    "retrainingExampleId": example.id,
+                    "message": "Saved as a few-shot example for the agent.",
+                })
+
+        return JSONResponse({"status": "good_noted", "message": "Noted as a good call."})
+
+    # rating == "bad" — generate a corrective coaching card via LLM
+    tenant_res = await db.execute(select(Tenant).where(Tenant.id == auth.tenant_id))
+    tenant = tenant_res.scalar_one_or_none()
+    groq_key = app_settings.GROQ_API_KEY
+    if tenant and tenant.settings:
+        enc = tenant.settings.get("groqApiKey")
+        if enc:
+            dec = decrypt_safe(enc)
+            if dec and dec.startswith("gsk_"):
+                groq_key = dec
+
+    suggested_delta = note  # fallback: use the note as-is
+    observation_text = note
+
+    if groq_key and transcript_text:
+        try:
+            async with httpx.AsyncClient(timeout=20) as http:
+                resp = await http.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
+                    json={
+                        "model": "llama-3.1-8b-instant",
+                        "messages": [
+                            {"role": "system", "content": "You are an AI call quality expert. Analyze the call and generate a corrective instruction for the agent's prompt."},
+                            {"role": "user", "content": (
+                                f"The following call was marked as BAD by a supervisor.\n"
+                                f"Supervisor note: {note}\n\n"
+                                f"TRANSCRIPT (last 20 turns):\n{transcript_text[:2000]}\n\n"
+                                f"Generate a SHORT corrective instruction (1-3 sentences) to add to the agent's system prompt "
+                                f"to prevent this type of failure in future calls. Be specific and actionable."
+                            )},
+                        ],
+                        "temperature": 0.4,
+                        "max_tokens": 300,
+                    },
+                )
+            if resp.status_code == 200:
+                suggested_delta = resp.json()["choices"][0]["message"]["content"].strip()
+                observation_text = f"Supervisor flagged: {note}" if note else "Flagged via recording review"
+        except Exception:
+            logger.warning("[coaching] LLM correction generation failed — using note as delta")
+
+    card = CoachingCard(
+        id=str(uuid.uuid4()),
+        tenantId=auth.tenant_id,
+        agentId=agent_id,
+        callLogId=call_log_id or None,
+        status="pending",
+        observation=observation_text,
+        suggestedPromptDelta=suggested_delta,
+        impactScore=0.6,
+    )
+    db.add(card)
+    await db.commit()
+
+    return JSONResponse({
+        "status": "coaching_card_created",
+        "coachingCardId": card.id,
+        "suggestedDelta": suggested_delta,
+        "message": "Coaching card created — awaiting admin review before applying.",
+    }, status_code=201)
+

@@ -16,9 +16,11 @@ from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import uuid
+
 from app.database import get_db, AsyncSessionLocal
 from app.auth import AuthContext, get_auth
-from app.models import Agent, CallLog, Tenant
+from app.models import Agent, CallLog, CoachingCard, Tenant
 from app.config import settings
 from app.services.credentials import decrypt_safe
 
@@ -78,6 +80,40 @@ async def handle_inbound_call(agent: Agent, request: Request) -> Response:
 
     agent_name = agent.name or "your AI assistant"
     resp = VoiceResponse()
+
+    # ── Pre-call caller enrichment ────────────────────────────────────────
+    # Fetch caller phone from the inbound request and enrich via OmniCRM / HubSpot / Salesforce.
+    # Store enriched context in Redis so the first gather turn can inject it.
+    call_sid_inbound = ""
+    try:
+        form_data = await request.form()
+        caller_phone_inbound = form_data.get("From", "")
+        call_sid_inbound = form_data.get("CallSid", "")
+        if caller_phone_inbound and call_sid_inbound:
+            from app.services.crm_enrichment_service import enrich_caller, format_crm_context_for_prompt
+            import redis.asyncio as _aioredis
+            async with AsyncSessionLocal() as enrich_db:
+                try:
+                    caller_ctx = await enrich_caller(
+                        tenant_id=agent.tenantId,
+                        phone_number=caller_phone_inbound,
+                        db=enrich_db,
+                    )
+                    if caller_ctx:
+                        ctx_str = await format_crm_context_for_prompt(caller_ctx)
+                        r = _aioredis.Redis(
+                            host=settings.REDIS_HOST, port=settings.REDIS_PORT,
+                            db=2, decode_responses=True,
+                        )
+                        try:
+                            await r.setex(f"caller_context:{call_sid_inbound}", 3600, ctx_str)
+                        finally:
+                            await r.aclose()
+                except Exception:
+                    logger.debug("[gather] caller enrichment error — continuing without context")
+    except Exception:
+        pass
+
     gather = Gather(
         input="dtmf speech",
         action=f"/api/voice/gather/{agent.id}",
@@ -159,7 +195,35 @@ async def voice_gather(
         resp.say("I couldn't process that. Goodbye.", voice="Polly.Joanna")
         resp.hangup()
         return Response(content=str(resp), media_type="application/xml")
+    # ── Supervisor whisper hint + pre-call CRM context ─────────────────────
+    whisper_hint: str | None = None
+    caller_crm_context: str | None = None
+    if call_sid:
+        try:
+            import redis.asyncio as _aioredis
+            r = _aioredis.Redis(
+                host=settings.REDIS_HOST, port=settings.REDIS_PORT,
+                db=2, decode_responses=True,
+            )
+            try:
+                hint_raw = await r.get(f"whisper_hint:{call_sid}")
+                if hint_raw:
+                    whisper_hint = hint_raw
+                    await r.delete(f"whisper_hint:{call_sid}")  # consume once
+                ctx_raw = await r.get(f"caller_context:{call_sid}")
+                if ctx_raw:
+                    caller_crm_context = ctx_raw
+            finally:
+                await r.aclose()
+        except Exception:
+            pass
 
+    # Build effective query — prepend supervisor hint and/or caller CRM context
+    effective_query = speech_result
+    if whisper_hint:
+        effective_query = f"[SUPERVISOR HINT — use this to guide your next response, do not read it aloud: {whisper_hint}]\n{effective_query}"
+    if caller_crm_context:
+        effective_query = f"[CALLER CONTEXT from CRM]: {caller_crm_context}\n[CALLER SAID]: {effective_query}"
     # Run RAG pipeline
     from app.services.rag_service import process_query
     from app.services.voice_tools import get_tools_for_agent, TOOL_REGISTRY, voice_tool_executor
@@ -172,7 +236,7 @@ async def voice_gather(
     answer = "I encountered an error processing your request."
     try:
         rag_result = await process_query(
-            db, agent.tenantId, agent_id, speech_result, f"call-{call_sid}",
+            db, agent.tenantId, agent_id, effective_query, f"call-{call_sid}",
             tools=tools_spec if tools_spec else None,
         )
 
@@ -256,6 +320,97 @@ async def voice_gather(
 
 
 # ── Post-call delivery helper ────────────────────────────────────────────────
+
+async def _generate_coaching_cards(
+    call_log_id: str,
+    analysis: dict,
+    tenant_id: str,
+    agent_id: str,
+) -> None:
+    """
+    Generate CoachingCard rows from post-call analysis.
+    Produces up to 3 specific, actionable coaching cards with suggested prompt deltas.
+    Goal scoring, persona adherence, sentiment trajectory, and hallucination risk
+    are all factored into the card's observation and impact score.
+    """
+    async with AsyncSessionLocal() as db:
+        try:
+            coaching_insights: list = analysis.get("coachingInsights", [])
+            quality_score: int = analysis.get("qualityScore", 7)
+            goal_achieved: bool | None = analysis.get("goalAchieved", None)
+            hallucination_risk: str = analysis.get("hallucinationRisk", "low")
+            missed: list = analysis.get("missedOpportunities", [])
+            sentiment: str = analysis.get("sentiment", "neutral")
+
+            if not coaching_insights and not missed:
+                return  # Nothing actionable
+
+            # Merge insights and missed opportunities, deduplicate
+            all_insights = list(coaching_insights) + [f"Missed opportunity: {m}" for m in missed]
+            all_insights = all_insights[:3]  # cap at 3 cards
+
+            # Compute base impact score: inverse of quality (1=perfect→low impact, 10=terrible→high)
+            base_impact = max(1, 11 - quality_score)
+            # Boost for hallucination risk
+            if hallucination_risk == "high":
+                base_impact = min(10, base_impact + 3)
+            elif hallucination_risk == "medium":
+                base_impact = min(10, base_impact + 1)
+            # Boost if goal not achieved
+            if goal_achieved is False:
+                base_impact = min(10, base_impact + 2)
+
+            cards_created = 0
+            for i, insight in enumerate(all_insights):
+                # Craft a concrete prompt delta from the insight
+                if "hallucin" in insight.lower() or hallucination_risk != "low":
+                    prompt_delta = (
+                        f"\n\n**ACCURACY RULE (added after coaching review)**: "
+                        f"Always say 'I'm not certain, but...' when you lack confidence. "
+                        f"Never fabricate specific facts, prices, or dates. "
+                        f"Insight that triggered this: {insight}"
+                    )
+                elif "goal" in insight.lower() or goal_achieved is False:
+                    prompt_delta = (
+                        f"\n\n**GOAL COMPLETION RULE (added after coaching review)**: "
+                        f"Actively drive conversations toward the goal. "
+                        f"Before ending each call, confirm whether the caller's need was resolved. "
+                        f"Insight: {insight}"
+                    )
+                else:
+                    prompt_delta = (
+                        f"\n\n**IMPROVEMENT (added after coaching review)**: {insight}"
+                    )
+
+                # Observation includes goal scoring and sentiment context
+                observation = insight
+                if i == 0 and goal_achieved is not None:
+                    observation = (
+                        f"[Goal {'ACHIEVED' if goal_achieved else 'NOT ACHIEVED'}, "
+                        f"sentiment: {sentiment}, quality: {quality_score}/10] {insight}"
+                    )
+
+                card = CoachingCard(
+                    id=str(uuid.uuid4()),
+                    tenantId=tenant_id,
+                    agentId=agent_id,
+                    callLogId=call_log_id,
+                    status="pending",
+                    observation=observation,
+                    suggestedPromptDelta=prompt_delta,
+                    impactScore=base_impact,
+                )
+                db.add(card)
+                cards_created += 1
+
+            await db.commit()
+            logger.info(
+                "[coaching] generated %d coaching cards for call %s (quality=%d, goal=%s, hallucination=%s)",
+                cards_created, call_log_id, quality_score, goal_achieved, hallucination_risk,
+            )
+        except Exception:
+            logger.exception("[coaching] failed to generate coaching cards for call %s", call_log_id)
+
 
 async def _run_post_call_delivery(
     *,
@@ -372,8 +527,12 @@ Transcript:
                     await db.commit()
                     logger.info("Post-call analysis completed for call %s", call_log_id)
 
+                    # ── Generate AI Coaching Cards ────────────────────────────
+                    asyncio.create_task(
+                        _generate_coaching_cards(call_log_id, analysis, log.tenantId, log.agentId)
+                    )
+
                     # ── AI Call Coach + CRM delivery ─────────────────────────
-                    # Extends analysis with coaching insights, then pushes to CRM/Slack
                     asyncio.create_task(
                         _run_post_call_delivery(
                             tenant_id=log.tenantId,

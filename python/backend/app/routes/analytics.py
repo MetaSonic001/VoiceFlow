@@ -1,17 +1,20 @@
 """
 /analytics routes — mirrors Express src/routes/analytics.ts
 """
+import csv
+import io
 import math
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.auth import AuthContext, get_auth
-from app.models import Agent, CallLog, Document
+from app.models import Agent, CallLog, Campaign, Document
 
 router = APIRouter()
 
@@ -266,3 +269,437 @@ async def usage(auth: AuthContext = Depends(get_auth), db: AsyncSession = Depend
         "callLogs": logs_count,
         "documents": docs_count,
     }
+
+
+@router.get("/resolution-stats")
+async def resolution_stats(
+    timeRange: str = "7d",
+    agentId: Optional[str] = None,
+    auth: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Resolution rate, escalation rate and goal achievement from call analysis JSON."""
+    days = _days_from_range(timeRange)
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    where = [CallLog.tenantId == auth.tenant_id, CallLog.startedAt >= since, CallLog.analysis.isnot(None)]
+    if agentId and agentId != "all":
+        where.append(CallLog.agentId == agentId)
+
+    logs_r = await db.execute(select(CallLog.analysis, CallLog.durationSeconds).where(*where))
+    rows = logs_r.all()
+
+    total = len(rows)
+    resolved = 0
+    escalated = 0
+    total_duration = 0
+    quality_scores: list[float] = []
+
+    for analysis, dur in rows:
+        if not isinstance(analysis, dict):
+            continue
+        if analysis.get("goalAchieved") is True:
+            resolved += 1
+        if analysis.get("escalated") is True or analysis.get("transferredToHuman") is True:
+            escalated += 1
+        if dur:
+            total_duration += dur
+        qs = analysis.get("qualityScore")
+        if qs is not None:
+            try:
+                quality_scores.append(float(qs))
+            except (TypeError, ValueError):
+                pass
+
+    resolution_rate = round(resolved / total * 100, 1) if total > 0 else None
+    escalation_rate = round(escalated / total * 100, 1) if total > 0 else None
+    avg_quality = round(sum(quality_scores) / len(quality_scores), 2) if quality_scores else None
+    avg_duration = round(total_duration / total, 1) if total > 0 else None
+
+    return {
+        "totalCalls": total,
+        "resolvedCalls": resolved,
+        "escalatedCalls": escalated,
+        "resolutionRate": resolution_rate,
+        "escalationRate": escalation_rate,
+        "avgQualityScore": avg_quality,
+        "avgDurationSeconds": avg_duration,
+        "timeRange": timeRange,
+    }
+
+
+@router.get("/top-intents")
+async def top_intents(
+    timeRange: str = "7d",
+    agentId: Optional[str] = None,
+    limit: int = Query(default=10, le=50),
+    auth: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Top N intents aggregated from call analysis JSON."""
+    days = _days_from_range(timeRange)
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    where = [CallLog.tenantId == auth.tenant_id, CallLog.startedAt >= since, CallLog.analysis.isnot(None)]
+    if agentId and agentId != "all":
+        where.append(CallLog.agentId == agentId)
+
+    logs_r = await db.execute(select(CallLog.analysis).where(*where))
+    rows = logs_r.scalars().all()
+
+    intent_counts: dict[str, int] = {}
+    for analysis in rows:
+        if not isinstance(analysis, dict):
+            continue
+        intent = analysis.get("intent") or analysis.get("primaryIntent")
+        if intent and isinstance(intent, str):
+            intent_counts[intent] = intent_counts.get(intent, 0) + 1
+
+    sorted_intents = sorted(intent_counts.items(), key=lambda x: x[1], reverse=True)
+    total = sum(intent_counts.values())
+
+    return {
+        "topIntents": [
+            {
+                "intent": name,
+                "count": count,
+                "percentage": round(count / total * 100, 1) if total > 0 else 0,
+            }
+            for name, count in sorted_intents[:limit]
+        ],
+        "totalClassified": total,
+        "timeRange": timeRange,
+    }
+
+
+@router.get("/failure-modes")
+async def failure_modes(
+    timeRange: str = "7d",
+    agentId: Optional[str] = None,
+    auth: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Common failure patterns from missedOpportunities and hallucinations in analysis JSON."""
+    days = _days_from_range(timeRange)
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    where = [CallLog.tenantId == auth.tenant_id, CallLog.startedAt >= since, CallLog.analysis.isnot(None)]
+    if agentId and agentId != "all":
+        where.append(CallLog.agentId == agentId)
+
+    logs_r = await db.execute(select(CallLog.analysis).where(*where))
+    rows = logs_r.scalars().all()
+
+    failed_calls = 0
+    hallucination_risk_calls = 0
+    missed_opportunity_counts: dict[str, int] = {}
+
+    total = 0
+    for analysis in rows:
+        if not isinstance(analysis, dict):
+            continue
+        total += 1
+        if analysis.get("goalAchieved") is False:
+            failed_calls += 1
+        if analysis.get("hallucinationRisk") is True:
+            hallucination_risk_calls += 1
+        missed = analysis.get("missedOpportunities", [])
+        if isinstance(missed, list):
+            for item in missed:
+                if isinstance(item, str):
+                    missed_opportunity_counts[item] = missed_opportunity_counts.get(item, 0) + 1
+
+    sorted_missed = sorted(missed_opportunity_counts.items(), key=lambda x: x[1], reverse=True)
+
+    return {
+        "totalAnalyzed": total,
+        "failedCalls": failed_calls,
+        "failureRate": round(failed_calls / total * 100, 1) if total > 0 else None,
+        "hallucinationRiskCalls": hallucination_risk_calls,
+        "hallucinationRate": round(hallucination_risk_calls / total * 100, 1) if total > 0 else None,
+        "topMissedOpportunities": [
+            {"description": desc, "count": count}
+            for desc, count in sorted_missed[:10]
+        ],
+        "timeRange": timeRange,
+    }
+
+
+@router.get("/cost-estimate")
+async def cost_estimate(
+    timeRange: str = "7d",
+    agentId: Optional[str] = None,
+    auth: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Estimated cost per call modeled from duration × token cost heuristics."""
+    # Cost model (approximate USD):
+    #   STT: $0.006/min (Groq Whisper turbo)
+    #   LLM: $0.002/min of conversation (Llama 3.3 70B at ~500 tokens/min, $0.0039/1K)
+    #   TTS: $0.004/min (Sarvam / ElevenLabs estimate)
+    #   Telephony: $0.0085/min (Twilio)
+    # Total: ~$0.0205 / minute
+    COST_PER_SECOND = 0.0205 / 60
+
+    days = _days_from_range(timeRange)
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    where = [
+        CallLog.tenantId == auth.tenant_id,
+        CallLog.startedAt >= since,
+        CallLog.durationSeconds.isnot(None),
+    ]
+    if agentId and agentId != "all":
+        where.append(CallLog.agentId == agentId)
+
+    r = await db.execute(
+        select(
+            func.count(CallLog.id),
+            func.sum(CallLog.durationSeconds),
+            func.avg(CallLog.durationSeconds),
+            func.min(CallLog.durationSeconds),
+            func.max(CallLog.durationSeconds),
+        ).where(*where)
+    )
+    row = r.one()
+    count, total_sec, avg_sec, min_sec, max_sec = row
+    count = count or 0
+    total_sec = float(total_sec or 0)
+    avg_sec = float(avg_sec or 0)
+
+    total_cost = round(total_sec * COST_PER_SECOND, 4)
+    avg_cost = round(avg_sec * COST_PER_SECOND, 4)
+
+    return {
+        "totalCalls": count,
+        "totalDurationSeconds": int(total_sec),
+        "avgDurationSeconds": round(avg_sec, 1),
+        "estimatedTotalCostUSD": total_cost,
+        "estimatedAvgCostPerCallUSD": avg_cost,
+        "costModel": {
+            "sttPerMin": 0.006,
+            "llmPerMin": 0.002,
+            "ttsPerMin": 0.004,
+            "telephonyPerMin": 0.0085,
+            "totalPerMin": 0.0205,
+        },
+        "timeRange": timeRange,
+    }
+
+
+@router.get("/sentiment-trend")
+async def sentiment_trend(
+    timeRange: str = "7d",
+    agentId: Optional[str] = None,
+    auth: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Daily average sentiment score (from CallLog.analysis.sentimentScore) for trend line."""
+    days = _days_from_range(timeRange)
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    where = [
+        CallLog.tenantId == auth.tenant_id,
+        CallLog.startedAt >= since,
+        CallLog.analysis.isnot(None),
+    ]
+    if agentId and agentId != "all":
+        where.append(CallLog.agentId == agentId)
+
+    result = await db.execute(select(CallLog).where(*where).order_by(CallLog.startedAt))
+    logs = result.scalars().all()
+
+    # Bucket by day
+    buckets: dict[str, list[float]] = {}
+    for log in logs:
+        analysis = log.analysis or {}
+        score = analysis.get("sentimentScore")
+        if score is None:
+            # Derive from rating: 1=positive(0.8), -1=negative(0.2), 0=neutral(0.5)
+            rating = log.rating or 0
+            score = 0.8 if rating == 1 else (0.2 if rating == -1 else 0.5)
+        day_key = log.startedAt.strftime("%Y-%m-%d") if log.startedAt else "unknown"
+        buckets.setdefault(day_key, []).append(float(score))
+
+    trend = [
+        {"date": day, "avgSentiment": round(sum(scores) / len(scores), 3), "callCount": len(scores)}
+        for day, scores in sorted(buckets.items())
+    ]
+    return {"trend": trend, "timeRange": timeRange}
+
+
+@router.get("/handle-time-histogram")
+async def handle_time_histogram(
+    timeRange: str = "7d",
+    agentId: Optional[str] = None,
+    buckets: int = Query(10, ge=3, le=30),
+    auth: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Duration distribution histogram — how many calls fall into each duration bucket."""
+    days = _days_from_range(timeRange)
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    where = [
+        CallLog.tenantId == auth.tenant_id,
+        CallLog.startedAt >= since,
+        CallLog.durationSeconds.isnot(None),
+        CallLog.durationSeconds > 0,
+    ]
+    if agentId and agentId != "all":
+        where.append(CallLog.agentId == agentId)
+
+    result = await db.execute(
+        select(CallLog.durationSeconds).where(*where)
+    )
+    durations = [row[0] for row in result.all()]
+
+    if not durations:
+        return {"histogram": [], "timeRange": timeRange}
+
+    min_d, max_d = min(durations), max(durations)
+    if min_d == max_d:
+        return {"histogram": [{"bucketLabel": f"{min_d}s", "count": len(durations), "minSec": min_d, "maxSec": max_d}], "timeRange": timeRange}
+
+    bucket_size = math.ceil((max_d - min_d) / buckets)
+    hist: dict[int, int] = {}
+    for d in durations:
+        bucket_idx = (d - min_d) // bucket_size
+        hist[bucket_idx] = hist.get(bucket_idx, 0) + 1
+
+    histogram = []
+    for i in range(buckets):
+        lo = min_d + i * bucket_size
+        hi = lo + bucket_size
+        histogram.append({
+            "bucketLabel": f"{lo}–{hi}s",
+            "minSec": lo,
+            "maxSec": hi,
+            "count": hist.get(i, 0),
+        })
+
+    # Trim trailing empty buckets
+    while histogram and histogram[-1]["count"] == 0:
+        histogram.pop()
+
+    return {
+        "histogram": histogram,
+        "totalCalls": len(durations),
+        "avgSec": round(sum(durations) / len(durations), 1),
+        "medianSec": sorted(durations)[len(durations) // 2],
+        "timeRange": timeRange,
+    }
+
+
+@router.get("/campaign-roi")
+async def campaign_roi(
+    timeRange: str = "30d",
+    auth: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Campaign ROI: calls attempted, answered, resolved + estimated cost per resolution."""
+    COST_PER_SECOND = 0.0205 / 60
+
+    days = _days_from_range(timeRange)
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+
+    camps_result = await db.execute(
+        select(Campaign).where(
+            Campaign.tenantId == auth.tenant_id,
+            Campaign.createdAt >= since,
+        ).order_by(Campaign.createdAt.desc()).limit(50)
+    )
+    campaigns = camps_result.scalars().all()
+
+    rows = []
+    for camp in campaigns:
+        # Get call logs for this campaign via agentId + createdAt range
+        # (campaign contacts map to call logs via callerPhone + agentId)
+        logs_result = await db.execute(
+            select(
+                func.count(CallLog.id),
+                func.sum(CallLog.durationSeconds),
+            ).where(
+                CallLog.agentId == camp.agentId,
+                CallLog.tenantId == auth.tenant_id,
+                CallLog.startedAt >= (camp.createdAt or since),
+            )
+        )
+        row = logs_result.one()
+        total_calls, total_sec = (row[0] or 0), float(row[1] or 0)
+        total_cost = round(total_sec * COST_PER_SECOND, 4)
+
+        # Count resolved calls via analysis.goalAchieved
+        resolved_result = await db.execute(
+            select(func.count(CallLog.id)).where(
+                CallLog.agentId == camp.agentId,
+                CallLog.tenantId == auth.tenant_id,
+                CallLog.startedAt >= (camp.createdAt or since),
+                CallLog.analysis["goalAchieved"].as_boolean() == True,
+            )
+        )
+        resolved = resolved_result.scalar() or 0
+        cost_per_resolved = round(total_cost / resolved, 4) if resolved else None
+
+        rows.append({
+            "campaignId": camp.id,
+            "campaignName": camp.name,
+            "status": camp.status,
+            "totalContacts": camp.totalContacts or 0,
+            "callsAttempted": total_calls,
+            "callsResolved": resolved,
+            "resolutionRate": round(resolved / total_calls, 3) if total_calls else 0,
+            "estimatedCostUSD": total_cost,
+            "costPerResolutionUSD": cost_per_resolved,
+        })
+
+    return {"campaigns": rows, "timeRange": timeRange}
+
+
+@router.get("/export.csv")
+async def export_csv(
+    timeRange: str = "7d",
+    agentId: Optional[str] = None,
+    auth: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Export call log analytics to CSV for tenant reporting."""
+    days = _days_from_range(timeRange)
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    where = [
+        CallLog.tenantId == auth.tenant_id,
+        CallLog.startedAt >= since,
+    ]
+    if agentId and agentId != "all":
+        where.append(CallLog.agentId == agentId)
+
+    result = await db.execute(
+        select(CallLog).where(*where).order_by(CallLog.startedAt.desc()).limit(5000)
+    )
+    logs = result.scalars().all()
+
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=[
+        "id", "agentId", "callerPhone", "type", "status",
+        "durationSeconds", "startedAt", "rating",
+        "sentiment", "goalAchieved", "intent", "summary",
+    ])
+    writer.writeheader()
+    for log in logs:
+        analysis = log.analysis or {}
+        writer.writerow({
+            "id": log.id,
+            "agentId": log.agentId,
+            "callerPhone": log.callerPhone or "",
+            "type": log.type or "voice",
+            "status": log.status or "completed",
+            "durationSeconds": log.durationSeconds or 0,
+            "startedAt": log.startedAt.isoformat() if log.startedAt else "",
+            "rating": log.rating or 0,
+            "sentiment": analysis.get("sentiment", "neutral"),
+            "goalAchieved": analysis.get("goalAchieved", False),
+            "intent": analysis.get("intent", ""),
+            "summary": (analysis.get("summary") or "")[:200],
+        })
+
+    output.seek(0)
+    filename = f"voiceflow_calls_{timeRange}_{datetime.now(timezone.utc).strftime('%Y%m%d')}.csv"
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )

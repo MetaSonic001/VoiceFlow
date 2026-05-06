@@ -470,6 +470,107 @@ def analytics_overview(request):
 
 
 @login_required
+def analytics_resolution_stats(request):
+    try:
+        return JsonResponse(get_client(request)._get(
+            "/analytics/resolution-stats",
+            params={"timeRange": request.GET.get("timeRange", "7d"), "agentId": request.GET.get("agentId", "")},
+        ))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
+def analytics_top_intents(request):
+    try:
+        return JsonResponse(get_client(request)._get(
+            "/analytics/top-intents",
+            params={"timeRange": request.GET.get("timeRange", "7d"), "limit": request.GET.get("limit", "10"), "agentId": request.GET.get("agentId", "")},
+        ))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
+def analytics_failure_modes(request):
+    try:
+        return JsonResponse(get_client(request)._get(
+            "/analytics/failure-modes",
+            params={"timeRange": request.GET.get("timeRange", "7d"), "agentId": request.GET.get("agentId", "")},
+        ))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
+def analytics_cost_estimate(request):
+    try:
+        return JsonResponse(get_client(request)._get(
+            "/analytics/cost-estimate",
+            params={"timeRange": request.GET.get("timeRange", "7d"), "agentId": request.GET.get("agentId", "")},
+        ))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
+def analytics_sentiment_trend(request):
+    try:
+        return JsonResponse(get_client(request)._get(
+            "/analytics/sentiment-trend",
+            params={"timeRange": request.GET.get("timeRange", "7d"), "agentId": request.GET.get("agentId", "")},
+        ))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
+def analytics_handle_time(request):
+    try:
+        return JsonResponse(get_client(request)._get(
+            "/analytics/handle-time-histogram",
+            params={"timeRange": request.GET.get("timeRange", "7d"), "agentId": request.GET.get("agentId", "")},
+        ))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
+def analytics_campaign_roi(request):
+    try:
+        return JsonResponse(get_client(request)._get(
+            "/analytics/campaign-roi",
+            params={"timeRange": request.GET.get("timeRange", "30d")},
+        ))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
+def analytics_export_csv(request):
+    import requests as req_lib
+    try:
+        client = get_client(request)
+        params = {"timeRange": request.GET.get("timeRange", "7d")}
+        if request.GET.get("agentId"):
+            params["agentId"] = request.GET["agentId"]
+        resp = req_lib.get(
+            client._url("/analytics/export.csv"),
+            headers=client._headers(),
+            params=params,
+            timeout=30,
+        )
+        from django.http import HttpResponse
+        return HttpResponse(
+            resp.content,
+            content_type="text/csv",
+            headers={"Content-Disposition": resp.headers.get("Content-Disposition", "attachment; filename=calls.csv")},
+        )
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
 def call_logs_api(request):
     try:
         return JsonResponse(get_client(request).get_call_logs(
@@ -987,6 +1088,28 @@ def recording_download(request, recording_id):
 # ── Contacts (OmniCRM) ────────────────────────────────────────────────
 
 @login_required
+@require_http_methods(["POST"])
+def contacts_import_csv(request):
+    """Upload CSV to bulk-import/upsert contacts."""
+    try:
+        import requests as _req
+        from django.conf import settings as _settings
+        client = get_client(request)
+        files = {"file": (request.FILES["file"].name, request.FILES["file"].read(), "text/csv")}
+        # Strip Content-Type so requests can set multipart boundary correctly
+        headers = {k: v for k, v in client._headers.items() if k.lower() != "content-type"}
+        r = _req.post(
+            f"{_settings.BACKEND_API_URL}/api/contacts/import/",
+            files=files,
+            headers=headers,
+            timeout=60,
+        )
+        return JsonResponse(r.json(), status=r.status_code)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
 @require_http_methods(["GET", "POST"])
 def contacts_list(request):
     client = get_client(request)
@@ -1029,6 +1152,18 @@ def contact_note(request, contact_id):
 
 
 # ── Coaching Cards ────────────────────────────────────────────────────
+
+@login_required
+@require_http_methods(["POST"])
+def coaching_from_recording(request):
+    """Create a coaching card (bad) or few-shot example (good) from a recording review."""
+    try:
+        import json as _json
+        body = _json.loads(request.body)
+        return JsonResponse(get_client(request)._post("/coaching/from-recording", body), status=201)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
 
 @login_required
 @require_http_methods(["GET"])
@@ -1075,6 +1210,18 @@ def coaching_reject(request, card_id):
 def coaching_report(request, agent_id):
     try:
         return JsonResponse(get_client(request).get_coaching_report(agent_id))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
+@require_http_methods(["POST"])
+def agent_revise(request, agent_id):
+    """POST /api/agents/{agent_id}/revise — per-prompt revision with diff preview."""
+    try:
+        import json as _json
+        body = _json.loads(request.body)
+        return JsonResponse(get_client(request)._post(f"/agents/{agent_id}/revise", body))
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
@@ -1474,6 +1621,16 @@ def live_monitor_note(request, call_sid):
         return JsonResponse({"error": str(e)}, status=400)
 
 
+@login_required
+@require_http_methods(["POST"])
+def live_monitor_whisper(request, call_sid):
+    try:
+        body = _json_body(request)
+        return JsonResponse(get_client(request).live_monitor_whisper(call_sid, body.get("hint", "")))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
 # ── Speaker Verification (Voice Biometrics) ───────────────────────────────────
 
 @login_required
@@ -1538,3 +1695,191 @@ def speaker_verification_delete(request, voiceprint_id):
         return JsonResponse(get_client(request).delete_voiceprint(voiceprint_id))
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)
+
+
+# ── Background Ambient Sound ──────────────────────────────────────────────────
+
+@login_required
+def background_sound_types(request):
+    try:
+        return JsonResponse(get_client(request)._get("/api/background-sound/types"))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
+def background_sound_config(request, agent_id):
+    try:
+        client = get_client(request)
+        if request.method == "PUT":
+            import json as _json
+            body = _json.loads(request.body)
+            return JsonResponse(client._put(f"/api/background-sound/{agent_id}", json=body))
+        return JsonResponse(client._get(f"/api/background-sound/{agent_id}"))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+# ── SIP Trunking ──────────────────────────────────────────────────────────────
+
+@login_required
+def sip_trunks_list(request):
+    try:
+        client = get_client(request)
+        if request.method == "POST":
+            import json as _json
+            return JsonResponse(client._post("/api/sip-trunking/trunks", json=_json.loads(request.body)))
+        return JsonResponse(client._get("/api/sip-trunking/trunks"))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
+def sip_trunk_detail(request, trunk_id):
+    try:
+        client = get_client(request)
+        if request.method == "DELETE":
+            return JsonResponse(client._delete(f"/api/sip-trunking/trunks/{trunk_id}"))
+        return JsonResponse(client._get(f"/api/sip-trunking/trunks/{trunk_id}"))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
+def sip_trunk_test(request, trunk_id):
+    try:
+        return JsonResponse(get_client(request)._post(f"/api/sip-trunking/trunks/{trunk_id}/test", json={}))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
+def sip_webhook_uri(request, agent_id):
+    try:
+        return JsonResponse(get_client(request)._get(f"/api/sip-trunking/webhook-uri/{agent_id}"))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+# ── Widget (public endpoints — no login_required) ─────────────────────────────
+
+def widget_embed_js(request, agent_id):
+    """Proxy the embeddable JS widget file; passes branding query params to backend."""
+    import requests as _req
+    from django.http import HttpResponse
+    from django.conf import settings as _settings
+    qs = request.GET.urlencode()
+    url = f"{_settings.BACKEND_API_URL}/api/widget/{agent_id}/embed.js"
+    if qs:
+        url += "?" + qs
+    try:
+        r = _req.get(url, timeout=10)
+        return HttpResponse(r.content, content_type="application/javascript", status=r.status_code)
+    except Exception as e:
+        return HttpResponse(f"console.error('VoiceFlow proxy error');", content_type="application/javascript", status=502)
+
+
+def widget_sessions(request, agent_id):
+    """Create a new widget chat session — public."""
+    try:
+        import json as _json
+        import requests as _req
+        from django.conf import settings as _settings
+        body = _json.loads(request.body) if request.body else {}
+        r = _req.post(f"{_settings.BACKEND_API_URL}/api/widget/{agent_id}/sessions", json=body, timeout=10)
+        return JsonResponse(r.json(), status=r.status_code)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=502)
+
+
+def widget_session_message(request, agent_id, session_id):
+    """Send a chat message in a widget session — public."""
+    try:
+        import json as _json
+        import requests as _req
+        from django.conf import settings as _settings
+        body = _json.loads(request.body) if request.body else {}
+        r = _req.post(
+            f"{_settings.BACKEND_API_URL}/api/widget/{agent_id}/sessions/{session_id}/message",
+            json=body, timeout=30,
+        )
+        return JsonResponse(r.json(), status=r.status_code)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=502)
+
+
+def widget_call_request(request, agent_id):
+    """Request a callback from the widget — public."""
+    try:
+        import json as _json
+        import requests as _req
+        from django.conf import settings as _settings
+        body = _json.loads(request.body) if request.body else {}
+        r = _req.post(f"{_settings.BACKEND_API_URL}/api/widget/{agent_id}/call-request", json=body, timeout=10)
+        return JsonResponse(r.json(), status=r.status_code)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=502)
+
+
+# ── CRM Integration Settings ──────────────────────────────────────────────────
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def crm_field_mapping(request):
+    """GET/POST the CRM field mapping config for this tenant."""
+    try:
+        client = get_client(request)
+        if request.method == "POST":
+            return JsonResponse(client._post("/crm/field-mapping", _json_body(request)))
+        return JsonResponse(client._get("/crm/field-mapping"))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
+@require_http_methods(["GET"])
+def crm_lookup(request):
+    """Look up enriched contact data by phone number from the connected CRM."""
+    try:
+        phone = request.GET.get("phone", "")
+        return JsonResponse(get_client(request)._get(f"/crm/lookup", params={"phone": phone}))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+def crm_hubspot_callback(request):
+    """Proxy the HubSpot OAuth callback to the backend (no login required — OAuth flow)."""
+    import requests as _req
+    from django.http import HttpResponseRedirect
+    from django.conf import settings as _settings
+    qs = request.GET.urlencode()
+    try:
+        # Let backend handle code exchange and return a redirect
+        r = _req.get(
+            f"{_settings.BACKEND_API_URL}/api/crm/hubspot/callback?" + qs,
+            allow_redirects=False, timeout=20,
+        )
+        if r.status_code in (301, 302, 303, 307, 308):
+            return HttpResponseRedirect(r.headers.get("Location", "/dashboard/crm-settings/"))
+        return HttpResponseRedirect("/dashboard/crm-settings/?hs_connected=1")
+    except Exception:
+        return HttpResponseRedirect("/dashboard/crm-settings/?error=proxy_error")
+
+
+def crm_salesforce_callback(request):
+    """Proxy the Salesforce OAuth callback to the backend."""
+    import requests as _req
+    from django.http import HttpResponseRedirect
+    from django.conf import settings as _settings
+    qs = request.GET.urlencode()
+    try:
+        r = _req.get(
+            f"{_settings.BACKEND_API_URL}/api/crm/salesforce/callback?" + qs,
+            allow_redirects=False, timeout=20,
+        )
+        if r.status_code in (301, 302, 303, 307, 308):
+            return HttpResponseRedirect(r.headers.get("Location", "/dashboard/crm-settings/"))
+        return HttpResponseRedirect("/dashboard/crm-settings/?sf_connected=1")
+    except Exception:
+        return HttpResponseRedirect("/dashboard/crm-settings/?error=proxy_error")
+

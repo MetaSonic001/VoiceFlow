@@ -23,6 +23,7 @@ from collections.abc import AsyncGenerator
 from typing import Any
 
 from app.services.call_state import CallState, CallStateManager
+from app.services.semantic_vad import is_turn_complete, get_min_silence_ms
 
 logger = logging.getLogger("voiceflow.orchestrator")
 
@@ -98,6 +99,8 @@ class StreamingOrchestrator:
         prefs: dict = agent.llmPreferences or {}
         stt_engine: str = prefs.get("sttEngine", "faster-whisper")
         tts_engine: str = prefs.get("ttsEngine", "kokoro")
+        # Semantic VAD sensitivity: high=~240ms, medium=~480ms, low=~800ms silence gate
+        turn_sensitivity: str = prefs.get("turnDetectionSensitivity", "medium")
         tts_voice_id: str = "af_sky"
         cfg = getattr(agent, "configuration", None)
         if cfg and cfg.voiceId:
@@ -120,6 +123,7 @@ class StreamingOrchestrator:
                 stt_engine=stt_engine,
                 tts_engine=tts_engine,
                 tts_voice_id=tts_voice_id,
+                turn_sensitivity=turn_sensitivity,
             ):
                 yield event
         finally:
@@ -156,11 +160,22 @@ class StreamingOrchestrator:
         stt_engine: str,
         tts_engine: str,
         tts_voice_id: str,
+        turn_sensitivity: str = "medium",
     ) -> AsyncGenerator[dict, None]:
         """
         Runs the listen → transcribe → think → speak loop indefinitely
         until audio_queue is closed (sentinel received) or a timeout fires.
         """
+        # Sensitivity to base silence-frame threshold mapping (20 ms / frame):
+        #   high   → 12 frames (~240 ms) — snappy Q&A bots
+        #   medium → 24 frames (~480 ms) — default, balanced
+        #   low    → 40 frames (~800 ms) — complex queries, thinking callers
+        _SENSITIVITY_FRAMES = {"high": 12, "medium": 24, "low": 40}
+        base_silence_frames: int = _SENSITIVITY_FRAMES.get(turn_sensitivity, _SILENCE_FRAMES_THRESHOLD)
+
+        # Track last assistant-turn text to adapt silence threshold dynamically.
+        _last_transcript: str = ""
+
         # A chunk that was dequeued during barge-in handling and needs to start
         # the next listening phase.
         pending_chunk: bytes | None = None
@@ -169,6 +184,12 @@ class StreamingOrchestrator:
             # ── Phase 1: LISTENING ────────────────────────────────────────────
             await self.state.transition(call_sid, CallState.LISTENING)
             yield {"type": "state", "state": "listening"}
+
+            # Compute adaptive silence threshold from last transcript via semantic VAD
+            semantic_ms = get_min_silence_ms(_last_transcript)
+            semantic_frames = max(12, semantic_ms // 20)
+            # Use the more permissive of the two (don't cut off callers)
+            dyn_silence_threshold = max(base_silence_frames, semantic_frames)
 
             pcm_buffer = bytearray()
             silence_frames = 0
@@ -204,7 +225,7 @@ class StreamingOrchestrator:
                 else:
                     silence_frames = 0
 
-                if silence_frames >= _SILENCE_FRAMES_THRESHOLD and len(pcm_buffer) > 0:
+                if silence_frames >= dyn_silence_threshold and len(pcm_buffer) > 0:
                     break  # end-of-utterance detected
 
             utterance = bytes(pcm_buffer)
@@ -224,6 +245,8 @@ class StreamingOrchestrator:
                         tts_voice_id=tts_voice_id,
                     ):
                         yield event
+                        if event.get("type") == "text":
+                            _last_transcript = event.get("content", "")
                 yield {"type": "done"}
                 return
 
@@ -246,6 +269,8 @@ class StreamingOrchestrator:
                 tts_voice_id=tts_voice_id,
             ):
                 yield event
+                if event.get("type") == "text":
+                    _last_transcript = event.get("content", "")
                 if event.get("type") == "interrupt":
                     interrupted = True
                     pending_chunk_out = event.get("_chunk")
@@ -276,12 +301,20 @@ class StreamingOrchestrator:
             utterance,
             sample_rate=16000,
             engine=stt_engine,
+            call_sid=call_sid,  # enables mid-call language switching via Redis
         )
         if not transcript:
             logger.debug("[orchestrator] empty transcript call=%s", call_sid)
             return
 
         yield {"type": "text", "content": transcript}
+
+        # Semantic turn completeness: update last_transcript for next silence threshold
+        # We store it on the orchestrator so _pipeline_loop can read it via nonlocal
+        # Actually we can't easily pass back to the loop here, so we check completeness
+        # and log it — the adaptive threshold runs on the NEXT utterance via _last_transcript
+        if not await is_turn_complete(transcript):
+            logger.debug("[orchestrator] semantic VAD: transcript may be incomplete call=%s", call_sid)
 
         # ── Thinking / Streaming RAG ──────────────────────────────────────────
         await self.state.transition(call_sid, CallState.THINKING)

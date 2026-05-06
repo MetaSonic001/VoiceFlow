@@ -664,6 +664,9 @@ class BackendClient:
     def live_monitor_note(self, call_sid: str, note: str):
         return self._post(f"/api/live-monitor/calls/{call_sid}/note", json={"note": note})
 
+    def live_monitor_whisper(self, call_sid: str, hint: str):
+        return self._post(f"/api/live-monitor/calls/{call_sid}/whisper", json={"hint": hint})
+
     # ── Speaker Verification (Voice Biometrics) ─────────────────────────────
     def list_voiceprints(self):
         return self._get("/api/speaker-verification/")

@@ -15,11 +15,13 @@ POST   /api/contacts/{contact_id}/note    — add a note to a contact
 """
 from __future__ import annotations
 
+import csv
+import io
 import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, UploadFile, File
 from fastapi.responses import JSONResponse
 from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -231,3 +233,77 @@ async def add_note(
     contact.updatedAt = datetime.now(timezone.utc)  # type: ignore[assignment]
     await db.commit()
     return {"note": new_entry, "notes": contact.notes}
+
+
+# ── CSV Import ────────────────────────────────────────────────────────────────
+
+@router.post("/import/")
+async def import_contacts_csv(
+    file: UploadFile = File(...),
+    auth: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Bulk import contacts from a CSV file.
+
+    Required column: phone (or phoneNumber).
+    Optional columns: name, email, company, intentLevel, tags, notes.
+
+    If a contact with that phone number already exists for this tenant it is
+    updated rather than duplicated.
+    """
+    content = await file.read()
+    try:
+        text = content.decode("utf-8-sig")  # handle optional BOM
+    except UnicodeDecodeError:
+        text = content.decode("latin-1")
+
+    reader = csv.DictReader(io.StringIO(text))
+    if not reader.fieldnames:
+        return JSONResponse({"error": "Empty or invalid CSV"}, status_code=400)
+
+    # Normalise header names to camelCase equivalents
+    headers = [h.strip().lower().replace(" ", "_") for h in reader.fieldnames]
+    phone_col = next((h for h in headers if h in ("phone", "phonenumber", "phone_number")), None)
+    if not phone_col:
+        return JSONResponse({"error": "CSV must have a 'phone' column"}, status_code=400)
+
+    col_map = {headers[i]: reader.fieldnames[i] for i in range(len(headers))}  # normalised → original
+
+    created = updated = skipped = 0
+    now = datetime.now(timezone.utc)
+
+    for raw_row in reader:
+        row = {k.strip().lower().replace(" ", "_"): (v or "").strip() for k, v in raw_row.items()}
+        phone = row.get(phone_col, "").strip()
+        if not phone:
+            skipped += 1
+            continue
+
+        existing = (await db.execute(
+            select(Contact).where(Contact.tenantId == auth.tenant_id, Contact.phoneNumber == phone)
+        )).scalar_one_or_none()
+
+        if existing:
+            contact = existing
+            updated += 1
+        else:
+            contact = Contact(tenantId=auth.tenant_id, phoneNumber=phone, createdAt=now)
+            db.add(contact)
+            created += 1
+
+        for field, col in (
+            ("name",         col_map.get("name")),
+            ("email",        col_map.get("email")),
+            ("company",      col_map.get("company")),
+            ("intentLevel",  col_map.get("intentlevel") or col_map.get("intent_level")),
+            ("tags",         col_map.get("tags")),
+            ("notes",        col_map.get("notes")),
+        ):
+            if col and raw_row.get(col, "").strip():
+                setattr(contact, field, raw_row[col].strip())
+
+        contact.updatedAt = now
+
+    await db.commit()
+    return {"imported": created, "updated": updated, "skipped": skipped}

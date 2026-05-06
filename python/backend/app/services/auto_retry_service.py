@@ -25,6 +25,7 @@ import time
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
+import httpx
 import redis.asyncio as aioredis
 
 from app.config import settings
@@ -79,6 +80,31 @@ async def cancel_retry(tenant_id: str, contact_id: str) -> None:
             await redis.zrem(queue_key, *to_remove)
     finally:
         await redis.aclose()
+
+
+async def _fire_retry_webhook(
+    webhook_url: str,
+    event_type: str,
+    tenant_id: str,
+    campaign_id: str,
+    contact_id: str,
+    attempt: int,
+) -> None:
+    """Fire a retry lifecycle webhook without blocking the retry loop."""
+    payload = {
+        "event": event_type,
+        "tenantId": tenant_id,
+        "campaignId": campaign_id,
+        "contactId": contact_id,
+        "attempt": attempt,
+        "ts": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            await client.post(webhook_url, json=payload)
+            logger.debug("[auto_retry] webhook %s fired for contact=%s", event_type, contact_id)
+    except Exception as exc:
+        logger.warning("[auto_retry] webhook fire failed url=%s err=%s", webhook_url, exc)
 
 
 async def _is_within_calling_hours(
@@ -174,6 +200,11 @@ async def scan_and_retry(tenant_id: str) -> int:
                     contact.updatedAt = datetime.now(timezone.utc)
                     await db.commit()
                     await redis.zrem(queue_key, payload_str)
+                    if campaign.webhookUrl:
+                        await _fire_retry_webhook(
+                            campaign.webhookUrl, "call.retry.max_reached",
+                            tenant_id, campaign_id, contact_id, contact.callAttempts or 0,
+                        )
                     continue
 
                 # Compliance check (DND etc.)
@@ -224,6 +255,11 @@ async def scan_and_retry(tenant_id: str) -> int:
                 dispatched += 1
                 logger.info("[auto_retry] dispatched retry for contact=%s campaign=%s attempt=%d",
                             contact_id, campaign_id, contact.callAttempts)
+                if campaign.webhookUrl:
+                    await _fire_retry_webhook(
+                        campaign.webhookUrl, "call.retry.attempted",
+                        tenant_id, campaign_id, contact_id, contact.callAttempts or 0,
+                    )
 
     finally:
         await redis.aclose()

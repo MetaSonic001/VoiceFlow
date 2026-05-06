@@ -101,6 +101,14 @@ urlpatterns = [
     path("api/settings/assemblyai/", api_proxy.assemblyai_api_key, name="api_assemblyai_key"),
     path("api/settings/truecaller/", api_proxy.truecaller_api_key, name="api_truecaller_key"),
     path("api/analytics/overview/", api_proxy.analytics_overview, name="api_analytics"),
+    path("api/analytics/resolution-stats/", api_proxy.analytics_resolution_stats, name="api_analytics_resolution"),
+    path("api/analytics/top-intents/", api_proxy.analytics_top_intents, name="api_analytics_intents"),
+    path("api/analytics/failure-modes/", api_proxy.analytics_failure_modes, name="api_analytics_failures"),
+    path("api/analytics/cost-estimate/", api_proxy.analytics_cost_estimate, name="api_analytics_cost"),
+    path("api/analytics/sentiment-trend/", api_proxy.analytics_sentiment_trend, name="api_analytics_sentiment"),
+    path("api/analytics/handle-time-histogram/", api_proxy.analytics_handle_time, name="api_analytics_histogram"),
+    path("api/analytics/campaign-roi/", api_proxy.analytics_campaign_roi, name="api_analytics_campaign_roi"),
+    path("api/analytics/export.csv", api_proxy.analytics_export_csv, name="api_analytics_csv"),
     path("api/call-logs/", api_proxy.call_logs_api, name="api_call_logs"),
     path("api/retraining/", api_proxy.retraining_api, name="api_retraining"),
     path("api/retraining/trigger/", api_proxy.retraining_trigger, name="api_retraining_trigger"),
@@ -160,11 +168,21 @@ urlpatterns = [
     path("api/recordings/<str:recording_id>/download/", api_proxy.recording_download, name="api_recording_download"),
 
     # ── Contacts (OmniCRM) ─────────────────────────────────────────────
+    path("api/contacts/import/", api_proxy.contacts_import_csv, name="api_contacts_import"),
     path("api/contacts/", api_proxy.contacts_list, name="api_contacts_list"),
     path("api/contacts/<str:contact_id>/", api_proxy.contact_detail, name="api_contact_detail"),
     path("api/contacts/<str:contact_id>/note/", api_proxy.contact_note, name="api_contact_note"),
 
+    # ── CRM Settings ───────────────────────────────────────────────────
+    path("dashboard/crm-settings/", pages.crm_settings, name="crm_settings"),
+    path("api/crm/field-mapping/", api_proxy.crm_field_mapping, name="api_crm_field_mapping"),
+    path("api/crm/lookup/", api_proxy.crm_lookup, name="api_crm_lookup"),
+    # OAuth callbacks — proxy straight to backend which handles code exchange + redirects
+    path("api/crm/hubspot/callback/", api_proxy.crm_hubspot_callback, name="api_crm_hubspot_callback"),
+    path("api/crm/salesforce/callback/", api_proxy.crm_salesforce_callback, name="api_crm_salesforce_callback"),
+
     # ── Coaching Cards ─────────────────────────────────────────────────
+    path("api/coaching/from-recording/", api_proxy.coaching_from_recording, name="api_coaching_from_recording"),
     path("api/coaching/", api_proxy.coaching_list, name="api_coaching_list"),
     path("api/coaching/<str:card_id>/", api_proxy.coaching_detail, name="api_coaching_detail"),
     path("api/coaching/<str:card_id>/approve/", api_proxy.coaching_approve, name="api_coaching_approve"),
@@ -174,6 +192,7 @@ urlpatterns = [
     # ── Prompt-to-Agent 2.0 ──────────────────────────────────────────────
     path("api/agents/generate-from-prompt/preview/", api_proxy.agent_preview_from_prompt, name="api_agent_preview"),
     path("api/agents/generate-from-prompt/create/", api_proxy.agent_create_from_preview, name="api_agent_create_preview"),
+    path("api/agents/<str:agent_id>/revise/", api_proxy.agent_revise, name="api_agent_revise"),
     path("api/agents/<str:agent_id>/versions/", api_proxy.agent_versions_list, name="api_agent_versions_list"),
     path("api/agents/<str:agent_id>/versions/save/", api_proxy.agent_version_save, name="api_agent_version_save"),
     path("api/agents/<str:agent_id>/versions/<str:version_id>/restore/", api_proxy.agent_version_restore, name="api_agent_version_restore"),
@@ -213,10 +232,28 @@ urlpatterns = [
     path("api/live-monitor/calls/<str:call_sid>/takeover/", api_proxy.live_monitor_takeover, name="api_live_monitor_takeover"),
     path("api/live-monitor/calls/<str:call_sid>/end/", api_proxy.live_monitor_end, name="api_live_monitor_end"),
     path("api/live-monitor/calls/<str:call_sid>/note/", api_proxy.live_monitor_note, name="api_live_monitor_note"),
+    path("api/live-monitor/calls/<str:call_sid>/whisper/", api_proxy.live_monitor_whisper, name="api_live_monitor_whisper"),
 
     # ── Speaker Verification (Voice Biometrics) ───────────────────────────────
     path("api/speaker-verification/", api_proxy.speaker_verification_list, name="api_sv_list"),
     path("api/speaker-verification/enroll/", api_proxy.speaker_verification_enroll, name="api_sv_enroll"),
     path("api/speaker-verification/verify/", api_proxy.speaker_verification_verify, name="api_sv_verify"),
     path("api/speaker-verification/<str:voiceprint_id>/", api_proxy.speaker_verification_delete, name="api_sv_delete"),
+
+    # ── Background Ambient Sound ──────────────────────────────────────────────
+    path("api/background-sound/types/", api_proxy.background_sound_types, name="api_bg_sound_types"),
+    path("api/background-sound/<str:agent_id>/", api_proxy.background_sound_config, name="api_bg_sound_config"),
+
+    # ── SIP Trunking ──────────────────────────────────────────────────────────
+    path("dashboard/sip-trunking/", pages.sip_trunking, name="sip_trunking"),
+    path("api/sip-trunking/trunks/", api_proxy.sip_trunks_list, name="api_sip_trunks"),
+    path("api/sip-trunking/trunks/<str:trunk_id>/", api_proxy.sip_trunk_detail, name="api_sip_trunk_detail"),
+    path("api/sip-trunking/trunks/<str:trunk_id>/test/", api_proxy.sip_trunk_test, name="api_sip_trunk_test"),
+    path("api/sip-trunking/webhook-uri/<str:agent_id>/", api_proxy.sip_webhook_uri, name="api_sip_webhook_uri"),
+
+    # ── Widget (public, no login_required) ────────────────────────────────────
+    path("api/widget/<str:agent_id>/embed.js", api_proxy.widget_embed_js, name="api_widget_embed_js"),
+    path("api/widget/<str:agent_id>/sessions", api_proxy.widget_sessions, name="api_widget_sessions"),
+    path("api/widget/<str:agent_id>/sessions/<str:session_id>/message", api_proxy.widget_session_message, name="api_widget_session_message"),
+    path("api/widget/<str:agent_id>/call-request", api_proxy.widget_call_request, name="api_widget_call_request"),
 ]

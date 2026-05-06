@@ -63,6 +63,43 @@
           <h3 class="font-semibold text-gray-900 dark:text-white mb-3">Embed Code</h3>
           <code class="block p-3 bg-gray-50 dark:bg-gray-800 rounded-lg text-xs font-mono text-gray-600 dark:text-gray-300 break-all" x-text="'<script src=\"' + location.origin + '/widget/' + agent.id + '/embed.js\"></script>'"></code>
         </div>
+
+        <!-- AI Revision panel -->
+        <div class="vf-card p-5 space-y-3">
+          <h3 class="font-semibold text-gray-900 dark:text-white">AI Revision</h3>
+          <p class="text-xs text-gray-500 dark:text-gray-400">Describe a change in plain English — preview the diff before applying.</p>
+          <textarea x-model="revise.prompt" rows="3" class="vf-input text-sm" placeholder="e.g. Make the agent more concise and stop repeating the caller's name"></textarea>
+          <div class="flex gap-2">
+            <button @click="previewRevision()" :disabled="revise.loading" class="vf-btn px-3 py-1.5 text-xs border border-teal-400 text-teal-600 dark:text-teal-400 rounded-lg hover:bg-teal-50 dark:hover:bg-teal-900/20 disabled:opacity-50" x-text="revise.loading?'Generating…':'Preview'"></button>
+            <button @click="applyRevision()" :disabled="revise.loading || !revise.diffItems.length" class="vf-btn px-3 py-1.5 text-xs bg-gradient-to-r from-teal-500 to-cyan-500 text-white rounded-lg disabled:opacity-50">Apply Changes</button>
+          </div>
+          <!-- Diff table -->
+          <template x-if="revise.diffItems.length">
+            <div class="overflow-auto rounded-lg border border-slate-200 dark:border-slate-700 text-xs">
+              <table class="w-full">
+                <thead class="bg-slate-50 dark:bg-slate-800">
+                  <tr>
+                    <th class="px-3 py-1.5 text-left text-slate-500 font-medium w-24">Field</th>
+                    <th class="px-3 py-1.5 text-left text-red-500 font-medium">Before</th>
+                    <th class="px-3 py-1.5 text-left text-green-600 font-medium">After</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="item in revise.diffItems" :key="item.field">
+                    <tr class="border-t border-slate-100 dark:border-slate-700">
+                      <td class="px-3 py-1.5 font-medium text-slate-700 dark:text-slate-300" x-text="item.field"></td>
+                      <td class="px-3 py-1.5 text-red-500 line-through whitespace-pre-wrap break-all" x-text="item.before ?? '—'"></td>
+                      <td class="px-3 py-1.5 text-green-600 whitespace-pre-wrap break-all" x-text="item.after ?? '—'"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </template>
+          <template x-if="revise.error">
+            <p class="text-xs text-red-500" x-text="revise.error"></p>
+          </template>
+        </div>
       </div>
     </div>
   </div>
@@ -794,6 +831,8 @@ function agentDetailApp() {
     simExpectedIntent: '',
     simRunning: false,
     simResults: null,
+    // AI Revision
+    revise: { prompt: '', loading: false, diffItems: [], delta: null, error: '' },
     async loadConversations() {
       if (this.conversations !== null) return;
       try {
@@ -822,6 +861,44 @@ function agentDetailApp() {
       } catch(e) { showToast('Save failed','error'); }
       this.saving = false;
     },
+
+    async previewRevision() {
+      if (!this.revise.prompt.trim()) return;
+      this.revise.loading = true;
+      this.revise.diffItems = [];
+      this.revise.delta = null;
+      this.revise.error = '';
+      try {
+        const d = await apiFetch('/api/agents/{{ agent.id|default:"" }}/revise/', {
+          method: 'POST',
+          json: { revision_prompt: this.revise.prompt, preview: true, apply: false },
+        });
+        this.revise.diffItems = d.diffItems || [];
+        this.revise.delta = d.delta || null;
+        if (!this.revise.diffItems.length) this.revise.error = 'No changes suggested.';
+      } catch(e) { this.revise.error = 'Revision failed: ' + (e.message || e); }
+      this.revise.loading = false;
+    },
+
+    async applyRevision() {
+      if (!this.revise.prompt.trim()) return;
+      this.revise.loading = true;
+      this.revise.error = '';
+      try {
+        const d = await apiFetch('/api/agents/{{ agent.id|default:"" }}/revise/', {
+          method: 'POST',
+          json: { revision_prompt: this.revise.prompt, preview: false, apply: true },
+        });
+        if (d.applied && d.delta) {
+          Object.assign(this.agent, d.delta);
+          showToast('Revision applied', 'success');
+          this.revise.diffItems = [];
+          this.revise.prompt = '';
+        }
+      } catch(e) { this.revise.error = 'Apply failed: ' + (e.message || e); }
+      this.revise.loading = false;
+    },
+
     async saveTelephony() {
       this.savingTel = true;
       try {

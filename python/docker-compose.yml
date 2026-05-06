@@ -80,6 +80,28 @@ services:
     networks:
       - voiceflow-network
 
+  # Langfuse — self-hosted LLM observability (open source)
+  # Access at http://localhost:3001  — create an account on first visit
+  # Set LANGFUSE_SECRET_KEY, LANGFUSE_PUBLIC_KEY, LANGFUSE_HOST=http://langfuse:3000
+  # in backend/.env to enable trace streaming from rag_service.py
+  langfuse:
+    image: langfuse/langfuse:latest
+    container_name: voiceflow_langfuse
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      - DATABASE_URL=postgresql://vf_admin:vf_secure_2025!@postgres:5432/voiceflow_prod
+      - NEXTAUTH_SECRET=langfuse-nextauth-secret-change-me-in-prod
+      - NEXTAUTH_URL=http://localhost:3001
+      - SALT=langfuse-salt-change-me-in-prod
+      - LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES=false
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - voiceflow-network
+
   piper-tts:
     image: rhasspy/wyoming-piper:latest
     container_name: voiceflow_piper

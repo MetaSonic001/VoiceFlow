@@ -509,6 +509,287 @@ def prompt_improve_agent(agent_id: str, problem_description: str) -> str:
 
 # ── Entry point ────────────────────────────────────────────────────────────────
 
+@mcp.tool()
+async def batch_campaign(
+    agent_id: str,
+    name: str,
+    contacts: list[dict],
+    scheduled_start: Optional[str] = None,
+    max_concurrent: int = 5,
+) -> dict:
+    """
+    Create and start an outbound calling campaign for a list of contacts.
+
+    Args:
+        agent_id: The agent that will handle the calls
+        name: Campaign name (e.g. "March Renewal Outreach")
+        contacts: List of contact dicts, each with at minimum {"phone": "+91..."}
+                  Optional fields: name, email, custom1, custom2
+        scheduled_start: ISO-8601 datetime to start the campaign. If None, starts immediately.
+        max_concurrent: Maximum simultaneous calls (default 5, max 20)
+
+    Returns:
+        {"campaignId": "...", "status": "running"|"scheduled", "totalContacts": N}
+    """
+    # 1. Create campaign
+    campaign = await _post("/api/campaigns/", {
+        "agentId": agent_id,
+        "name": name,
+        "scheduledStart": scheduled_start,
+        "maxConcurrent": min(20, max(1, max_concurrent)),
+    })
+    campaign_id = campaign.get("id") or campaign.get("campaign", {}).get("id")
+    if not campaign_id:
+        return {"error": "Failed to create campaign", "detail": campaign}
+
+    # 2. Upload contacts as CSV
+    import io
+    import csv
+    buf = io.StringIO()
+    if contacts:
+        fieldnames = list(contacts[0].keys())
+        writer = csv.DictWriter(buf, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(contacts)
+    csv_bytes = buf.getvalue().encode()
+
+    async with httpx.AsyncClient(timeout=60) as client:
+        resp = await client.post(
+            _url(f"/api/campaigns/{campaign_id}/contacts/upload"),
+            headers={k: v for k, v in _HEADERS.items() if k != "Content-Type"},
+            files={"file": ("contacts.csv", csv_bytes, "text/csv")},
+        )
+        resp.raise_for_status()
+
+    # 3. Start immediately if no scheduled_start
+    if not scheduled_start:
+        await _post(f"/api/campaigns/{campaign_id}/start", {})
+
+    return {
+        "campaignId": campaign_id,
+        "name": name,
+        "agentId": agent_id,
+        "status": "scheduled" if scheduled_start else "running",
+        "totalContacts": len(contacts),
+        "scheduledStart": scheduled_start,
+    }
+
+
+@mcp.tool()
+async def get_real_time_call_status(call_sid: str) -> dict:
+    """
+    Get real-time status of an active call including live transcript, state, and duration.
+
+    Unlike get_call_summary (which works on completed calls), this tool reads live state
+    from Redis so it works during an ongoing call. Useful for live monitoring dashboards
+    and supervisory workflows.
+
+    Args:
+        call_sid: The Twilio call SID (e.g. "CAxxxx...") of the active call
+
+    Returns:
+        {
+          "callSid": "...",
+          "state": "speaking" | "listening" | "thinking" | "idle",
+          "agentId": "...",
+          "tenantId": "...",
+          "durationSeconds": 42,
+          "liveTranscript": [...],  # list of {role, text, ts} from last ~60s
+          "isActive": true
+        }
+    """
+    data = await _get(f"/api/live-monitor/calls/", {"call_sid": call_sid})
+    # Filter to the specific call_sid
+    calls = data if isinstance(data, list) else data.get("calls", [])
+    for call in calls:
+        if call.get("callSid") == call_sid or call.get("call_sid") == call_sid:
+            return call
+    return {"callSid": call_sid, "isActive": False, "error": "Call not found in active calls"}
+
+
+# ── Additional MCP Tools ───────────────────────────────────────────────────────
+
+@mcp.tool()
+async def get_live_calls() -> list[dict]:
+    """
+    List all currently active calls across all agents for this tenant.
+
+    Returns a list of live call objects, each with callSid, agentId, state,
+    durationSeconds, callerPhone, and liveTranscript.
+
+    Useful for supervisor dashboards and real-time monitoring workflows.
+    """
+    data = await _get("/api/live-monitor/calls/")
+    calls = data if isinstance(data, list) else data.get("calls", [])
+    return [
+        {
+            "callSid": c.get("callSid") or c.get("call_sid"),
+            "agentId": c.get("agentId"),
+            "state": c.get("state", "unknown"),
+            "durationSeconds": c.get("durationSeconds", 0),
+            "callerPhone": c.get("callerPhone"),
+            "liveTranscript": c.get("liveTranscript", []),
+        }
+        for c in calls
+    ]
+
+
+@mcp.tool()
+async def whisper_to_call(
+    call_sid: str,
+    message: str,
+) -> dict:
+    """
+    Inject a supervisor hint silently into a live call.
+
+    The message is inserted as a hidden system context update into the agent's
+    LLM context. The caller does NOT hear anything — only the agent reads it
+    and adjusts its responses accordingly.
+
+    Args:
+        call_sid: The Twilio call SID of the active call
+        message: Supervisor instruction, e.g. "The caller is a VIP — offer 20% discount"
+
+    Returns:
+        {"success": true, "callSid": "..."}
+    """
+    data = await _post(f"/api/live-monitor/calls/{call_sid}/whisper", {"message": message})
+    return {"success": True, "callSid": call_sid, "detail": data}
+
+
+@mcp.tool()
+async def approve_coaching_card(coaching_id: str) -> dict:
+    """
+    Approve a pending coaching card and apply its suggested prompt delta to the agent.
+
+    Coaching cards are generated automatically after calls by the AI coach.
+    Approved cards' suggestions are merged into the agent's system prompt.
+
+    Args:
+        coaching_id: The coaching card ID to approve
+
+    Returns:
+        {"id": "...", "status": "applied", "appliedAt": "..."}
+    """
+    data = await _post(f"/api/coaching/{coaching_id}/approve", {})
+    return data
+
+
+# ── Additional MCP Resources ──────────────────────────────────────────────────
+
+@mcp.resource("voiceflow://contacts/{phone_number}")
+async def resource_contact_profile(phone_number: str) -> str:
+    """Resource: contact profile and full call history for a phone number."""
+    try:
+        data = await _get(f"/api/contacts/lookup/{phone_number}")
+        if not data:
+            return f"No contact found for {phone_number}"
+        lines = [
+            f"Contact: {data.get('name', 'Unknown')} ({phone_number})",
+            f"  Email: {data.get('email', '—')}",
+            f"  Tags: {', '.join(data.get('tags', []) or [])}",
+            f"  Total calls: {data.get('totalCalls', 0)}",
+            f"  Last call: {data.get('lastCalledAt', '—')}",
+            f"  Intent level: {data.get('intentLevel', '—')}",
+            f"  Sentiment: {data.get('sentiment', '—')}",
+        ]
+        notes = data.get("notes")
+        if notes:
+            lines.append(f"  Notes: {notes[:200]}")
+        extracted = data.get("extractedData") or {}
+        if extracted:
+            lines.append(f"  Extracted data: {', '.join(f'{k}={v}' for k, v in list(extracted.items())[:5])}")
+        return "\n".join(lines)
+    except Exception as exc:
+        return f"Contact lookup failed: {exc}"
+
+
+@mcp.resource("voiceflow://kb/{agent_id}/documents")
+async def resource_kb_documents(agent_id: str) -> str:
+    """Resource: list of knowledge base documents for an agent with metadata."""
+    try:
+        data = await _get(f"/api/knowledge/{agent_id}/documents")
+        docs = data if isinstance(data, list) else data.get("documents", [])
+        if not docs:
+            return f"No documents in knowledge base for agent {agent_id}"
+        lines = [f"Knowledge Base — Agent {agent_id} ({len(docs)} documents):\n"]
+        for d in docs:
+            lines.append(
+                f"  [{d.get('id', '?')}] {d.get('title') or d.get('url') or 'Untitled'}"
+                f" — status={d.get('status', '?')}"
+                f" chunks={d.get('chunkCount', '?')}"
+            )
+        return "\n".join(lines)
+    except Exception as exc:
+        return f"KB document list failed: {exc}"
+
+
+# ── Additional MCP Prompts ────────────────────────────────────────────────────
+
+@mcp.prompt()
+def failure_analysis(agent_id: str, time_period: str = "last 7 days") -> str:
+    """Prompt template: deep-dive analysis of what an agent most commonly fails at."""
+    return (
+        f"Perform a comprehensive failure analysis for VoiceFlow agent {agent_id} "
+        f"covering {time_period}.\n\n"
+        f"Steps:\n"
+        f"1. Get agent analytics using get_analytics to understand volume and success rate\n"
+        f"2. Get the agent's coaching report using get_call_coaching_report — focus on low-score cards\n"
+        f"3. Search the knowledge base for topics that appear in failure coaching cards\n"
+        f"4. Run a targeted simulation using run_simulation with 5 scenarios that probe failure areas\n"
+        f"5. Produce a structured failure report with:\n"
+        f"   - Top 3 failure categories (with frequency and example utterances)\n"
+        f"   - Root cause for each (missing KB content / wrong prompt / model limitation)\n"
+        f"   - Specific remediation for each (knowledge to add / prompt to change)\n"
+        f"   - Priority order (impact × frequency)\n"
+        f"6. If any fix is straightforward, apply it with update_agent_from_prompt\n"
+        f"7. Re-run the simulation to confirm improvement"
+    )
+
+
+# ── MCP Streaming Resource ────────────────────────────────────────────────────
+# FastMCP streaming resources let Claude stream live transcript data.
+# Below we expose a polling-based streaming summary (true streaming requires
+# server-sent events support in the MCP client; this approach returns a
+# snapshot that callers can re-request to get updates).
+
+@mcp.tool()
+async def stream_call_transcript(call_sid: str, last_n_turns: int = 10) -> dict:
+    """
+    Get the latest transcript turns from an active call.
+
+    Designed for repeated polling to simulate transcript streaming.
+    Call this tool every 2-3 seconds during an active call to get
+    the most recent turns. Each call returns the last N turns.
+
+    Args:
+        call_sid: The Twilio call SID of the active call
+        last_n_turns: How many of the most recent turns to return (default 10)
+
+    Returns:
+        {
+          "callSid": "...",
+          "isActive": bool,
+          "transcriptTurns": [{"role": "caller"|"agent", "text": "...", "ts": float}],
+          "durationSeconds": int,
+          "state": "listening"|"thinking"|"speaking"
+        }
+    """
+    data = await _get(f"/api/live-monitor/calls/", {"call_sid": call_sid})
+    calls = data if isinstance(data, list) else data.get("calls", [])
+    for call in calls:
+        if call.get("callSid") == call_sid or call.get("call_sid") == call_sid:
+            transcript = call.get("liveTranscript", [])
+            return {
+                "callSid": call_sid,
+                "isActive": True,
+                "transcriptTurns": transcript[-last_n_turns:] if transcript else [],
+                "durationSeconds": call.get("durationSeconds", 0),
+                "state": call.get("state", "unknown"),
+            }
+    return {"callSid": call_sid, "isActive": False, "transcriptTurns": []}
+
+
 if __name__ == "__main__":
     mcp.run()
 

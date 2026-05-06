@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from fastapi.responses import JSONResponse
-from sqlalchemy import select, update
+from sqlalchemy import select, update, func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -296,6 +296,24 @@ async def campaign_stats(
     answered = campaign.answeredCount or 0
     dialed = campaign.dialedCount or 0
 
+    # Retry attempt distribution — count contacts by callAttempts value
+    retry_rows = await db.execute(
+        select(CampaignContact.callAttempts, sa_func.count(CampaignContact.id))
+        .where(CampaignContact.campaignId == campaign_id)
+        .group_by(CampaignContact.callAttempts)
+    )
+    attempt_counts: dict[int, int] = {row[0] or 0: row[1] for row in retry_rows.all()}
+    max_retries = campaign.maxRetries or 3
+    # contacts that have reached or exceeded maxRetries and are still failed/pending
+    max_reached_rows = await db.execute(
+        select(sa_func.count(CampaignContact.id))
+        .where(
+            CampaignContact.campaignId == campaign_id,
+            CampaignContact.callAttempts >= max_retries,
+        )
+    )
+    max_reached = max_reached_rows.scalar() or 0
+
     return {
         "id": campaign.id,
         "name": campaign.name,
@@ -309,6 +327,11 @@ async def campaign_stats(
         "answerRate": round(answered / dialed * 100, 1) if dialed else 0,
         "startedAt": campaign.startedAt.isoformat() if campaign.startedAt else None,
         "completedAt": campaign.completedAt.isoformat() if campaign.completedAt else None,
+        # Retry breakdown
+        "attempt1": attempt_counts.get(1, 0),
+        "attempt2": attempt_counts.get(2, 0),
+        "attempt3": attempt_counts.get(3, 0),
+        "maxReached": max_reached,
     }
 
 

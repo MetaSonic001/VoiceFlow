@@ -155,9 +155,17 @@
         </template>
       </div>
       <!-- Supervisor note -->
-      <div class="p-4 border-t border-slate-200 dark:border-gray-700 flex gap-3">
-        <input x-model="noteText" type="text" placeholder="Add supervisor note…" class="flex-1 text-sm border dark:border-gray-700 rounded-lg px-3 py-2 dark:bg-gray-800 dark:text-white">
-        <button @click="addNote(detailCall?.call_sid)" class="vf-btn-primary text-sm px-4 py-2">Note</button>
+      <div class="p-4 border-t border-slate-200 dark:border-gray-700 space-y-2">
+        <div class="flex gap-3">
+          <input x-model="noteText" type="text" placeholder="Add supervisor note…" class="flex-1 text-sm border dark:border-gray-700 rounded-lg px-3 py-2 dark:bg-gray-800 dark:text-white">
+          <button @click="addNote(detailCall?.call_sid)" class="vf-btn-primary text-sm px-4 py-2">Note</button>
+        </div>
+        <!-- Supervisor whisper: silently inject hint into agent context -->
+        <div class="flex gap-3">
+          <input x-model="whisperText" type="text" placeholder="👁️ Whisper hint to agent (caller won’t hear this)…" class="flex-1 text-sm border border-purple-300 dark:border-purple-700 rounded-lg px-3 py-2 dark:bg-gray-800 dark:text-white focus:ring-purple-400">
+          <button @click="sendWhisper(detailCall?.call_sid)" class="text-sm px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-white font-medium transition-colors">🧠 Whisper</button>
+        </div>
+        <p class="text-xs text-purple-500 dark:text-purple-400">Whisper hints are injected into the agent’s next context window and consumed silently. The caller does not hear this message.</p>
       </div>
     </div>
   </div>
@@ -200,6 +208,7 @@ function liveMonitorApp() {
     selectedSid: null,
     detailCall: null,
     noteText: '',
+      whisperText: '',
     takeoverCall: null,
     transferTo: '',
     whisperMsg: 'You have a call transfer from VoiceFlow AI.',
@@ -287,6 +296,26 @@ function liveMonitorApp() {
         });
         this.noteText = '';
       } catch { }
+    },
+
+    async sendWhisper(callSid) {
+      if (!this.whisperText.trim()) return;
+      try {
+        const r = await fetch(`/api/live-monitor/calls/${callSid}/whisper/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ hint: this.whisperText }),
+        });
+        if (r.ok) {
+          this.whisperText = '';
+          // Brief visual feedback
+          const btn = document.querySelector('[class*="Whisper"]');
+          if (btn) { btn.textContent = '✓ Sent'; setTimeout(() => { btn.textContent = '🧠 Whisper'; }, 2000); }
+        } else {
+          alert('Failed to send whisper hint');
+        }
+      } catch { alert('Error sending whisper'); }
     },
 
     formatDuration(secs) {

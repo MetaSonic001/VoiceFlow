@@ -331,6 +331,12 @@ def contacts(request):
 
 
 @login_required
+def crm_settings(request):
+    """CRM OAuth integrations & field mapping."""
+    return render(request, "dashboard/crm_settings.html")
+
+
+@login_required
 def coaching(request):
     """AI Coaching Cards — approve/reject AI-generated prompt improvements."""
     return render(request, "dashboard/coaching.html")
@@ -346,4 +352,10 @@ def phone_numbers(request):
 def live_monitor(request):
     """Live Call Monitor — real-time supervisor view of active calls."""
     return render(request, "dashboard/live_monitor.html")
+
+
+@login_required
+def sip_trunking(request):
+    """SIP Trunking / BYOC — manage SIP trunk configurations."""
+    return render(request, "dashboard/sip_trunking.html")
 

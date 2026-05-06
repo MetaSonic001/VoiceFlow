@@ -170,6 +170,26 @@
           </div>
         </div>
 
+        <!-- Retry breakdown row -->
+        <div class="grid grid-cols-4 gap-1 text-center pt-1 pb-1">
+          <div>
+            <div class="text-sm font-semibold text-teal-600" x-text="c.attempt1||0"></div>
+            <div class="text-[9px] text-slate-400 uppercase tracking-wide">1st try</div>
+          </div>
+          <div>
+            <div class="text-sm font-semibold text-cyan-600" x-text="c.attempt2||0"></div>
+            <div class="text-[9px] text-slate-400 uppercase tracking-wide">2nd try</div>
+          </div>
+          <div>
+            <div class="text-sm font-semibold text-amber-600" x-text="c.attempt3||0"></div>
+            <div class="text-[9px] text-slate-400 uppercase tracking-wide">3rd try</div>
+          </div>
+          <div>
+            <div class="text-sm font-semibold text-red-600" x-text="c.maxReached||0"></div>
+            <div class="text-[9px] text-slate-400 uppercase tracking-wide">Max hit</div>
+          </div>
+        </div>
+
         <!-- Actions -->
         <div class="flex gap-2 pt-1">
           <button @click="uploadModal.open=true; uploadModal.campaignId=c.id"

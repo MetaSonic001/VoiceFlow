@@ -2,7 +2,7 @@
 
 A multi-tenant SaaS platform for building, deploying, and managing AI-powered voice and chat agents. Businesses onboard through a guided wizard, upload their knowledge base, and receive a domain-specific AI agent that answers customer queries over phone (Twilio), browser-based WebSocket voice calls, or a web chat interface — using Retrieval-Augmented Generation (RAG) over their own documents with hierarchical context injection and policy-based retrieval scoring.
 
-> **Status (May 2026):** The full pipeline is functional end-to-end — **42 route files (~210 endpoints), 28 service modules, 25 ORM models, 32 dashboard pages.** The Architecture Bible, Numbers Shop, Live Call Monitor, Voice Biometrics (ECAPA-TDNN speaker verification), Caller Enrichment (4-layer: Redis → Contacts → phonenumbers → Truecaller), and BYOK for 10 AI providers are all fully wired frontend-to-backend. Full `pip install voiceflow` developer SDK with plugin architecture. MCP server for Claude Desktop integration. **Modern UI: glassmorphism, micro-interactions, 15+ CSS animations, dark mode on all 32 pages.** Stack: Django 6 (HTMX + Alpine.js) frontend + FastAPI backend + Docker services (Postgres, Redis, ChromaDB, MinIO). See [What's New (May 2026)](#whats-new-may-2026) and [Implementation Status](#implementation-status) for the full breakdown.
+> **Status (June 2026):** The full pipeline is functional end-to-end — **42 route files (~220 endpoints), 30 service modules, 25 ORM models, 33 dashboard pages.** The Architecture Bible is **fully implemented**: coaching cards with auto-generation, simulation CI/CD auto-gates, live whisper injection, pre-call CRM enrichment wired to voice pipeline, background ambient sound service, SIP Trunking / BYOC dashboard, mid-call language switching (Sarvam + Whisper), analytics KPIs (resolution rate, escalation rate, top intents, failure modes, cost estimate), IVR visual SVG node editor, and MCP `batch_campaign` + `get_real_time_call_status` tools. Full `pip install voiceflow` developer SDK with plugin architecture. MCP server for Claude Desktop integration. **Modern UI: glassmorphism, micro-interactions, 15+ CSS animations, dark mode on all 33 pages.** Stack: Django 6 (HTMX + Alpine.js) frontend + FastAPI backend + Docker services (Postgres, Redis, ChromaDB, MinIO). See [What's New (June 2026)](#whats-new-june-2026) and [Implementation Status](#implementation-status) for the full breakdown.
 
 ---
 
@@ -31,6 +31,26 @@ A multi-tenant SaaS platform for building, deploying, and managing AI-powered vo
 20. [What Remains — Startup Readiness Checklist](#what-remains--startup-readiness-checklist)
 
 ---
+
+## What's New (June 2026)
+
+### Architecture Bible — Final Completion Pass
+
+All Architecture & Feature Bible items are now fully implemented end-to-end:
+
+| Feature | Status | Details |
+|---------|--------|---------|
+| Pre-call CRM enrichment | ✅ Complete | `enrich_caller()` now called in `handle_inbound_call()`, context stored in Redis and injected as effective query |
+| AI Coaching Card generation | ✅ Complete | `_generate_coaching_cards()` background task wired after `analyze_call()` — up to 3 cards per call with computed `impactScore` |
+| Simulation CI/CD auto-trigger | ✅ Complete | `update_agent()` detects `systemPrompt` change → fires `_auto_simulate_on_prompt_change()` → warns if pass rate < 75% |
+| Live whisper injection | ✅ Complete | `POST /api/live-monitor/calls/{call_sid}/whisper` stores supervisor hint in Redis → consumed once by next `voice_gather()` turn |
+| Background Ambient Sound | ✅ Complete | `background_sound_service.py` — synthetic PCM generation (office/callcenter/cafe/street), `mix_ambient_into_pcm()`, per-agent config, Voice Agent UI |
+| SIP Trunking / BYOC | ✅ Complete | `sip_trunking.py` — CRUD, test endpoint, webhook URI generator; dedicated dashboard `/dashboard/sip-trunking/`; sidebar link |
+| Mid-call language switching | ✅ Complete | `stt_service.py`: detected language stored in Redis at `call_lang:{call_sid}`; subsequent turns auto-resolve language; `get_call_language()` / `update_call_language()` exported |
+| Analytics KPIs | ✅ Complete | 4 new endpoints: `/analytics/resolution-stats`, `/analytics/top-intents`, `/analytics/failure-modes`, `/analytics/cost-estimate`; analytics page rewritten with 8-card layout + top intents chart |
+| IVR visual node editor | ✅ Complete | SVG-based drag-and-drop canvas in IVR modal — "Visual Editor" tab with drag nodes, edge drawing from parentId, selected node inline edit panel |
+| MCP batch_campaign | ✅ Complete | `batch_campaign()` tool — creates campaign, uploads contacts CSV, starts campaign immediately or scheduled |
+| MCP get_real_time_call_status | ✅ Complete | `get_real_time_call_status()` tool — reads live call state + transcript from Redis via `/api/live-monitor/calls/` |
 
 ## What's New (May 2026)
 

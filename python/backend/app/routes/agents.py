@@ -169,6 +169,8 @@ async def update_agent(agent_id: str, request_data: dict, auth: AuthContext = De
     if not agent:
         return JSONResponse({"error": "Agent not found"}, status_code=404)
 
+    prompt_changed = "systemPrompt" in request_data and request_data["systemPrompt"] != agent.systemPrompt
+
     for field in ("name", "description", "systemPrompt", "voiceType", "llmPreferences",
                    "tokenLimit", "contextWindowStrategy", "channels", "status", "phoneNumber", "brandId"):
         if field in request_data:
@@ -176,7 +178,83 @@ async def update_agent(agent_id: str, request_data: dict, auth: AuthContext = De
 
     await db.commit()
     await db.refresh(agent)
+
+    # ── CI/CD gate: auto-run simulation suite when systemPrompt changes ─────
+    if prompt_changed and agent.simulation_suite:
+        import asyncio
+        asyncio.create_task(_auto_simulate_on_prompt_change(str(agent.id), str(agent.tenantId)))
+
     return _agent_to_dict(agent)
+
+
+async def _auto_simulate_on_prompt_change(agent_id: str, tenant_id: str) -> None:
+    """
+    Background task: auto-run the agent's simulation suite after a prompt update.
+    Stores the pass rate in Agent.deployment_readiness_score and creates a
+    platform Notification if the pass rate drops below 0.75 (CI/CD gate threshold).
+    """
+    import logging
+    import uuid as _uuid
+    from app.database import AsyncSessionLocal
+    from app.models import Agent, Tenant, Notification
+    from app.services.credentials import decrypt_safe
+    from app.config import settings
+
+    _logger = logging.getLogger("voiceflow.ci_gate")
+
+    async with AsyncSessionLocal() as db:
+        try:
+            agent_res = await db.execute(select(Agent).where(Agent.id == agent_id))
+            agent = agent_res.scalar_one_or_none()
+            if not agent or not agent.simulation_suite:
+                return
+
+            tenant_res = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
+            tenant = tenant_res.scalar_one_or_none()
+            groq_key = settings.GROQ_API_KEY
+            if tenant and tenant.settings:
+                enc = tenant.settings.get("groqApiKey")
+                if enc:
+                    dec = decrypt_safe(enc)
+                    if dec and dec.startswith("gsk_"):
+                        groq_key = dec
+
+            from app.services.simulation_service import run_simulation
+            report = await run_simulation(
+                db=db,
+                tenant_id=tenant_id,
+                agent_id=agent_id,
+                scenarios=agent.simulation_suite,
+                groq_key=groq_key,
+                session_prefix=f"ci-{agent_id[:8]}",
+            )
+
+            pass_rate = (report.passed / report.total) if report.total else 0
+            score = int(pass_rate * 100)
+            agent.deployment_readiness_score = score
+            await db.commit()
+
+            _logger.info("[ci_gate] agent=%s prompt change simulation: %d/%d passed (%.0f%%)",
+                         agent_id, report.passed, report.total, pass_rate * 100)
+
+            # Create a warning notification if pass rate below threshold
+            if pass_rate < 0.75:
+                notif = Notification(
+                    id=str(_uuid.uuid4()),
+                    tenantId=tenant_id,
+                    type="warning",
+                    title="⚠ Agent Simulation Gate Failed",
+                    message=(
+                        f"Agent '{agent.name}' prompt was updated but the simulation suite "
+                        f"only passed {report.passed}/{report.total} scenarios ({score}%). "
+                        f"Review before activating in production."
+                    ),
+                    isRead=False,
+                )
+                db.add(notif)
+                await db.commit()
+        except Exception:
+            _logger.exception("[ci_gate] simulation failed for agent %s", agent_id)
 
 
 @router.delete("/{agent_id}")
@@ -1025,5 +1103,127 @@ async def auto_simulate_agent(
     return JSONResponse({
         "simulation_suite": sim_suite,
         "deployment_readiness": readiness,
+    })
+
+
+@router.post("/{agent_id}/revise")
+async def revise_agent_by_id(
+    agent_id: str,
+    request: Request,
+    auth: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    POST /api/agents/{agent_id}/revise — spec-compliant per-prompt agent revision.
+
+    Delegates to generate-from-prompt/revise with agent_id injected from the URL path.
+
+    Body: {"revision_prompt": "...", "apply": true, "preview": false}
+    Returns: {"delta": {...}, "applied": bool, "diffItems": [...]}
+    """
+    from app.models import Tenant
+    from app.services.credentials import decrypt_safe
+    from app.config import settings as app_settings
+    import httpx, json as json_mod
+
+    body = await request.json()
+    revision_prompt = (body.get("revision_prompt") or "").strip()[:500]
+    apply = bool(body.get("apply", True))
+    show_diff = bool(body.get("preview", True))
+
+    if not revision_prompt:
+        return JSONResponse({"error": "revision_prompt is required"}, status_code=400)
+
+    agent_res = await db.execute(
+        select(Agent).where(Agent.id == agent_id, Agent.tenantId == auth.tenant_id)
+    )
+    agent = agent_res.scalar_one_or_none()
+    if not agent:
+        return JSONResponse({"error": "Agent not found"}, status_code=404)
+
+    current_config = {
+        "name": agent.name,
+        "description": agent.description or "",
+        "systemPrompt": agent.systemPrompt or "",
+        "voiceType": agent.voiceType or "female",
+        "llmPreferences": agent.llmPreferences or {},
+        "tokenLimit": agent.tokenLimit or 4096,
+    }
+
+    tenant_res = await db.execute(select(Tenant).where(Tenant.id == auth.tenant_id))
+    tenant = tenant_res.scalar_one_or_none()
+    groq_key = app_settings.GROQ_API_KEY
+    if tenant and tenant.settings:
+        enc = tenant.settings.get("groqApiKey")
+        if enc:
+            decrypted = decrypt_safe(enc)
+            if decrypted and decrypted.startswith("gsk_"):
+                groq_key = decrypted
+
+    if not groq_key:
+        return JSONResponse({"error": "No Groq API key configured"}, status_code=503)
+
+    llm_prompt = f"""You are revising an AI voice agent configuration.
+
+CURRENT CONFIGURATION:
+{json_mod.dumps(current_config, indent=2)}
+
+REVISION INSTRUCTION: "{revision_prompt}"
+
+Return a JSON object containing ONLY the fields that need to change.
+Do NOT include fields that should remain unchanged.
+Return valid JSON only, no markdown."""
+
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
+                json={
+                    "model": "llama-3.3-70b-versatile",
+                    "messages": [
+                        {"role": "system", "content": "You are an expert agent configurator. Return valid JSON only with changed fields."},
+                        {"role": "user", "content": llm_prompt},
+                    ],
+                    "temperature": 0.3,
+                    "max_tokens": 1024,
+                },
+            )
+    except Exception as exc:
+        return JSONResponse({"error": f"LLM request failed: {exc}"}, status_code=503)
+
+    content = resp.json()["choices"][0]["message"]["content"].strip()
+    content = content.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+
+    try:
+        delta: dict = json_mod.loads(content)
+    except Exception:
+        return JSONResponse({"error": "LLM returned invalid JSON", "raw": content[:500]}, status_code=500)
+
+    # Build human-readable diff items for preview
+    diff_items = []
+    for key, new_val in delta.items():
+        old_val = current_config.get(key)
+        if old_val != new_val:
+            diff_items.append({
+                "field": key,
+                "before": str(old_val)[:300] if old_val else None,
+                "after": str(new_val)[:300],
+            })
+
+    if apply and not show_diff:
+        for field in ("name", "description", "systemPrompt", "voiceType",
+                      "llmPreferences", "tokenLimit", "channels"):
+            if field in delta:
+                setattr(agent, field, delta[field])
+        await db.commit()
+        await db.refresh(agent)
+
+    return JSONResponse({
+        "agentId": agent_id,
+        "delta": delta,
+        "diffItems": diff_items,
+        "applied": apply and not show_diff,
+        "previewMode": show_diff,
     })
 

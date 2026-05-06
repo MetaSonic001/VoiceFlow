@@ -1,0 +1,256 @@
+{% extends "base_dashboard.html" %}
+{% block title %}SIP Trunking — VoiceFlow AI{% endblock %}
+
+{% block content %}
+<div x-data="sipApp()" x-init="init()" class="space-y-6 fade-in">
+
+  <!-- Header -->
+  <div class="flex items-center justify-between">
+    <div>
+      <h1 class="text-2xl font-bold vf-heading bg-gradient-to-r from-slate-900 to-slate-600 dark:from-slate-100 dark:to-slate-400 bg-clip-text text-transparent">SIP Trunking / BYOC</h1>
+      <p class="text-slate-500 dark:text-slate-400 text-sm mt-1">Bring Your Own Carrier — connect Twilio BYOC or any generic SIP trunk to VoiceFlow agents.</p>
+    </div>
+    <button @click="openCreate()" class="vf-btn px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-violet-600 text-white text-sm font-medium rounded-xl flex items-center gap-2">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+      Add SIP Trunk
+    </button>
+  </div>
+
+  <!-- Info banner -->
+  <div class="rounded-xl border border-indigo-500/20 bg-indigo-50/60 dark:bg-indigo-900/10 p-4 flex items-start gap-3">
+    <svg class="w-5 h-5 text-indigo-600 dark:text-indigo-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+    <div>
+      <p class="text-sm text-indigo-700 dark:text-indigo-300">
+        SIP trunks let you use your own telecom provider (e.g. Airtel, Jio, Vonage) instead of or alongside Twilio numbers.
+        After adding a trunk, configure your carrier to send calls to the webhook URI shown below.
+      </p>
+    </div>
+  </div>
+
+  <!-- Loading -->
+  <div x-show="loading" class="flex justify-center py-12">
+    <div class="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+  </div>
+
+  <!-- Empty state -->
+  <div x-show="!loading && trunks.length === 0" class="vf-card text-center py-16">
+    <svg class="w-14 h-14 text-slate-300 dark:text-slate-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 16l-4-4m0 0l4-4m-4 4h14m-5 4l4-4m0 0l-4-4"/>
+    </svg>
+    <p class="text-slate-500 dark:text-slate-400 font-medium">No SIP trunks configured</p>
+    <p class="text-slate-400 dark:text-slate-500 text-sm mt-1">Add your first trunk to route calls via your own carrier.</p>
+    <button @click="openCreate()" class="mt-5 vf-btn px-5 py-2 bg-gradient-to-r from-indigo-600 to-violet-600 text-white text-sm rounded-xl">Add SIP Trunk</button>
+  </div>
+
+  <!-- Trunk cards -->
+  <div x-show="!loading && trunks.length > 0" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+    <template x-for="trunk in trunks" :key="trunk.id">
+      <div class="vf-card p-5 group hover:border-indigo-500/30 transition-all">
+        <div class="flex items-start justify-between mb-3">
+          <div class="flex-1 min-w-0">
+            <h3 class="font-semibold text-slate-900 dark:text-slate-100 truncate" x-text="trunk.name"></h3>
+            <span class="inline-block mt-1 px-2 py-0.5 rounded-full text-xs font-medium"
+                  :class="trunk.provider === 'twilio_byoc' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300' : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300'"
+                  x-text="trunk.provider === 'twilio_byoc' ? 'Twilio BYOC' : 'Generic SIP'"></span>
+          </div>
+          <span :class="trunk.active ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-slate-100 text-slate-500 dark:bg-slate-800'"
+                class="flex-shrink-0 px-2.5 py-1 rounded-full text-xs font-medium" x-text="trunk.active ? 'Active' : 'Inactive'"></span>
+        </div>
+
+        <div class="space-y-1 mb-4 text-xs text-slate-500 dark:text-slate-400">
+          <div x-show="trunk.sipUri"><span class="font-medium">SIP URI:</span> <span class="font-mono" x-text="trunk.sipUri"></span></div>
+          <div x-show="trunk.fromNumber"><span class="font-medium">From:</span> <span x-text="trunk.fromNumber"></span></div>
+          <div x-show="trunk.agentId"><span class="font-medium">Agent:</span> <span x-text="trunk.agentId"></span></div>
+          <div x-show="trunk.updatedAt"><span class="font-medium">Updated:</span> <span x-text="fmtDate(trunk.updatedAt)"></span></div>
+        </div>
+
+        <!-- Webhook URI -->
+        <div x-show="trunk.agentId" class="bg-slate-50 dark:bg-slate-800/50 rounded-lg px-3 py-2 mb-4 flex items-center gap-2">
+          <svg class="w-3.5 h-3.5 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
+          <span class="text-xs font-mono text-slate-500 dark:text-slate-400 truncate flex-1" x-text="webhookUris[trunk.agentId] || 'Loading…'"></span>
+          <button @click="copyWebhook(trunk.agentId)" class="flex-shrink-0 text-slate-400 hover:text-indigo-500 transition">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/></svg>
+          </button>
+        </div>
+
+        <!-- Actions -->
+        <div class="flex gap-2">
+          <button @click="testTrunk(trunk.id)"
+                  :disabled="testing[trunk.id]"
+                  class="flex-1 py-2 text-xs font-medium border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition disabled:opacity-50">
+            <span x-show="!testing[trunk.id]">Test</span>
+            <span x-show="testing[trunk.id]">Testing…</span>
+          </button>
+          <button @click="deleteTrunk(trunk.id)"
+                  class="px-3 py-2 text-xs text-rose-500 border border-rose-200 dark:border-rose-800 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-900/20 transition">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+          </button>
+        </div>
+      </div>
+    </template>
+  </div>
+
+  <!-- Add Trunk modal -->
+  <div x-show="modal.open" x-cloak @click.self="modal.open=false"
+       x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+       class="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+    <div x-show="modal.open" x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0 scale-95" x-transition:enter-end="opacity-100 scale-100"
+         class="vf-card-static max-w-lg w-full p-6 dark:bg-slate-800">
+      <h3 class="text-lg font-bold mb-5 vf-heading">Add SIP Trunk</h3>
+      <form @submit.prevent="saveTrunk()" class="space-y-4">
+        <div>
+          <label class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">Trunk Name *</label>
+          <input x-model="modal.form.name" required placeholder="Airtel SIP Trunk" class="vf-input w-full">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">Provider *</label>
+          <select x-model="modal.form.provider" class="vf-input w-full">
+            <option value="twilio_byoc">Twilio BYOC</option>
+            <option value="generic_sip">Generic SIP</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">SIP URI *</label>
+          <input x-model="modal.form.sipUri" required placeholder="sip:trunk.yourcarrier.com:5060" class="vf-input w-full font-mono text-sm">
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">SIP Username</label>
+            <input x-model="modal.form.sipUsername" placeholder="username" class="vf-input w-full">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">SIP Password</label>
+            <input x-model="modal.form.sipPassword" type="password" placeholder="••••••••" class="vf-input w-full">
+          </div>
+        </div>
+
+        <!-- Twilio BYOC fields -->
+        <template x-if="modal.form.provider === 'twilio_byoc'">
+          <div class="space-y-3 p-3 rounded-xl bg-red-50 dark:bg-red-900/10 border border-red-200/60 dark:border-red-800/30">
+            <p class="text-xs text-red-600 dark:text-red-400 font-medium">Twilio BYOC credentials</p>
+            <div>
+              <label class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">Twilio Account SID</label>
+              <input x-model="modal.form.twilioAccountSid" placeholder="ACxxxxxxxx" class="vf-input w-full font-mono text-sm">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">Twilio Auth Token</label>
+              <input x-model="modal.form.twilioAuthToken" type="password" placeholder="••••••••" class="vf-input w-full">
+            </div>
+          </div>
+        </template>
+
+        <div>
+          <label class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">Agent ID (route inbound calls to)</label>
+          <input x-model="modal.form.agentId" placeholder="agent-uuid" class="vf-input w-full font-mono text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">From Number (outbound CLI)</label>
+          <input x-model="modal.form.fromNumber" placeholder="+91xxxxxxxxxx" class="vf-input w-full">
+        </div>
+
+        <div class="flex gap-3 pt-2">
+          <button type="submit" :disabled="saving" class="vf-btn flex-1 py-2.5 bg-gradient-to-r from-indigo-600 to-violet-600 text-white rounded-xl text-sm font-medium disabled:opacity-50">
+            <span x-show="!saving">Save Trunk</span><span x-show="saving">Saving…</span>
+          </button>
+          <button type="button" @click="modal.open=false" class="flex-1 py-2.5 border border-slate-200 dark:border-slate-600 rounded-xl text-sm hover:bg-slate-50 dark:hover:bg-slate-700 transition">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div x-show="toast.show" x-cloak x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0 translate-y-4" x-transition:enter-end="opacity-100 translate-y-0"
+       class="fixed bottom-6 right-6 z-50 px-5 py-3 rounded-xl shadow-lg text-sm font-medium text-white"
+       :class="toast.type === 'success' ? 'bg-emerald-600' : 'bg-rose-600'"
+       x-text="toast.msg"></div>
+</div>
+
+<script>
+function sipApp() {
+  return {
+    trunks: [],
+    loading: true,
+    saving: false,
+    testing: {},
+    webhookUris: {},
+    modal: { open: false, form: { name: '', provider: 'twilio_byoc', sipUri: '', sipUsername: '', sipPassword: '', twilioAccountSid: '', twilioAuthToken: '', agentId: '', fromNumber: '' } },
+    toast: { show: false, msg: '', type: 'success' },
+
+    async init() {
+      await this.load();
+    },
+    async load() {
+      this.loading = true;
+      try {
+        const r = await fetch('/api/sip-trunking/trunks/', { headers: { 'X-CSRFToken': getCookie('csrftoken') } });
+        const d = await r.json();
+        this.trunks = d.trunks || d || [];
+        // Load webhook URIs for each trunk that has an agentId
+        const agentIds = [...new Set(this.trunks.filter(t => t.agentId).map(t => t.agentId))];
+        await Promise.all(agentIds.map(id => this.loadWebhookUri(id)));
+      } catch (e) { this.notify('Failed to load trunks', 'error'); }
+      this.loading = false;
+    },
+    async loadWebhookUri(agentId) {
+      try {
+        const r = await fetch(`/api/sip-trunking/webhook-uri/${agentId}/`, { headers: { 'X-CSRFToken': getCookie('csrftoken') } });
+        if (r.ok) {
+          const d = await r.json();
+          this.webhookUris[agentId] = d.inboundWebhookUrl || d.webhook_uri || '';
+        }
+      } catch (e) {}
+    },
+    openCreate() {
+      this.modal = { open: true, form: { name: '', provider: 'twilio_byoc', sipUri: '', sipUsername: '', sipPassword: '', twilioAccountSid: '', twilioAuthToken: '', agentId: '', fromNumber: '' } };
+    },
+    async saveTrunk() {
+      this.saving = true;
+      try {
+        const r = await fetch('/api/sip-trunking/trunks/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+          body: JSON.stringify(this.modal.form),
+        });
+        if (!r.ok) throw new Error(await r.text());
+        this.modal.open = false;
+        this.notify('SIP trunk added');
+        await this.load();
+      } catch (e) { this.notify('Save failed: ' + e.message, 'error'); }
+      this.saving = false;
+    },
+    async testTrunk(trunkId) {
+      this.testing = { ...this.testing, [trunkId]: true };
+      try {
+        const r = await fetch(`/api/sip-trunking/trunks/${trunkId}/test/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+          body: '{}',
+        });
+        const d = await r.json();
+        this.notify(d.success ? '✓ Trunk test passed' : `Test failed: ${d.error || d.message}`, d.success ? 'success' : 'error');
+      } catch (e) { this.notify('Test request failed', 'error'); }
+      this.testing = { ...this.testing, [trunkId]: false };
+    },
+    async deleteTrunk(trunkId) {
+      if (!confirm('Delete this SIP trunk?')) return;
+      try {
+        await fetch(`/api/sip-trunking/trunks/${trunkId}/`, { method: 'DELETE', headers: { 'X-CSRFToken': getCookie('csrftoken') } });
+        this.trunks = this.trunks.filter(t => t.id !== trunkId);
+        this.notify('Trunk deleted');
+      } catch { this.notify('Delete failed', 'error'); }
+    },
+    async copyWebhook(agentId) {
+      const uri = this.webhookUris[agentId];
+      if (uri) {
+        navigator.clipboard.writeText(uri).then(() => this.notify('Webhook URI copied'));
+      }
+    },
+    fmtDate(d) { return d ? new Date(d).toLocaleDateString() : '—'; },
+    notify(msg, type = 'success') {
+      this.toast = { show: true, msg, type };
+      setTimeout(() => this.toast.show = false, 3500);
+    },
+  };
+}
+</script>
+{% endblock %}

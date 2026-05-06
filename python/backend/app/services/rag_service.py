@@ -29,6 +29,7 @@ from app.models import (
     Agent, AgentConfiguration, AgentTemplate, Brand, CallLog,
     KbAttachment, RetrainingExample, Tenant,
 )
+from app.services.observability import trace_span
 
 logger = logging.getLogger("voiceflow.rag")
 
@@ -1064,8 +1065,6 @@ async def process_query(
     allowed_doc_ids: Optional[list[str]] = None  # None = no filter (backward-compat)
 
     if kb_attachments:
-        # Determine which documents are relevant to this query
-        # Run synchronously in thread to keep event loop free (embedding model is CPU-bound)
         import asyncio as _asyncio
 
         def _compute_allowed():
@@ -1083,10 +1082,19 @@ async def process_query(
         with ThreadPoolExecutor(max_workers=1) as pool:
             allowed_doc_ids = await loop.run_in_executor(pool, _compute_allowed)
 
-    # 3. Query ChromaDB (with optional document filter)
-    retrieved_docs = await query_documents(
-        tenant_id, agent_id, query, allowed_doc_ids=allowed_doc_ids
-    )
+    # 3. Query ChromaDB (with optional document filter) — traced
+    async with trace_span(
+        "rag_retrieval",
+        tenant_id=tenant_id,
+        agent_id=agent_id,
+        session_id=session_id,
+        query_preview=query[:120],
+    ) as rag_span:
+        retrieved_docs = await query_documents(
+            tenant_id, agent_id, query, allowed_doc_ids=allowed_doc_ids
+        )
+        rag_span["docs_retrieved"] = len(retrieved_docs)
+        rag_span["kb_filter_active"] = allowed_doc_ids is not None
 
     # 4. Apply policy scoring
     if retrieved_docs and ctx.get("mergedPolicies"):
@@ -1110,17 +1118,31 @@ async def process_query(
             "sources": [],
         }
 
-    # 8. Generate response
-    response_result = await generate_response(
-        groq_key=groq_key,
-        system_prompt=system_prompt,
-        query=query,
-        context_chunks=retrieved_docs,
-        conversation_history=ctx["conversationHistory"],
-        token_limit=ctx["tokenLimit"],
+    # 8. Generate response — traced
+    async with trace_span(
+        "llm",
+        tenant_id=tenant_id,
+        agent_id=agent_id,
+        session_id=session_id,
         model=ctx["model"],
-        tools=tools,
-    )
+        input_preview=query[:120],
+    ) as llm_span:
+        response_result = await generate_response(
+            groq_key=groq_key,
+            system_prompt=system_prompt,
+            query=query,
+            context_chunks=retrieved_docs,
+            conversation_history=ctx["conversationHistory"],
+            token_limit=ctx["tokenLimit"],
+            model=ctx["model"],
+            tools=tools,
+        )
+        # Capture output preview for trace
+        if isinstance(response_result, str):
+            llm_span["output_preview"] = response_result[:120]
+        elif isinstance(response_result, dict):
+            llm_span["output_preview"] = (response_result.get("content") or str(response_result))[:120]
+            llm_span["response_type"] = response_result.get("type", "text")
 
     # Handle tool_call vs text response
     if tools and isinstance(response_result, dict) and response_result.get("type") == "tool_call":

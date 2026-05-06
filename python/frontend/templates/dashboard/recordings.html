@@ -73,6 +73,9 @@
 
           <!-- Actions -->
           <div class="flex items-center gap-2 flex-shrink-0">
+            <button @click="openReview(rec)"
+                    class="px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/40 transition"
+                    title="Review this call">Review</button>
             <button @click="downloadRec(rec.id)"
                     class="p-2 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 transition text-slate-500 dark:text-slate-400"
                     title="Download">
@@ -147,6 +150,45 @@
        class="fixed bottom-6 right-6 z-50 px-5 py-3 rounded-xl shadow-lg text-sm font-medium text-white"
        :class="toast.type === 'success' ? 'bg-emerald-600' : 'bg-rose-600'"
        x-text="toast.msg"></div>
+
+  <!-- Review Modal -->
+  <div x-show="review.open" x-cloak @click.self="review.open = false"
+       class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="vf-card-static max-w-lg w-full p-6 dark:bg-slate-800">
+      <div class="flex items-center justify-between mb-5">
+        <h3 class="font-bold text-lg vf-heading">Review Call</h3>
+        <button @click="review.open = false" class="text-slate-400 hover:text-slate-600">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <p class="text-sm text-slate-500 dark:text-slate-400 mb-4">Rate this call to train the agent. Positive examples become few-shot demonstrations. Negative examples generate corrective coaching cards for admin review.</p>
+      <div class="flex gap-3 mb-4">
+        <button @click="review.rating = 'good'"
+                :class="review.rating === 'good' ? 'ring-2 ring-emerald-500 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400' : 'border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'"
+                class="flex-1 py-3 rounded-xl font-medium text-sm transition flex items-center justify-center gap-2">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905a3.61 3.61 0 01-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5"/></svg>
+          Good Call
+        </button>
+        <button @click="review.rating = 'bad'"
+                :class="review.rating === 'bad' ? 'ring-2 ring-rose-500 bg-rose-50 dark:bg-rose-900/30 text-rose-700 dark:text-rose-400' : 'border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'"
+                class="flex-1 py-3 rounded-xl font-medium text-sm transition flex items-center justify-center gap-2">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14H5.236a2 2 0 01-1.789-2.894l3.5-7A2 2 0 018.736 3h4.018c.163 0 .326.02.485.06L17 4m-7 10v2a2 2 0 002 2h.095c.5 0 .905-.405.905-.905 0-.715.222-1.41.632-1.988L17 13V4m-7 10h2m5-10h2a2 2 0 012 2v6a2 2 0 01-2 2h-2.5"/></svg>
+          Bad Call
+        </button>
+      </div>
+      <textarea x-model="review.note" :placeholder="review.rating === 'bad' ? 'Describe the issue (e.g. agent quoted wrong price, failed to escalate)…' : 'Optional note about what made this a great call…'"
+                class="vf-input text-sm w-full h-24 resize-none mb-4"></textarea>
+      <div class="flex justify-end gap-3">
+        <button @click="review.open = false" class="px-4 py-2 text-sm border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition">Cancel</button>
+        <button @click="submitReview()" :disabled="!review.rating || review.submitting"
+                :class="review.rating === 'good' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-rose-600 hover:bg-rose-700'"
+                class="px-4 py-2 text-sm text-white rounded-lg transition disabled:opacity-50">
+          <span x-show="!review.submitting">Submit Review</span>
+          <span x-show="review.submitting">Submitting…</span>
+        </button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -157,6 +199,7 @@ function recordingsApp() {
     filter: { agent: '', search: '' },
     player: { open: false, rec: null, audioUrl: '' },
     toast: { show: false, msg: '', type: 'success' },
+    review: { open: false, rec: null, rating: '', note: '', submitting: false },
 
     async init() {
       try {
@@ -211,6 +254,36 @@ function recordingsApp() {
         this.recordings = this.recordings.filter(r => r.id !== id);
         this.notify('Recording deleted');
       } catch { this.notify('Delete failed', 'error'); }
+    },
+    openReview(rec) {
+      this.review = { open: true, rec, rating: '', note: '', submitting: false };
+    },
+    async submitReview() {
+      if (!this.review.rating || this.review.submitting) return;
+      this.review.submitting = true;
+      try {
+        const rec = this.review.rec;
+        const body = {
+          recording_id: rec.id,
+          call_log_id: rec.callLogId || rec.id,
+          agent_id: rec.agentId || this.filter.agent || '',
+          rating: this.review.rating,
+          note: this.review.note,
+        };
+        const r = await fetch('/api/coaching/from-recording/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken() },
+          body: JSON.stringify(body),
+        });
+        const d = await r.json();
+        if (r.ok) {
+          this.notify(d.message || 'Review submitted', 'success');
+          this.review.open = false;
+        } else {
+          this.notify(d.error || 'Review failed', 'error');
+        }
+      } catch { this.notify('Review failed', 'error'); }
+      this.review.submitting = false;
     },
     formatDuration(s) { if (!s) return '—'; const m = Math.floor(s/60); const sec = s%60; return `${m}m ${sec}s`; },
     formatDate(d) { return d ? new Date(d).toLocaleString() : '—'; },

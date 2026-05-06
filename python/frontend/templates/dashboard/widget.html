@@ -13,12 +13,83 @@
 </div>
 
 {% for agent in agents %}
-<div class="vf-card p-5 mb-4" x-data="{copied:false}">
-  <div class="flex items-center justify-between">
+<div class="vf-card p-5 mb-4"
+     x-data="{
+       copied: false,
+       color: '#6366f1',
+       greeting: '',
+       widgetName: '{{ agent.name|escapejs }}',
+       get embedUrl() {
+         const p = new URLSearchParams({ color: this.color, greeting: this.greeting, widget_name: this.widgetName });
+         return location.origin + '/api/widget/{{ agent.id }}/embed.js?' + p.toString();
+       },
+       get embedTag() { return '<script src=\'' + this.embedUrl + '\'><\/script>'; },
+       copyCode() { navigator.clipboard.writeText(this.embedTag); this.copied=true; setTimeout(()=>this.copied=false,2000); },
+     }">
+  <div class="flex items-center justify-between mb-3">
     <div><span class="font-semibold dark:text-white">{{ agent.name }}</span> <span class="text-xs px-2 py-1 rounded-full {% if agent.status == 'active' %}bg-green-100 text-green-700{% else %}bg-gray-100 text-gray-600{% endif %} ml-2">{{ agent.status }}</span></div>
-    <button @click="navigator.clipboard.writeText('<script src=\'' + location.origin + '/widget/{{ agent.id }}/embed.js\'><\/script>'); copied=true; setTimeout(()=>copied=false,2000)" class="vf-btn px-3 py-1.5 border dark:border-gray-700/50 rounded-lg text-sm hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700" x-text="copied?'Copied!':'Copy Code'">Copy Code</button>
+    <button @click="copyCode()" class="vf-btn px-3 py-1.5 border dark:border-gray-700/50 rounded-lg text-sm hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700" x-text="copied?'Copied!':'Copy Code'">Copy Code</button>
   </div>
-  <code class="block mt-3 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg text-xs font-mono text-gray-600 dark:text-gray-400" x-text="'<script src=\"' + location.origin + '/widget/{{ agent.id }}/embed.js\"><\/script>'"></code>
+
+  <!-- Branding customization -->
+  <div class="grid md:grid-cols-2 gap-4 mb-3">
+    <div class="space-y-3">
+      <h4 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Branding</h4>
+      <div>
+        <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Widget Name</label>
+        <input x-model="widgetName" class="vf-input text-sm" placeholder="AI Assistant">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Greeting Message</label>
+        <input x-model="greeting" class="vf-input text-sm" placeholder="Hi! How can I help you today?">
+      </div>
+      <div class="flex items-center gap-3">
+        <label class="text-xs text-gray-500 dark:text-gray-400">Primary Color</label>
+        <input type="color" x-model="color" class="h-8 w-16 rounded border border-gray-200 dark:border-gray-700 cursor-pointer">
+        <span class="text-xs font-mono text-gray-500" x-text="color"></span>
+      </div>
+    </div>
+
+    <!-- Live mini preview -->
+    <div>
+      <h4 class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Preview</h4>
+      <div class="relative bg-white dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden" style="height:220px;">
+        <!-- fake chat header -->
+        <div class="flex items-center justify-between px-3 py-2.5" :style="'background:'+color">
+          <div class="flex items-center gap-2">
+            <div class="w-6 h-6 rounded-full bg-white/20 flex items-center justify-center">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="white"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/></svg>
+            </div>
+            <span class="text-xs font-semibold text-white" x-text="widgetName || 'AI Agent'"></span>
+          </div>
+          <span class="text-white/70 text-base cursor-pointer">×</span>
+        </div>
+        <!-- fake message area -->
+        <div class="px-3 pt-2 space-y-2" style="font-size:11px;">
+          <template x-if="greeting">
+            <div class="inline-block bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-gray-200 px-2.5 py-1.5 rounded-xl rounded-bl-sm max-w-[80%]" x-text="greeting"></div>
+          </template>
+          <template x-if="!greeting">
+            <div class="inline-block bg-gray-100 dark:bg-slate-700 text-gray-400 px-2.5 py-1.5 rounded-xl rounded-bl-sm italic">Hi! How can I help?</div>
+          </template>
+          <div class="flex justify-end"><div class="inline-block text-white px-2.5 py-1.5 rounded-xl rounded-br-sm max-w-[80%]" :style="'background:'+color">Hello, I need help.</div></div>
+        </div>
+        <!-- fake input bar -->
+        <div class="absolute bottom-0 left-0 right-0 flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-slate-900 border-t border-gray-100 dark:border-gray-700">
+          <div class="flex-1 bg-gray-50 dark:bg-slate-800 rounded-full px-3 py-1 text-[10px] text-gray-400">Type a message…</div>
+          <div class="w-6 h-6 rounded-full flex items-center justify-center" :style="'background:'+color">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="white"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+          </div>
+        </div>
+        <!-- floating button preview -->
+        <div class="absolute bottom-10 right-3 w-8 h-8 rounded-full flex items-center justify-center shadow-md" :style="'background:'+color">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="white"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <code class="block mt-2 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg text-xs font-mono text-gray-600 dark:text-gray-400 break-all" x-text="embedTag"></code>
 </div>
 {% empty %}
 <div class="vf-card p-12 text-center text-gray-400">No agents yet. Create an agent first.</div>

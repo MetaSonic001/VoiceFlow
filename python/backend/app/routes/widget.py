@@ -65,20 +65,39 @@ async def widget_config(agent_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{agent_id}/embed.js")
-async def widget_embed_js(agent_id: str, db: AsyncSession = Depends(get_db)):
-    """Return embeddable JavaScript widget for any website."""
+async def widget_embed_js(
+    agent_id: str,
+    color: str = "#6366f1",
+    greeting: str = "",
+    widget_name: str = "",
+    db: AsyncSession = Depends(get_db),
+):
+    """Return embeddable JavaScript widget for any website.
+
+    Query params:
+      color       — hex primary color, e.g. #14b8a6
+      greeting    — opening message shown when widget first opens
+      widget_name — override displayed agent name
+    """
     result = await db.execute(select(Agent).where(Agent.id == agent_id))
     agent = result.scalar_one_or_none()
     if not agent:
         return PlainTextResponse("console.error('VoiceFlow: Agent not found');", status_code=404)
 
+    # Sanitise injected values (no quotes / script injection)
+    import re as _re
+    safe_color = color if _re.match(r'^#[0-9a-fA-F]{3,8}$', color) else "#6366f1"
+    safe_name = (widget_name or agent.name or "AI Agent").replace("'", "\\'").replace("\\", "")[:80]
+    safe_greeting = greeting.replace("'", "\\'").replace("\\", "")[:240]
+
     js = r"""
 (function() {
   /* VoiceFlow Embeddable Chat Widget — auto-injected */
   var AGENT_ID = '""" + agent_id + r"""';
-  var AGENT_NAME = '""" + (agent.name or "AI Agent").replace("'", "\\'") + r"""';
+  var AGENT_NAME = '""" + safe_name + r"""';
   var API_BASE = window.location.protocol + '//' + window.location.host;
-  var PRIMARY = '#6366f1';
+  var PRIMARY = '""" + safe_color + r"""';
+  var GREETING = '""" + safe_greeting + r"""';
 
   /* ── Simple Markdown renderer (bold, italic, code, links) ── */
   function md(text) {
@@ -182,7 +201,11 @@ async def widget_embed_js(agent_id: str, db: AsyncSession = Depends(get_db)):
   function startSession() {
     fetch(API_BASE + '/api/widget/' + AGENT_ID + '/sessions', {method:'POST',headers:{'Content-Type':'application/json'}})
       .then(function(r) { return r.json(); })
-      .then(function(d) { sessionId = d.sessionId; if(d.greeting) addMsg(d.greeting, false); })
+      .then(function(d) {
+        sessionId = d.sessionId;
+        var greet = d.greeting || GREETING;
+        if (greet) addMsg(greet, false);
+      })
       .catch(function(){});
   }
 

@@ -196,6 +196,46 @@
       <div x-show="messages.length===0" class="text-center text-gray-400 text-sm py-8">Select an agent and click the mic to start a conversation.</div>
     </div>
   </div>
+
+  <!-- Background Ambient Sound -->
+  <div class="vf-card p-5" x-show="selectedAgentId">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <h3 class="font-semibold text-sm dark:text-white">Background Ambient Sound</h3>
+        <p class="text-xs text-gray-400 mt-0.5">Mix subtle ambient noise into the agent's audio to sound more natural on calls</p>
+      </div>
+      <button @click="saveBgSound()" :disabled="bgSoundSaving"
+              class="vf-btn px-4 py-1.5 bg-teal-600 text-white text-xs rounded-lg disabled:opacity-50">
+        <span x-show="!bgSoundSaving">Save</span><span x-show="bgSoundSaving">Saving…</span>
+      </button>
+    </div>
+    <div class="grid grid-cols-2 gap-4">
+      <div>
+        <label class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-2">Ambient Type</label>
+        <div class="grid grid-cols-2 gap-2">
+          <template x-for="t in bgSoundTypes" :key="t.type">
+            <label :class="bgSound.type === t.type ? 'ring-2 ring-teal-500 bg-teal-50 dark:bg-teal-900/20' : 'bg-gray-50 dark:bg-gray-800 hover:bg-gray-100'"
+                   class="flex items-center gap-2 p-2.5 rounded-lg cursor-pointer transition">
+              <input type="radio" x-model="bgSound.type" :value="t.type" class="hidden">
+              <span class="text-lg" x-text="t.type === 'none' ? '🔇' : t.type === 'office' ? '🏢' : t.type === 'callcenter' ? '📞' : t.type === 'cafe' ? '☕' : '🌆'"></span>
+              <div>
+                <div class="text-xs font-medium dark:text-white" x-text="t.label || t.type"></div>
+                <div class="text-[10px] text-gray-400" x-text="t.description || ''"></div>
+              </div>
+            </label>
+          </template>
+        </div>
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-2">
+          Volume: <span class="font-bold text-teal-600" x-text="Math.round(bgSound.volume * 100) + '%'"></span>
+        </label>
+        <input type="range" x-model.number="bgSound.volume" min="0" max="1" step="0.05"
+               class="w-full accent-teal-600 mt-2" :disabled="bgSound.type === 'none'">
+        <p class="text-[10px] text-gray-400 mt-2">Recommended: 10–25% for a natural effect without distracting callers.</p>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -239,6 +279,16 @@ function voiceAgentApp() {
     _silenceThreshold: 0.01,
     _silenceMs: 1500,
     _lastSoundTime: 0,
+    // Background Ambient Sound
+    bgSound: { type: 'none', volume: 0.15 },
+    bgSoundTypes: [
+      { type: 'none', label: 'None', description: 'No background' },
+      { type: 'office', label: 'Office', description: 'Quiet office' },
+      { type: 'callcenter', label: 'Call Center', description: 'Floor chatter' },
+      { type: 'cafe', label: 'Café', description: 'Coffee shop' },
+      { type: 'street', label: 'Street', description: 'Outdoor urban' },
+    ],
+    bgSoundSaving: false,
 
     get stateLabel() {
       return {idle:'Ready',listening:'Listening…',processing:'Thinking…',speaking:'Speaking…'}[this.state] || 'Ready';
@@ -407,6 +457,34 @@ function voiceAgentApp() {
       this.messages = [];
       this.sessionId = 'voice-' + Date.now();
       this.connectWs();
+      this.loadBgSound();
+    },
+
+    async loadBgSound() {
+      if (!this.selectedAgentId) return;
+      try {
+        const r = await fetch(`/api/background-sound/${this.selectedAgentId}/`, { headers: { 'X-CSRFToken': getCookie('csrftoken') } });
+        if (r.ok) {
+          const d = await r.json();
+          this.bgSound.type = d.type || 'none';
+          this.bgSound.volume = d.volume ?? 0.15;
+        }
+      } catch {}
+    },
+
+    async saveBgSound() {
+      if (!this.selectedAgentId) return;
+      this.bgSoundSaving = true;
+      try {
+        const r = await fetch(`/api/background-sound/${this.selectedAgentId}/`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+          body: JSON.stringify(this.bgSound),
+        });
+        if (!r.ok) throw new Error();
+        typeof showToast === 'function' && showToast('Background sound saved', 'success');
+      } catch { typeof showToast === 'function' && showToast('Save failed', 'error'); }
+      this.bgSoundSaving = false;
     },
 
     connectWs() {

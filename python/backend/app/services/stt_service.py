@@ -6,6 +6,13 @@ Secondary engine: Vosk KaldiRecognizer (offline, auto-downloads 40 MB model)
 Fallback engine : Groq Whisper API
 Indian languages: Sarvam AI (pip install sarvamai) — 22 Indian languages + Hinglish
 Noise reduction : noisereduce (spectral gating, CPU-only, applied before STT)
+
+Mid-call language switching:
+  - Detected language is stored in Redis at call_lang:{call_sid} with 2h TTL
+  - Callers pass call_sid to transcribe_bytes(); on language change an event is emitted
+  - get_call_language(call_sid) returns the current detected language for a call
+  - streaming_orchestrator passes the stored language back for subsequent turns so
+    Sarvam / Whisper stay locked to the correct code-switched language
 """
 from __future__ import annotations
 
@@ -106,6 +113,46 @@ def calibrate_noise_floor(call_sid: str, first_500ms_pcm: bytes) -> float:
 def clear_noise_calibration(call_sid: str) -> None:
     """Remove cached noise floor when a call ends."""
     _noise_floor_cache.pop(call_sid, None)
+
+
+# ── Per-call language tracking ────────────────────────────────────────────────
+# Supports mid-call language switching: detected language stored in Redis so that
+# subsequent STT turns can continue in the same language (or follow the switch).
+# Key: call_lang:{call_sid}  Value: BCP-47 code, e.g. "hi-IN", "en-IN"
+# TTL: 2 hours (auto-expires after call ends)
+
+async def _redis_key_set(key: str, value: str, ttl: int = 7200) -> None:
+    try:
+        import redis.asyncio as aioredis
+        r = aioredis.Redis(host=settings.REDIS_HOST, port=settings.REDIS_PORT, db=2, decode_responses=True)
+        await r.setex(key, ttl, value)
+        await r.aclose()
+    except Exception:
+        pass
+
+
+async def _redis_key_get(key: str) -> Optional[str]:
+    try:
+        import redis.asyncio as aioredis
+        r = aioredis.Redis(host=settings.REDIS_HOST, port=settings.REDIS_PORT, db=2, decode_responses=True)
+        val = await r.get(key)
+        await r.aclose()
+        return val
+    except Exception:
+        return None
+
+
+async def update_call_language(call_sid: str, language_code: str) -> None:
+    """Persist the detected/active language for an ongoing call."""
+    await _redis_key_set(f"call_lang:{call_sid}", language_code, ttl=7200)
+    logger.info("[stt] call %s language updated → %s", call_sid, language_code)
+
+
+async def get_call_language(call_sid: str) -> Optional[str]:
+    """Return the most recently detected language for an ongoing call, or None."""
+    if not call_sid:
+        return None
+    return await _redis_key_get(f"call_lang:{call_sid}")
 
 
 def _apply_noise_reduction(
@@ -257,37 +304,71 @@ class STTService:
           3. vosk
           4. groq (if engine=='groq' and groq_api_key provided)
 
+        Mid-call language switching:
+          If call_sid is provided, the detected language is stored/updated in Redis at
+          call_lang:{call_sid}.  On subsequent turns, pass call_sid and omit `language`
+          — the service automatically loads the cached language so STT stays consistent
+          within a code-switching conversation.
+
         Noise reduction (noisereduce spectral gating) is applied before transcription
         with adaptive prop_decrease based on the call's calibrated noise floor.
         Pass call_sid to enable per-call adaptive calibration.
         """
+        # ── Resolve language for this turn ────────────────────────────────────
+        # If language not explicitly provided, check Redis for the call's active language
+        effective_language = language
+        if call_sid and not effective_language:
+            effective_language = await get_call_language(call_sid)
+
         # Apply adaptive noise reduction
         audio_bytes = await asyncio.get_event_loop().run_in_executor(
             None, _apply_noise_reduction, audio_bytes, sample_rate, call_sid
         )
 
+        transcript = ""
+
         if engine == "sarvam" and sarvam_api_key:
-            return await self._transcribe_sarvam(audio_bytes, sample_rate, sarvam_api_key, language)
-
-        if engine == "groq" and groq_api_key:
-            return await self._transcribe_groq(audio_bytes, sample_rate, groq_api_key)
-
-        if _WHISPER_AVAILABLE:
+            transcript, detected_lang = await self._transcribe_sarvam(
+                audio_bytes, sample_rate, sarvam_api_key, effective_language
+            )
+        elif engine == "groq" and groq_api_key:
+            transcript = await self._transcribe_groq(audio_bytes, sample_rate, groq_api_key)
+            detected_lang = effective_language  # Groq doesn't return language
+        elif _WHISPER_AVAILABLE:
             try:
-                return await self._transcribe_faster_whisper(audio_bytes, sample_rate, language)
+                transcript, detected_lang = await self._transcribe_faster_whisper(
+                    audio_bytes, sample_rate, effective_language
+                )
             except Exception as exc:
                 logger.warning("[stt] faster-whisper failed, trying Vosk: %s", exc)
-
-        if _VOSK_AVAILABLE:
+                detected_lang = effective_language
+                if _VOSK_AVAILABLE:
+                    try:
+                        transcript = await self._transcribe_vosk(audio_bytes, sample_rate)
+                    except Exception:
+                        pass
+                elif groq_api_key:
+                    transcript = await self._transcribe_groq(audio_bytes, sample_rate, groq_api_key)
+        elif _VOSK_AVAILABLE:
             try:
-                return await self._transcribe_vosk(audio_bytes, sample_rate)
+                transcript = await self._transcribe_vosk(audio_bytes, sample_rate)
+                detected_lang = effective_language
             except Exception as exc:
                 logger.warning("[stt] Vosk failed: %s", exc)
+                detected_lang = effective_language
+        elif groq_api_key:
+            transcript = await self._transcribe_groq(audio_bytes, sample_rate, groq_api_key)
+            detected_lang = effective_language
+        else:
+            detected_lang = effective_language
 
-        if groq_api_key:
-            return await self._transcribe_groq(audio_bytes, sample_rate, groq_api_key)
+        # ── Persist detected language for mid-call switching ──────────────────
+        if call_sid and detected_lang and detected_lang != effective_language:
+            await update_call_language(call_sid, detected_lang)
+        elif call_sid and detected_lang and not effective_language:
+            await update_call_language(call_sid, detected_lang)
 
-        return ""
+        return transcript
 
     def create_vosk_recognizer(self, sample_rate: int = 16000) -> Optional[Any]:
         """
@@ -342,7 +423,7 @@ class STTService:
 
     async def _transcribe_sarvam(
         self, pcm_bytes: bytes, sample_rate: int, api_key: str, language: Optional[str] = None
-    ) -> str:
+    ) -> tuple[str, Optional[str]]:
         """
         Transcribe using Sarvam AI — 22 Indian languages + Hinglish code-switching.
 
@@ -350,6 +431,7 @@ class STTService:
         Model: saarika:v2 — 8kHz telephony-optimised, mulaw/PCM, real-time WebSocket.
         language_code examples: hi-IN, ta-IN, te-IN, kn-IN, ml-IN, bn-IN, mr-IN,
                                   gu-IN, pa-IN, od-IN, ur-IN, en-IN (auto-detect if None)
+        Returns (transcript, detected_language_code).
         """
         import httpx
 
@@ -377,31 +459,32 @@ class STTService:
                     # Sarvam returns {"transcript": "...", "language_code": "hi-IN", ...}
                     transcript = data.get("transcript", "").strip()
                     detected_lang = data.get("language_code")
-                    if detected_lang:
-                        logger.info("[stt] sarvam detected language: %s", detected_lang)
-                    return transcript
+                    if detected_lang and detected_lang != language:
+                        logger.info("[stt] sarvam detected language switch: %s → %s", language, detected_lang)
+                    return transcript, detected_lang
                 logger.warning("[stt] Sarvam STT returned %s: %s", resp.status_code, resp.text[:200])
         except Exception as exc:
             logger.warning("[stt] Sarvam STT request failed: %s", exc)
-        return ""
+        return "", language
 
     async def _transcribe_faster_whisper(
         self,
         pcm_bytes: bytes,
         sample_rate: int,
         language: Optional[str] = None,
-    ) -> str:
+    ) -> tuple[str, Optional[str]]:
         """
         Transcribe with faster-whisper.
-        When language is None, whisper auto-detects and the detected code is logged
-        so callers can update their per-call language state for mid-call switching.
+        Returns (transcript, detected_language_code).
+        When language is None, whisper auto-detects and the detected code is returned
+        so the caller can update per-call language state for mid-call switching.
         """
         if not _WHISPER_AVAILABLE or _WHISPER_MODEL is None:
-            return ""
+            return "", language
 
         wav_bytes = _pcm_bytes_to_wav(pcm_bytes, sample_rate)
 
-        def _run() -> str:
+        def _run() -> tuple[str, Optional[str]]:
             buf = io.BytesIO(wav_bytes)
             segments, info = _WHISPER_MODEL.transcribe(
                 buf,
@@ -412,7 +495,8 @@ class STTService:
             if detected and detected != (language or "en"):
                 logger.info("[stt] whisper detected language=%s (prob=%.2f)",
                             detected, getattr(info, "language_probability", 0))
-            return " ".join(seg.text for seg in segments).strip()
+            transcript = " ".join(seg.text for seg in segments).strip()
+            return transcript, detected or language
 
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, _run)
