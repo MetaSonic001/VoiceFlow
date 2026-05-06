@@ -129,10 +129,12 @@ async def _synthesise_cpu_engine(text: str, engine: str, voice_id: str) -> dict 
 
 @router.get("/preset-voices")
 async def preset_voices():
+    """Legacy endpoint — returns the basic preset list. Use /api/voices/catalog for full library."""
     return {
         "voices": EDGE_VOICE_LIST + CPU_VOICE_LIST,
         "previewSentence": PREVIEW_SENTENCE,
         "cpuOnly": True,
+        "catalogUrl": "/api/voices/catalog",
     }
 
 

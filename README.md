@@ -433,6 +433,7 @@ VoiceFlow/
 | File Storage | MinIO S3-compatible (Docker, port 9020/8070) |
 | LLM | Groq API (`Llama` / `GPT-OSS` family) |
 | TTS | Edge TTS (primary) + Kokoro local fallback/cloning |
+| Voice Library | 150+ curated voices — Edge TTS (free), Sarvam AI (Indian), Kokoro/Piper (local CPU) |
 | Telephony | Twilio (TwiML Gather loop, per-tenant credentials) |
 | Credential Encryption | AES-256-GCM via `cryptography` library |
 | Build / Dev Tooling | PowerShell Makefile with startup, reset, and test targets |
@@ -657,6 +658,77 @@ On next query, assemble_context() loads approved examples:
   → Injected as Section 5 "LEARNED EXAMPLES" in build_system_prompt()
   → Agent immediately improves for similar queries (no fine-tuning)
 ```
+
+---
+
+## Voice Library System
+
+VoiceFlow includes a comprehensive Voice Library (`/dashboard/voice-library/`) with 150+ curated voices across 4 providers.
+
+### Voice Providers
+
+| Provider | Voices | Language Coverage | Requires |
+|---|---|---|---|
+| **Edge TTS** (Microsoft) | 100+ | 20+ languages including en-US, en-GB, en-IN, hi-IN, ta-IN, te-IN, de, fr, es, zh, ja, ko, etc. | Internet (free, no API key) |
+| **Sarvam AI** | 50 (10 Indian languages × 5 speakers) | hi-IN, ta-IN, te-IN, bn-IN, mr-IN, kn-IN, gu-IN, ml-IN, pa-IN, en-IN | `SARVAM_API_KEY` in `.env` |
+| **Kokoro** (local CPU) | 5 | en-US, en-GB | Kokoro sidecar at `:8880` |
+| **Piper** (local ONNX) | 2 | en-US | Piper sidecar at `:8890` |
+
+### Voice Categories
+
+Every voice is tagged with one or more use-case categories:
+- **Customer Support** — Friendly, clear, empathetic voices for IVR and support flows
+- **Sales & Outreach** — Confident, persuasive voices for outbound campaigns
+- **News & Narration** — Authoritative, broadcast-quality voices
+- **Educational** — Patient, articulate voices for learning experiences
+- **ASMR & Calm** — Soft, soothing voices for low-stress interactions
+- **Indian Regional** — Curated Indian language voices for local markets
+
+### Voice ID Convention
+
+```
+edge-{ShortName}      → e.g.  edge-en-US-AriaNeural
+sarvam-{lang}-{spk}  → e.g.  sarvam-hi-IN-meera
+kokoro-{voice}        → e.g.  kokoro-af_sky
+piper-{voice}         → e.g.  piper-en_US-lessac-medium
+clone-{uuid}          → e.g.  clone-a3b4c5...  (user-uploaded)
+```
+
+### Voice Cloning
+
+Users can upload a reference audio sample (MP3/WAV/WebM, 6–60 seconds, max 50 MB) to create a named voice clone:
+
+1. **Upload** → reference audio stored in local disk (`/tmp/voiceflow_clones/`) or MinIO  
+2. **Preview** → browser plays back the uploaded reference audio  
+3. **Assign** → clone voice assigned to any agent via `llmPreferences.voiceId = "clone-{id}"`  
+4. **Call-time synthesis** → when XTTS-v2 is installed, full neural cloning is used; otherwise a language-matched Edge TTS voice is used as fallback (CPU-only, zero extra dependencies)
+
+### Preview Caching
+
+All library voice previews are generated once and cached at:
+```
+/tmp/voiceflow_voice_previews/{voice_id_md5}.{mp3|wav}
+```
+Repeated requests are served from cache with zero re-synthesis latency.
+
+### API Endpoints
+
+```
+GET  /api/voices/catalog              → full catalog with filter params: language, gender, provider, category, search
+POST /api/voices/preview              → { voice_id, text? } → { audioUrl (base64 data URI), cached }
+GET  /api/voices/clones               → list tenant's voice clones
+POST /api/voices/clones               → multipart upload (audio, name, language)
+GET  /api/voices/clones/{id}/preview  → stream reference audio bytes
+DELETE /api/voices/clones/{id}        → delete clone + stored audio
+```
+
+### Configure Sarvam AI (Optional)
+
+Add your Sarvam API key to `python/backend/.env`:
+```env
+SARVAM_API_KEY=your_sarvam_api_key_here
+```
+Sarvam voices will then be fully available for preview and synthesis.
 
 ---
 

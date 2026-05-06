@@ -92,18 +92,37 @@
       </div>
     </div>
 
-    <!-- Voice Clone — Coming Soon -->
+    <!-- Voice Clone — Live (via Voice Library) -->
     <div x-show="voiceTab==='clone'" class="space-y-4">
-      <div class="text-center py-10">
-        <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-purple-50 dark:bg-purple-900/20 mb-4">
-          <svg class="w-8 h-8 text-purple-400 dark:text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4M12 4a3 3 0 00-3 3v4a3 3 0 006 0V7a3 3 0 00-3-3z"/></svg>
+      <!-- Quick clone list -->
+      <div x-show="cloneSamples.length > 0" class="space-y-2">
+        <p class="text-xs text-gray-500 dark:text-gray-400 font-medium">Your cloned voices</p>
+        <template x-for="cv in cloneSamples" :key="cv.id">
+          <div :class="selectedVoiceId === 'clone-'+cv.id ? 'ring-2 ring-violet-500 bg-violet-50 dark:bg-violet-900/20' : 'bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700'"
+            class="flex items-center gap-3 p-3 rounded-xl cursor-pointer transition group"
+            @click="selectedVoiceId = 'clone-'+cv.id; voiceTab = 'preset'">
+            <div class="w-9 h-9 rounded-full bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 flex items-center justify-center text-sm font-bold flex-shrink-0" x-text="cv.name[0].toUpperCase()"></div>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-medium text-gray-900 dark:text-white truncate" x-text="cv.name"></p>
+              <p class="text-xs text-gray-400" x-text="(cv.languageName || cv.languageCode) + (cv.durationSecs ? ' · ' + cv.durationSecs.toFixed(0) + 's' : '')"></p>
+            </div>
+            <span class="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" x-text="cv.status"></span>
+          </div>
+        </template>
+      </div>
+
+      <!-- Empty / CTA box -->
+      <div class="rounded-2xl border-2 border-dashed border-violet-200 dark:border-violet-800 p-8 text-center">
+        <div class="inline-flex items-center justify-center w-14 h-14 rounded-full bg-violet-50 dark:bg-violet-900/20 mb-3">
+          <svg class="w-7 h-7 text-violet-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
         </div>
-        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-300">Voice Cloning</h4>
-        <p class="text-xs text-gray-400 dark:text-gray-500 mt-1 max-w-sm mx-auto">Clone any voice from a 10-60 second audio sample. Requires GPU acceleration — coming in a future release.</p>
-        <span class="inline-flex items-center mt-3 px-3 py-1 rounded-full bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400 text-xs font-semibold">
-          <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"/></svg>
-          Coming Soon
-        </span>
+        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-300" x-text="cloneSamples.length ? 'Manage all clones in Voice Library' : 'Clone a Voice'"></h4>
+        <p class="text-xs text-gray-400 dark:text-gray-500 mt-1 max-w-xs mx-auto" x-text="cloneSamples.length ? 'Upload, preview, and assign cloned voices from the Voice Library.' : 'Upload a 15–30 second recording to create a voice clone. Works with any language.'"></p>
+        <a href="/dashboard/voice-library/#clone-section"
+          class="inline-flex items-center gap-2 mt-4 px-5 py-2.5 bg-gradient-to-r from-violet-500 to-purple-500 text-white rounded-xl text-sm font-semibold shadow-lg shadow-violet-500/25 hover:from-violet-600 hover:to-purple-600 transition">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+          <span x-text="cloneSamples.length ? 'Open Voice Library' : 'Create Voice Clone'"></span>
+        </a>
       </div>
     </div>
   </div>
@@ -243,6 +262,11 @@ function voiceAgentApp() {
           {id:'kokoro-af_sky',name:'Kokoro TTS',gender:'Neutral',style:'Local synthesis'},
         ];
       }
+      // Load cloned voices from the new Voice Library API
+      try {
+        const cr = await apiFetch('/api/voices/clones/');
+        if (cr.clones) this.cloneSamples = cr.clones;
+      } catch {}
     },
 
     selectVoice(id) {

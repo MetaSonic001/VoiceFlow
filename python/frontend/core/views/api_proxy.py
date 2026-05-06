@@ -1099,3 +1099,77 @@ def templates_list(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)
 
+
+# ── Voice Library ─────────────────────────────────────────────────────────────
+
+@login_required
+@require_http_methods(["GET"])
+def voice_catalog(request):
+    """Full voice catalog with optional filter params."""
+    try:
+        params = {k: v for k, v in request.GET.items() if v}
+        return JsonResponse(get_client(request).get_voice_catalog(**params))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@require_http_methods(["POST"])
+def voice_preview_api(request):
+    """Generate a cached voice preview clip."""
+    try:
+        return JsonResponse(get_client(request).get_voice_preview(_json_body(request)))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def voice_clones(request):
+    """List clones (GET) or upload a new clone (POST multipart)."""
+    client = get_client(request)
+    try:
+        if request.method == "GET":
+            return JsonResponse(client.list_voice_clones())
+        # POST — multipart file upload
+        audio = request.FILES.get("audio")
+        if not audio:
+            return JsonResponse({"error": "No audio file in request"}, status=400)
+        return JsonResponse(
+            client.upload_voice_clone(
+                audio_data=audio.read(),
+                filename=audio.name or "recording.mp3",
+                name=request.POST.get("name", "My Clone"),
+                language=request.POST.get("language", "en-IN"),
+            ),
+            status=201,
+        )
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+def voice_clone_preview_stream(request, clone_id):
+    """Stream the reference audio for playback in the browser."""
+    import httpx
+    from django.http import StreamingHttpResponse
+    from django.conf import settings as django_settings
+    backend = getattr(django_settings, "BACKEND_API_URL", "http://127.0.0.1:8040").rstrip("/")
+    headers = get_client(request)._headers()
+    try:
+        resp = httpx.get(f"{backend}/api/voices/clones/{clone_id}/preview", headers=headers, timeout=15)
+        content_type = resp.headers.get("content-type", "audio/mpeg")
+        return StreamingHttpResponse(resp.iter_bytes(), content_type=content_type)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=502)
+
+
+@login_required
+@require_http_methods(["DELETE"])
+def voice_clone_delete(request, clone_id):
+    """Delete a cloned voice."""
+    try:
+        return JsonResponse(get_client(request).delete_voice_clone(clone_id))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+

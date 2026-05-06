@@ -165,4 +165,12 @@ urlpatterns = [
 
     # ── Agent Templates ──────────────────────────────────────────────────
     path("api/templates/", api_proxy.templates_list, name="api_templates"),
+
+    # ── Voice Library ─────────────────────────────────────────────────────────
+    path("dashboard/voice-library/", pages.voice_library, name="voice_library"),
+    path("api/voices/catalog/",                  api_proxy.voice_catalog,              name="api_voice_catalog"),
+    path("api/voices/preview/",                  api_proxy.voice_preview_api,           name="api_voice_preview_new"),
+    path("api/voices/clones/",                   api_proxy.voice_clones,               name="api_voice_clones"),
+    path("api/voices/clones/<str:clone_id>/preview/", api_proxy.voice_clone_preview_stream, name="api_voice_clone_preview"),
+    path("api/voices/clones/<str:clone_id>/",    api_proxy.voice_clone_delete,         name="api_voice_clone_delete"),
 ]

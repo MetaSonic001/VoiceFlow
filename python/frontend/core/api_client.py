@@ -477,6 +477,29 @@ class BackendClient:
     def list_templates(self):
         return self._get("/api/templates")
 
+    # ── Voice Library ──────────────────────────────────────────────────
+    def get_voice_catalog(self, language=None, gender=None, provider=None, category=None, search=None):
+        params = {k: v for k, v in {
+            "language": language, "gender": gender, "provider": provider,
+            "category": category, "search": search,
+        }.items() if v}
+        return self._get("/api/voices/catalog", params=params)
+
+    def get_voice_preview(self, body: dict):
+        return self._post("/api/voices/preview", json=body)
+
+    def list_voice_clones(self):
+        return self._get("/api/voices/clones")
+
+    def upload_voice_clone(self, audio_data: bytes, filename: str, name: str, language: str):
+        import io
+        files = {"audio": (filename, io.BytesIO(audio_data), "audio/mpeg")}
+        data  = {"name": name, "language": language}
+        return self._post("/api/voices/clones", files=files, data=data)
+
+    def delete_voice_clone(self, clone_id: str):
+        return self._delete(f"/api/voices/clones/{clone_id}")
+
 
 def get_client(request) -> BackendClient:
     """Build a BackendClient from the current Django request."""

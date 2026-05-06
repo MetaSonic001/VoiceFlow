@@ -46,6 +46,7 @@ class Tenant(Base):
     pipelines = relationship("Pipeline", back_populates="tenant", cascade="all, delete-orphan")
     campaigns = relationship("Campaign", back_populates="tenant", cascade="all, delete-orphan")
     webhook_endpoints = relationship("WebhookEndpoint", back_populates="tenant", cascade="all, delete-orphan")
+    cloned_voices = relationship("ClonedVoice", back_populates="tenant", cascade="all, delete-orphan")
 
 
 # ── User ──────────────────────────────────────────────────────────────────────
@@ -204,6 +205,30 @@ class AgentTemplate(Base):
 
     agents = relationship("Agent", back_populates="template")
     configurations = relationship("AgentConfiguration", back_populates="template")
+
+
+# ── ClonedVoice ──────────────────────────────────────────────────────────────
+
+class ClonedVoice(Base):
+    """User-uploaded voice reference audio for voice cloning."""
+    __tablename__ = "cloned_voices"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    tenantId: Mapped[str] = mapped_column("tenantId", String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    userId: Mapped[str] = mapped_column("userId", String, nullable=False, default="")
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    languageCode: Mapped[str] = mapped_column("languageCode", String, nullable=False, default="en-IN")
+    languageName: Mapped[Optional[str]] = mapped_column("languageName", String, nullable=True)
+    # Storage key — format: "local:clones/…" or "minio:bucket/key"
+    referenceAudioKey: Mapped[str] = mapped_column("referenceAudioKey", Text, nullable=False)
+    durationSecs: Mapped[Optional[float]] = mapped_column("durationSecs", Float, nullable=True)
+    # ready | error
+    status: Mapped[str] = mapped_column(String, nullable=False, default="ready")
+    errorMessage: Mapped[Optional[str]] = mapped_column("errorMessage", Text, nullable=True)
+    createdAt: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
+    updatedAt: Mapped[datetime] = mapped_column("updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    tenant = relationship("Tenant", back_populates="cloned_voices")
 
 
 # ── AgentVersion ──────────────────────────────────────────────────────────────

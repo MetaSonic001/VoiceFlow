@@ -1,0 +1,507 @@
+{% extends "base_dashboard.html" %}
+{% block title %}Voice Library — VoiceFlow AI{% endblock %}
+{% block content %}
+<div x-data="voiceLibraryApp()" x-init="init()" class="space-y-6 fade-in-up">
+
+  <!-- ── Header ────────────────────────────────────────────────────────────── -->
+  <div class="flex items-center justify-between">
+    <div>
+      <h1 class="text-2xl font-bold bg-gradient-to-r from-gray-900 via-gray-700 to-gray-900 dark:from-white dark:via-gray-200 dark:to-white bg-clip-text text-transparent">Voice Library</h1>
+      <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+        <span x-text="filteredVoices.length"></span> voices · Edge TTS (free) · Sarvam AI (Indian) · Local CPU
+      </p>
+    </div>
+    <div class="flex gap-2">
+      <a href="#clone-section" class="vf-btn px-4 py-2 bg-gradient-to-r from-violet-500 to-purple-500 text-white rounded-lg text-sm font-medium shadow-lg shadow-violet-500/25 hover:from-violet-600 hover:to-purple-600">
+        + Clone a Voice
+      </a>
+    </div>
+  </div>
+
+  <!-- ── Filter Bar ─────────────────────────────────────────────────────────── -->
+  <div class="vf-card p-4 space-y-3">
+    <!-- Search + Language + Gender row -->
+    <div class="flex flex-wrap gap-3">
+      <div class="relative flex-1 min-w-[200px]">
+        <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+        <input x-model="search" type="text" placeholder="Search by name, language, style…" class="vf-input pl-9 w-full text-sm">
+      </div>
+      <select x-model="filterLanguage" class="vf-input text-sm min-w-[160px]">
+        <option value="">All Languages</option>
+        <template x-for="lang in languages" :key="lang.code">
+          <option :value="lang.code" x-text="lang.name"></option>
+        </template>
+      </select>
+      <select x-model="filterGender" class="vf-input text-sm">
+        <option value="">All Genders</option>
+        <option value="Female">Female</option>
+        <option value="Male">Male</option>
+      </select>
+    </div>
+    <!-- Provider + Category tabs -->
+    <div class="flex flex-wrap gap-2">
+      <span class="text-xs text-gray-400 self-center mr-1">Provider:</span>
+      <template x-for="prov in providers" :key="prov.id">
+        <button
+          @click="filterProvider = filterProvider === prov.id ? '' : prov.id"
+          :class="filterProvider === prov.id
+            ? 'bg-teal-500 text-white shadow-lg shadow-teal-500/25'
+            : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'"
+          class="px-3 py-1 rounded-full text-xs font-medium transition flex items-center gap-1.5">
+          <span x-text="prov.name"></span>
+          <span class="opacity-60 text-[10px]" x-text="'(' + prov.count + ')'"></span>
+          <span x-show="prov.requires_key && !prov.configured" class="px-1 bg-amber-400 text-white rounded text-[9px] font-bold">KEY</span>
+        </button>
+      </template>
+    </div>
+    <div class="flex flex-wrap gap-2">
+      <span class="text-xs text-gray-400 self-center mr-1">Category:</span>
+      <template x-for="(label, key) in categories" :key="key">
+        <button
+          @click="filterCategory = filterCategory === key ? '' : key"
+          :class="filterCategory === key
+            ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/25'
+            : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'"
+          class="px-3 py-1 rounded-full text-xs font-medium transition" x-text="label">
+        </button>
+      </template>
+      <button x-show="search || filterLanguage || filterGender || filterProvider || filterCategory"
+        @click="search=''; filterLanguage=''; filterGender=''; filterProvider=''; filterCategory=''"
+        class="px-3 py-1 rounded-full text-xs font-medium text-red-500 border border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/20 transition">
+        Clear filters
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Voice Grid ─────────────────────────────────────────────────────────── -->
+  <div x-show="loading" class="text-center py-16 text-gray-400">
+    <svg class="w-8 h-8 animate-spin mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9"/></svg>
+    Loading voice catalog…
+  </div>
+
+  <div x-show="!loading && filteredVoices.length === 0" class="text-center py-16 text-gray-400">
+    <svg class="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4M12 4a3 3 0 00-3 3v4a3 3 0 006 0V7a3 3 0 00-3-3z"/></svg>
+    No voices match your filters.
+  </div>
+
+  <div x-show="!loading && filteredVoices.length > 0" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+    <template x-for="voice in paginatedVoices" :key="voice.id">
+      <div
+        @click="selectVoice(voice)"
+        :class="selectedVoice && selectedVoice.id === voice.id
+          ? 'ring-2 ring-teal-500 bg-teal-50 dark:bg-teal-900/20'
+          : 'bg-white dark:bg-gray-900 hover:shadow-md dark:hover:bg-gray-800'"
+        class="vf-card p-4 cursor-pointer transition group relative">
+        <!-- Provider badge -->
+        <div class="absolute top-2 right-2 flex gap-1">
+          <span :class="{
+            'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-400': voice.provider === 'edge',
+            'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-400': voice.provider === 'sarvam',
+            'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400': voice.provider === 'kokoro',
+            'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-400': voice.provider === 'piper',
+          }" class="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide" x-text="voice.provider"></span>
+          <span x-show="voice.requires_api_key && !voice.available" class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400">KEY</span>
+        </div>
+        <!-- Avatar + name -->
+        <div class="flex items-start gap-3 pr-10">
+          <div :class="voice.gender === 'Female'
+              ? 'bg-pink-100 text-pink-600 dark:bg-pink-900/30 dark:text-pink-400'
+              : 'bg-teal-100 text-teal-600 dark:bg-teal-900/30 dark:text-teal-400'"
+            class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
+            x-text="voice.name[0]">
+          </div>
+          <div class="min-w-0 flex-1">
+            <p class="text-sm font-semibold text-gray-900 dark:text-white truncate" x-text="voice.name"></p>
+            <p class="text-xs text-gray-500 dark:text-gray-400 truncate" x-text="voice.language_name"></p>
+            <p class="text-xs text-gray-400 dark:text-gray-500 truncate mt-0.5" x-text="voice.style"></p>
+          </div>
+        </div>
+        <!-- Category pills -->
+        <div class="flex flex-wrap gap-1 mt-2">
+          <template x-for="cat in voice.categories.slice(0,2)" :key="cat">
+            <span class="px-1.5 py-0.5 rounded-full text-[9px] bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400" x-text="(categories[cat] || cat).replace(' & ', ' ')"></span>
+          </template>
+        </div>
+        <!-- Preview button -->
+        <button
+          @click.stop="previewVoice(voice)"
+          :disabled="previewingId === voice.id"
+          class="absolute bottom-3 right-3 w-7 h-7 rounded-full bg-teal-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition shadow-md hover:bg-teal-600 disabled:opacity-60">
+          <svg x-show="previewingId !== voice.id" class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+          <svg x-show="previewingId === voice.id" class="w-3.5 h-3.5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9"/></svg>
+        </button>
+      </div>
+    </template>
+  </div>
+
+  <!-- Pagination -->
+  <div x-show="totalPages > 1" class="flex items-center justify-center gap-2 mt-2">
+    <button @click="page = Math.max(1, page-1)" :disabled="page===1" class="px-3 py-1.5 rounded-lg text-sm border dark:border-gray-700 disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-gray-800">← Prev</button>
+    <span class="text-sm text-gray-500" x-text="'Page ' + page + ' of ' + totalPages"></span>
+    <button @click="page = Math.min(totalPages, page+1)" :disabled="page===totalPages" class="px-3 py-1.5 rounded-lg text-sm border dark:border-gray-700 disabled:opacity-40 hover:bg-gray-50 dark:hover:bg-gray-800">Next →</button>
+  </div>
+
+  <!-- ── Selected voice panel ────────────────────────────────────────────────── -->
+  <div x-show="selectedVoice" x-transition class="vf-card p-5" x-cloak>
+    <div class="flex items-start gap-5">
+      <div :class="selectedVoice && selectedVoice.gender === 'Female'
+          ? 'bg-pink-100 text-pink-600 dark:bg-pink-900/30 dark:text-pink-400'
+          : 'bg-teal-100 text-teal-600 dark:bg-teal-900/30 dark:text-teal-400'"
+        class="w-14 h-14 rounded-full flex items-center justify-center text-xl font-bold flex-shrink-0"
+        x-text="selectedVoice ? selectedVoice.name[0] : ''">
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2 flex-wrap">
+          <h3 class="text-lg font-semibold text-gray-900 dark:text-white" x-text="selectedVoice && selectedVoice.name"></h3>
+          <span class="text-xs text-gray-400" x-text="selectedVoice && selectedVoice.gender"></span>
+          <span class="text-xs px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-500" x-text="selectedVoice && selectedVoice.language_name"></span>
+        </div>
+        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1" x-text="selectedVoice && selectedVoice.style"></p>
+        <p class="text-xs text-gray-400 mt-1" x-text="selectedVoice && 'Voice ID: ' + selectedVoice.id"></p>
+      </div>
+      <div class="flex items-center gap-2 flex-shrink-0 flex-wrap">
+        <button @click="previewVoice(selectedVoice)" :disabled="previewingId === (selectedVoice && selectedVoice.id)"
+          class="vf-btn px-4 py-2 border border-teal-200 dark:border-teal-700 text-teal-600 dark:text-teal-400 rounded-lg text-sm hover:bg-teal-50 dark:hover:bg-teal-900/20 flex items-center gap-2 disabled:opacity-50">
+          <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+          Preview
+        </button>
+        <div class="flex items-center gap-2">
+          <select x-model="assignAgentId" class="vf-input text-sm">
+            <option value="">Assign to agent…</option>
+            {% for a in agents %}
+            <option value="{{ a.id }}">{{ a.name }}</option>
+            {% endfor %}
+          </select>
+          <button @click="assignVoice()" :disabled="!assignAgentId || assigning"
+            class="vf-btn px-4 py-2 bg-gradient-to-r from-teal-500 to-cyan-500 text-white rounded-lg text-sm font-medium shadow-lg shadow-teal-500/25 hover:from-teal-600 hover:to-cyan-600 disabled:opacity-50"
+            x-text="assigning ? 'Assigning…' : 'Use this voice'">
+          </button>
+        </div>
+      </div>
+    </div>
+    <!-- Audio player -->
+    <div x-show="previewUrl" class="mt-4 bg-gray-50 dark:bg-gray-800 rounded-lg p-3 flex items-center gap-3">
+      <svg class="w-4 h-4 text-teal-500 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+      <span class="text-xs text-gray-500 dark:text-gray-400">Playing preview — <span x-text="selectedVoice && selectedVoice.name"></span></span>
+    </div>
+  </div>
+
+  <!-- ── Cloned Voices Section ───────────────────────────────────────────────── -->
+  <div id="clone-section" class="space-y-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+    <div class="flex items-center justify-between">
+      <div>
+        <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Cloned Voices</h2>
+        <p class="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Upload a 15–30 second recording to create a voice clone</p>
+      </div>
+      <button @click="showUpload = !showUpload"
+        :class="showUpload ? 'bg-violet-600 text-white' : 'border border-violet-300 dark:border-violet-700 text-violet-600 dark:text-violet-400'"
+        class="vf-btn px-4 py-2 rounded-lg text-sm font-medium transition">
+        <span x-text="showUpload ? 'Cancel' : '+ New Clone'"></span>
+      </button>
+    </div>
+
+    <!-- Upload form -->
+    <div x-show="showUpload" x-transition class="vf-card p-5 border border-violet-200 dark:border-violet-800">
+      <h3 class="font-semibold text-gray-900 dark:text-white text-sm mb-4">Upload Voice Sample</h3>
+      <div class="grid md:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Clone Name *</label>
+          <input x-model="cloneName" class="vf-input w-full text-sm" placeholder="e.g. Sarah's voice, CEO voice…">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Primary Language *</label>
+          <select x-model="cloneLanguage" class="vf-input w-full text-sm">
+            <option value="en-IN">English (India)</option>
+            <option value="en-US">English (US)</option>
+            <option value="en-GB">English (UK)</option>
+            <option value="hi-IN">Hindi (India)</option>
+            <option value="ta-IN">Tamil (India)</option>
+            <option value="te-IN">Telugu (India)</option>
+            <option value="bn-IN">Bengali (India)</option>
+            <option value="mr-IN">Marathi (India)</option>
+            <option value="kn-IN">Kannada (India)</option>
+            <option value="gu-IN">Gujarati (India)</option>
+            <option value="ml-IN">Malayalam (India)</option>
+            <option value="pa-IN">Punjabi (India)</option>
+          </select>
+        </div>
+      </div>
+      <!-- Drop zone -->
+      <div class="mt-3"
+        @dragover.prevent="dragOver = true"
+        @dragleave="dragOver = false"
+        @drop.prevent="handleFileDrop($event)"
+        :class="dragOver ? 'border-violet-500 bg-violet-50 dark:bg-violet-900/20' : 'border-gray-300 dark:border-gray-600'"
+        class="border-2 border-dashed rounded-xl p-8 text-center transition cursor-pointer"
+        @click="$refs.cloneFileInput.click()">
+        <template x-if="!cloneFile">
+          <div>
+            <svg class="w-10 h-10 text-gray-400 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+            <p class="text-sm text-gray-500">Drag & drop MP3, WAV, WebM, or OGG here</p>
+            <p class="text-xs text-gray-400 mt-1">Recommended: 15–30 seconds of clear speech, minimal background noise</p>
+            <p class="text-xs text-gray-400">Maximum 50 MB</p>
+          </div>
+        </template>
+        <template x-if="cloneFile">
+          <div class="flex items-center justify-center gap-3">
+            <svg class="w-8 h-8 text-violet-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
+            <div class="text-left">
+              <p class="text-sm font-medium text-gray-900 dark:text-white" x-text="cloneFile.name"></p>
+              <p class="text-xs text-gray-400" x-text="(cloneFile.size / 1024).toFixed(0) + ' KB'"></p>
+            </div>
+            <button @click.stop="cloneFile = null" class="text-gray-400 hover:text-red-500 transition">✕</button>
+          </div>
+        </template>
+      </div>
+      <input type="file" x-ref="cloneFileInput" @change="cloneFile = $event.target.files[0]" accept="audio/*" class="hidden">
+      <div class="flex items-center gap-2 mt-4 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-100 dark:border-amber-800">
+        <svg class="w-4 h-4 text-amber-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+        <p class="text-xs text-amber-700 dark:text-amber-400">Voice preview plays back your recording. Full synthesis with XTTS-v2 is available when the TTS package is installed; otherwise the agent uses a language-matched Edge TTS voice.</p>
+      </div>
+      <div class="flex gap-2 mt-4">
+        <button @click="uploadClone()" :disabled="!cloneFile || !cloneName.trim() || uploading"
+          class="vf-btn px-5 py-2 bg-gradient-to-r from-violet-500 to-purple-500 text-white rounded-lg text-sm font-medium shadow-lg shadow-violet-500/25 hover:from-violet-600 hover:to-purple-600 disabled:opacity-50"
+          x-text="uploading ? 'Uploading…' : 'Upload Clone'">
+        </button>
+        <button @click="showUpload = false; cloneFile = null; cloneName = ''" class="vf-btn px-4 py-2 text-sm border dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800">Cancel</button>
+      </div>
+    </div>
+
+    <!-- Existing clones -->
+    <div x-show="clones.length === 0 && !showUpload" class="vf-card p-8 text-center text-gray-400">
+      <svg class="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4M12 4a3 3 0 00-3 3v4a3 3 0 006 0V7a3 3 0 00-3-3z"/></svg>
+      <p class="text-sm">No voice clones yet. Upload a recording above to get started.</p>
+    </div>
+
+    <div x-show="clones.length > 0" class="grid md:grid-cols-2 lg:grid-cols-3 gap-3">
+      <template x-for="clone in clones" :key="clone.id">
+        <div class="vf-card p-4 group">
+          <div class="flex items-start gap-3">
+            <div class="w-10 h-10 rounded-full bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 flex items-center justify-center text-sm font-bold flex-shrink-0"
+              x-text="clone.name[0].toUpperCase()"></div>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-semibold text-gray-900 dark:text-white truncate" x-text="clone.name"></p>
+              <p class="text-xs text-gray-500 dark:text-gray-400" x-text="clone.languageName"></p>
+              <p x-show="clone.durationSecs" class="text-xs text-gray-400 mt-0.5" x-text="clone.durationSecs ? clone.durationSecs.toFixed(1) + 's recording' : ''"></p>
+            </div>
+            <span :class="clone.status === 'ready' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-100 text-red-600'"
+              class="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase" x-text="clone.status"></span>
+          </div>
+          <div class="flex items-center gap-2 mt-3">
+            <button @click="previewClone(clone)"
+              :disabled="previewingId === clone.id"
+              class="flex-1 vf-btn py-1.5 border border-violet-200 dark:border-violet-700 text-violet-600 dark:text-violet-400 rounded-lg text-xs hover:bg-violet-50 dark:hover:bg-violet-900/20 flex items-center justify-center gap-1.5 disabled:opacity-50">
+              <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+              <span x-text="previewingId === clone.id ? 'Playing…' : 'Preview'"></span>
+            </button>
+            <div>
+              <select x-model="assignAgentId" class="vf-input text-xs py-1.5 px-2">
+                <option value="">Assign to…</option>
+                {% for a in agents %}
+                <option value="{{ a.id }}">{{ a.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <button @click="selectCloneAndAssign(clone)" :disabled="!assignAgentId || assigning"
+              class="text-xs px-2 py-1.5 bg-teal-500 text-white rounded-lg hover:bg-teal-600 disabled:opacity-50 transition">
+              Use
+            </button>
+            <button @click="deleteClone(clone.id)" class="text-gray-400 hover:text-red-500 transition p-1">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            </button>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+</div>
+
+<script>
+const PAGE_SIZE = 24;
+
+function voiceLibraryApp() {
+  return {
+    voices: [],
+    clones: [],
+    loading: true,
+    languages: [],
+    providers: [],
+    categories: {},
+    // Filters
+    search: '',
+    filterLanguage: '',
+    filterGender: '',
+    filterProvider: '',
+    filterCategory: '',
+    page: 1,
+    // Selection
+    selectedVoice: null,
+    assignAgentId: '',
+    assigning: false,
+    previewingId: null,
+    previewUrl: null,
+    // Clone
+    showUpload: false,
+    cloneFile: null,
+    cloneName: '',
+    cloneLanguage: 'en-IN',
+    uploading: false,
+    dragOver: false,
+
+    get filteredVoices() {
+      let result = this.voices;
+      if (this.search) {
+        const q = this.search.toLowerCase();
+        result = result.filter(v =>
+          v.name.toLowerCase().includes(q) ||
+          v.language_name.toLowerCase().includes(q) ||
+          (v.style || '').toLowerCase().includes(q) ||
+          (v.accent || '').toLowerCase().includes(q)
+        );
+      }
+      if (this.filterLanguage) result = result.filter(v => v.language === this.filterLanguage);
+      if (this.filterGender)   result = result.filter(v => v.gender === this.filterGender);
+      if (this.filterProvider) result = result.filter(v => v.provider === this.filterProvider);
+      if (this.filterCategory) result = result.filter(v => v.categories.includes(this.filterCategory));
+      return result;
+    },
+    get paginatedVoices() {
+      const start = (this.page - 1) * PAGE_SIZE;
+      return this.filteredVoices.slice(start, start + PAGE_SIZE);
+    },
+    get totalPages() {
+      return Math.max(1, Math.ceil(this.filteredVoices.length / PAGE_SIZE));
+    },
+
+    async init() {
+      try {
+        const r = await apiFetch('/api/voices/catalog/');
+        this.voices     = r.voices       || [];
+        this.languages  = r.languages    || [];
+        this.categories = r.categories   || {};
+        this.providers  = r.providers    || [];
+      } catch(e) {
+        showToast('Failed to load voice catalog', 'error');
+      }
+      this.loading = false;
+      try {
+        const r2 = await apiFetch('/api/voices/clones/');
+        this.clones = r2.clones || [];
+      } catch {}
+    },
+
+    selectVoice(voice) {
+      this.selectedVoice = voice;
+      this.previewUrl = null;
+      window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+    },
+
+    async previewVoice(voice) {
+      if (this.previewingId === voice.id) return;
+      if (voice.requires_api_key && !voice.available) {
+        showToast(`${voice.provider} API key not configured`, 'warning');
+        return;
+      }
+      this.previewingId = voice.id;
+      try {
+        const r = await apiFetch('/api/voices/preview/', {method:'POST', json:{voice_id: voice.id}});
+        if (r.audioUrl) {
+          if (this._audio) this._audio.pause();
+          this._audio = new Audio(r.audioUrl);
+          this._audio.play();
+          this.previewUrl = r.audioUrl;
+        }
+      } catch(e) {
+        showToast('Preview unavailable for this voice', 'warning');
+      }
+      this.previewingId = null;
+    },
+
+    async assignVoice() {
+      if (!this.selectedVoice || !this.assignAgentId) return;
+      this.assigning = true;
+      try {
+        await apiFetch(`/api/agents/${this.assignAgentId}/`, {method:'PUT', json:{
+          llmPreferences: {voiceId: this.selectedVoice.id, voiceProvider: this.selectedVoice.provider},
+        }});
+        showToast(`"${this.selectedVoice.name}" assigned to agent`, 'success');
+      } catch { showToast('Assignment failed', 'error'); }
+      this.assigning = false;
+    },
+
+    // Clone methods
+    handleFileDrop(evt) {
+      this.dragOver = false;
+      const file = evt.dataTransfer.files[0];
+      if (file && file.type.startsWith('audio/')) this.cloneFile = file;
+    },
+
+    async uploadClone() {
+      if (!this.cloneFile || !this.cloneName.trim()) return;
+      this.uploading = true;
+      const fd = new FormData();
+      fd.append('audio',    this.cloneFile);
+      fd.append('name',     this.cloneName.trim());
+      fd.append('language', this.cloneLanguage);
+      try {
+        const resp = await fetch('/api/voices/clones/', {
+          method: 'POST',
+          headers: {'X-CSRFToken': getCookie('csrftoken')},
+          body: fd,
+        });
+        const r = await resp.json();
+        if (resp.ok) {
+          this.clones.unshift(r);
+          this.cloneName = '';
+          this.cloneFile = null;
+          this.showUpload = false;
+          showToast('Voice clone uploaded!', 'success');
+        } else {
+          showToast(r.detail || r.error || 'Upload failed', 'error');
+        }
+      } catch { showToast('Upload failed', 'error'); }
+      this.uploading = false;
+    },
+
+    async previewClone(clone) {
+      if (this.previewingId === clone.id) return;
+      this.previewingId = clone.id;
+      try {
+        const resp = await fetch(`/api/voices/clones/${clone.id}/preview/`, {
+          headers: {'X-CSRFToken': getCookie('csrftoken')},
+        });
+        if (!resp.ok) { showToast('Preview failed', 'error'); this.previewingId = null; return; }
+        const blob = await resp.blob();
+        const url  = URL.createObjectURL(blob);
+        if (this._audio) this._audio.pause();
+        this._audio = new Audio(url);
+        this._audio.play();
+        this.previewUrl = url;
+      } catch { showToast('Preview failed', 'error'); }
+      this.previewingId = null;
+    },
+
+    async selectCloneAndAssign(clone) {
+      if (!this.assignAgentId || this.assigning) return;
+      this.assigning = true;
+      try {
+        await apiFetch(`/api/agents/${this.assignAgentId}/`, {method:'PUT', json:{
+          llmPreferences: {voiceId: `clone-${clone.id}`, voiceProvider: 'clone', cloneId: clone.id, languageCode: clone.languageCode},
+        }});
+        showToast(`Clone "${clone.name}" assigned to agent`, 'success');
+      } catch { showToast('Assignment failed', 'error'); }
+      this.assigning = false;
+    },
+
+    async deleteClone(id) {
+      if (!confirm('Delete this voice clone?')) return;
+      try {
+        await apiFetch(`/api/voices/clones/${id}/`, {method:'DELETE'});
+        this.clones = this.clones.filter(c => c.id !== id);
+        showToast('Clone deleted', 'success');
+      } catch { showToast('Delete failed', 'error'); }
+    },
+  };
+}
+</script>
+{% endblock %}

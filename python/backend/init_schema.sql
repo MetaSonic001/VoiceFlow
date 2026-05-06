@@ -220,3 +220,20 @@ CREATE TABLE IF NOT EXISTS agent_versions (
     "createdAt" TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS ix_agent_versions_agent_id ON agent_versions ("agentId");
+
+-- Cloned Voices
+CREATE TABLE IF NOT EXISTS cloned_voices (
+    id TEXT PRIMARY KEY,
+    "tenantId" TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    "userId" TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL,
+    "languageCode" TEXT NOT NULL DEFAULT 'en-IN',
+    "languageName" TEXT,
+    "referenceAudioKey" TEXT NOT NULL,
+    "durationSecs" DOUBLE PRECISION,
+    status TEXT NOT NULL DEFAULT 'ready',
+    "errorMessage" TEXT,
+    "createdAt" TIMESTAMPTZ DEFAULT now(),
+    "updatedAt" TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ix_cloned_voices_tenant_id ON cloned_voices ("tenantId");

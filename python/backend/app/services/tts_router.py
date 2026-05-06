@@ -54,8 +54,6 @@ class TTSRouter:
         Ambient sound: mixed at -18dB if ambient_sound is set (office/cafe/call_center/street).
         """
         engine_name = (engine or "kokoro").lower()
-        if engine_name == "edge":
-            raise ValueError("edge synthesis is handled by app.routes.tts")
 
         # ── Phrase cache lookup ───────────────────────────────────────────────
         cache_key = hashlib.sha256(f"{engine_name}:{voice_id}:{language_code}:{text}".encode()).hexdigest()
@@ -63,7 +61,9 @@ class TTSRouter:
         if cache_file.exists():
             audio_bytes = cache_file.read_bytes()
         else:
-            if engine_name == "sarvam" and sarvam_api_key:
+            if engine_name == "edge":
+                audio_bytes = await self._synthesize_edge(text=text, voice_id=voice_id or "en-US-AriaNeural")
+            elif engine_name == "sarvam" and sarvam_api_key:
                 audio_bytes = await self._synthesize_sarvam(
                     text=text, voice_id=voice_id, api_key=sarvam_api_key,
                     language_code=language_code or "en-IN",
@@ -126,6 +126,36 @@ class TTSRouter:
         """Return μ-law 8kHz mono bytes for Twilio using pydub conversion."""
         audio_bytes = await self.synthesize(text=text, engine=engine, voice_id=voice_id, speed=speed, **kwargs)
         return self._wav_to_mulaw_8khz_mono(audio_bytes)
+
+    async def _synthesize_edge(self, text: str, voice_id: str) -> bytes:
+        """Call Edge TTS and return WAV bytes (converted from MP3 via pydub)."""
+        import io as _io
+        import edge_tts
+
+        # Handle both new "edge-en-US-AriaNeural" format and bare ShortName
+        neural_name = voice_id.removeprefix("edge-") if voice_id.startswith("edge-") else voice_id
+        if not neural_name.endswith("Neural"):
+            neural_name = "en-US-AriaNeural"  # safe fallback
+
+        communicate = edge_tts.Communicate(text, neural_name)
+        mp3_buf = _io.BytesIO()
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                mp3_buf.write(chunk["data"])
+
+        mp3_bytes = mp3_buf.getvalue()
+        if not mp3_bytes:
+            raise RuntimeError("Edge TTS returned empty audio")
+
+        # Convert MP3 → WAV so it fits the phrase cache convention (all WAV)
+        try:
+            seg = AudioSegment.from_file(_io.BytesIO(mp3_bytes), format="mp3")
+            wav_buf = _io.BytesIO()
+            seg.export(wav_buf, format="wav")
+            return wav_buf.getvalue()
+        except Exception:
+            # If conversion fails, return raw MP3 bytes; downstream handles both
+            return mp3_bytes
 
     async def _synthesize_kokoro(self, text: str, voice_id: str, speed: float) -> bytes:
         payload = {

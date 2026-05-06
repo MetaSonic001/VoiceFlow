@@ -62,6 +62,13 @@ class Settings(BaseSettings):
     MINIO_ACCESS_KEY: Optional[str] = None
     MINIO_SECRET_KEY: Optional[str] = None
 
+    # Sarvam AI (optional — enables Indian language TTS voices)
+    SARVAM_API_KEY: Optional[str] = None
+
+    # Voice clone reference audio storage (local fallback when MinIO is not configured)
+    VOICE_CLONE_DIR: str = "/tmp/voiceflow_clones"
+    VOICE_PREVIEW_CACHE_DIR: str = "/tmp/voiceflow_voice_previews"
+
     # ChromaDB
     CHROMA_HOST: str = "localhost"
     CHROMA_PORT: int = 8030

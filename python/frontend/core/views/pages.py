@@ -199,6 +199,17 @@ def reports(request):
 
 
 @login_required
+def voice_library(request):
+    client = get_client(request)
+    agents = []
+    try:
+        agents = client.get_agents(limit=100).get("agents", [])
+    except Exception:
+        pass
+    return render(request, "dashboard/voice_library.html", {"agents": agents})
+
+
+@login_required
 def integrations(request):
     client = get_client(request)
     integrations_list = []
