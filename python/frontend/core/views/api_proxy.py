@@ -1472,3 +1472,69 @@ def live_monitor_note(request, call_sid):
         return JsonResponse(get_client(request).live_monitor_note(call_sid, body.get("note", "")))
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)
+
+
+# ── Speaker Verification (Voice Biometrics) ───────────────────────────────────
+
+@login_required
+@require_http_methods(["GET"])
+def speaker_verification_list(request):
+    try:
+        return JsonResponse(get_client(request).list_voiceprints())
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@require_http_methods(["POST"])
+def speaker_verification_enroll(request):
+    """Enroll a voiceprint — expects multipart/form-data with audio file."""
+    try:
+        client = get_client(request)
+        audio_file = request.FILES.get("audio")
+        if not audio_file:
+            return JsonResponse({"error": "No audio file provided."}, status=400)
+        phone_number = request.POST.get("phone_number", "")
+        contact_id = request.POST.get("contact_id") or None
+        label = request.POST.get("label") or None
+        sample_rate = int(request.POST.get("sample_rate", 16000))
+        result = client.enroll_voiceprint(
+            audio_file=audio_file,
+            phone_number=phone_number,
+            contact_id=contact_id,
+            label=label,
+            sample_rate=sample_rate,
+        )
+        return JsonResponse(result, status=201)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@require_http_methods(["POST"])
+def speaker_verification_verify(request):
+    """Verify audio against stored voiceprints — multipart/form-data."""
+    try:
+        client = get_client(request)
+        audio_file = request.FILES.get("audio")
+        if not audio_file:
+            return JsonResponse({"error": "No audio file provided."}, status=400)
+        phone_number = request.POST.get("phone_number", "")
+        sample_rate = int(request.POST.get("sample_rate", 16000))
+        result = client.verify_voiceprint(
+            audio_file=audio_file,
+            phone_number=phone_number,
+            sample_rate=sample_rate,
+        )
+        return JsonResponse(result)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@require_http_methods(["DELETE"])
+def speaker_verification_delete(request, voiceprint_id):
+    try:
+        return JsonResponse(get_client(request).delete_voiceprint(voiceprint_id))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)

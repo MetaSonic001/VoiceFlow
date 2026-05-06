@@ -2,7 +2,7 @@
 
 A multi-tenant SaaS platform for building, deploying, and managing AI-powered voice and chat agents. Businesses onboard through a guided wizard, upload their knowledge base, and receive a domain-specific AI agent that answers customer queries over phone (Twilio), browser-based WebSocket voice calls, or a web chat interface — using Retrieval-Augmented Generation (RAG) over their own documents with hierarchical context injection and policy-based retrieval scoring.
 
-> **Status (May 2026):** The full pipeline is functional end-to-end. In the last 3 commits (unpushed, available locally) the **Architecture Bible** was fully implemented — see [What's New (May 2026)](#whats-new-may-2026). 42 route files (~175 endpoints), 21 service modules, 21 ORM models, 29 dashboard pages. Full `pip install voiceflow` developer SDK with plugin architecture. MCP server for Claude Desktop integration. **Modern UI: glassmorphism, micro-interactions, 15+ CSS animations, dark mode on all 29 pages.** Stack: Django 6 (HTMX + Alpine.js) frontend + FastAPI backend + Docker services (Postgres, Redis, ChromaDB, MinIO). See [Implementation Status](#implementation-status) for the full breakdown.
+> **Status (May 2026):** The full pipeline is functional end-to-end — **42 route files (~210 endpoints), 28 service modules, 25 ORM models, 32 dashboard pages.** The Architecture Bible, Numbers Shop, Live Call Monitor, Voice Biometrics (ECAPA-TDNN speaker verification), Caller Enrichment (4-layer: Redis → Contacts → phonenumbers → Truecaller), and BYOK for 10 AI providers are all fully wired frontend-to-backend. Full `pip install voiceflow` developer SDK with plugin architecture. MCP server for Claude Desktop integration. **Modern UI: glassmorphism, micro-interactions, 15+ CSS animations, dark mode on all 32 pages.** Stack: Django 6 (HTMX + Alpine.js) frontend + FastAPI backend + Docker services (Postgres, Redis, ChromaDB, MinIO). See [What's New (May 2026)](#whats-new-may-2026) and [Implementation Status](#implementation-status) for the full breakdown.
 
 ---
 
@@ -125,6 +125,24 @@ voiceflow new my-agent && cd my-agent && python agent.py
 - Intelligence section: **Recordings**, **AI Coaching**
 - Data section: **Contacts (CRM)** (moved up; was unnamed)
 
+### Commit — `365af7d` feat: numbers shop, live call monitor, speaker verification, caller enrichment
+
+| Feature | Description |
+|---------|-------------|
+| **Phone Numbers Shop** | `/dashboard/phone-numbers/` — search Twilio inventory, purchase, release, and assign numbers to agents. Full purchase flow with country/area-code filters. |
+| **Live Call Monitor** | `/dashboard/live-monitor/` — real-time supervisor console with 3-second polling. Live transcript feed, whisper coaching, takeover, end call, and timestamped notes. |
+| **Caller Enrichment** | 4-layer enrichment pipeline: Redis cache → Contacts DB → `phonenumbers` lib → Truecaller Business API. Pre-fills caller context before every conversation. |
+| **Truecaller BYOK** | Settings > Telephony tab — tenants supply their own Truecaller Business API partner key (AES-256-GCM encrypted). |
+
+### Commit — `speaker-verification-api` feat: voice biometrics API + contacts UI
+
+| Feature | Description |
+|---------|-------------|
+| **Speaker Verification HTTP layer** | `POST /api/speaker-verification/enroll` (multipart audio + phone_number), `POST /api/speaker-verification/verify`, `GET /api/speaker-verification/`, `DELETE /api/speaker-verification/{id}`. |
+| **WAV header stripping** | RIFF/WAVE chunk walk extracts raw PCM frame; raw PCM fallback for non-WAV uploads. |
+| **Voice Biometrics UI** | Contacts page gains a "Voice Biometrics / Voiceprints" section — enroll modal (file upload + phone + label), voiceprints table with delete, Alpine.js toast notifications. |
+| **Django proxy wired** | `urls.py` → `api_proxy.py` (multipart file forwarding) → `api_client.py` (httpx multipart) → FastAPI route. |
+
 ---
 
 ## What This Project Does
@@ -167,7 +185,7 @@ The primary market is Indian SMBs. Every tenant and agent is logically isolated 
 │                     FASTAPI BACKEND  (Port 8040)                     │
 │                                                                      │
 │   ┌──────────────┐  ┌───────────────┐  ┌────────────────────────┐   │
-│   │  Header Auth │  │  Rate Limiter │  │    29 Route Files      │   │
+│   │  Header Auth │  │  Rate Limiter │  │    42 Route Files      │   │
 │   │  (Demo mode) │  │  (SlowAPI +   │  │                        │   │
 │   │              │  │   Redis)      │  │  /auth    /agents       │   │
 │   │  x-tenant-id │  │              │  │  /onboarding /rag       │   │
@@ -265,7 +283,7 @@ VoiceFlow/
 │   │   │   ├── config.py          ← Settings (env vars)
 │   │   │   ├── database.py        ← SQLAlchemy async engine + session
 │   │   │   ├── models.py          ← 12 SQLAlchemy ORM models
-│   │   │   ├── routes/            ← 29 route files
+│   │   │   ├── routes/            ← 42 route files
 │   │   │   │   ├── agents.py      ← Agent CRUD + activate/pause
 │   │   │   │   ├── analytics.py   ← Real DB-based analytics
 │   │   │   │   ├── auth.py        ← Login/signup/user-sync
@@ -1501,7 +1519,7 @@ Primary runtime configuration is loaded from `python/.env` (created by `make env
 
 ## Service Inventory
 
-The FastAPI backend contains **13 service modules** in `python/backend/app/services/`:
+The FastAPI backend contains **28 service modules** in `python/backend/app/services/`:
 
 | Service | File | Lines | What It Does |
 |---|---|---|---|
@@ -1514,12 +1532,27 @@ The FastAPI backend contains **13 service modules** in `python/backend/app/servi
 | **Webhook Service** | `webhook_service.py` | ~125 | HMAC-SHA256 signed event dispatch to external URLs. 3 retries with exponential backoff. Events: `call.completed`, `campaign.finished`, `escalation.triggered`, `retraining.flagged` |
 | **Flow Engine** | `flow_engine.py` | ~250 | Visual conversation graph walker: executes node-based flows (greeting, knowledge, condition, api_call, human_transfer, end). Supports variable interpolation and conditional branching. |
 | **Voice Tools** | `voice_tools.py` | ~175 | Live function calling during voice conversations: tool registry, HTTP-based tool execution with timeout, filler audio synthesis during tool execution |
-| **Credentials** | `credentials.py` | ~87 | AES-256-GCM encryption/decryption for per-tenant API keys (Twilio, Groq, OpenAI). 96-bit random nonce. Graceful migration from plaintext via `decrypt_safe()`. |
+| **Credentials** | `credentials.py` | ~87 | AES-256-GCM encryption/decryption for per-tenant API keys (Twilio, Groq, OpenAI, Truecaller, etc.). 96-bit random nonce. Graceful migration from plaintext via `decrypt_safe()`. |
 | **Scheduler** | `scheduler.py` | ~161 | APScheduler nightly cron (02:00): extracts Q/A pairs from flagged calls, embeds approved retraining examples into ChromaDB, creates platform notifications |
 | **Call State** | `call_state.py` | ~110 | Redis-backed call state machine (IDLE → LISTENING → THINKING → SPEAKING) with 2h TTL. Enforces valid transitions. Barge-in: any state → LISTENING always allowed. |
 | **Streaming Orchestrator** | `streaming_orchestrator.py` | ~330 | Reusable real-time voice pipeline: STT → RAG → TTS with PCM energy-based barge-in detection, call state machine integration, μ-law frame pacing |
+| **CRM Enrichment** | `crm_enrichment_service.py` | ~280 | Bidirectional HubSpot/Salesforce sync; injects enriched context into system prompt before each call |
+| **IVR Service** | `ivr_service.py` | ~190 | IVR tree routing — TwiML `<Gather>` menus, BFS node traversal, DTMF-to-agent handoff |
+| **Call Recording Service** | `call_recording_service.py` | ~220 | MinIO WAV storage, 1-sample/sec waveform, timestamped transcripts, 24h presigned download |
+| **Auto Retry Service** | `auto_retry_service.py` | ~160 | Redis ZSET retry scheduler — calling hours (8am–9pm), DND compliance, max-retries |
+| **Live Transfer Service** | `live_transfer_service.py` | ~190 | Escalation detection (regex + LLM), HMAC-signed context handoff webhook, TwiML `<Dial>` transfer |
+| **Observability** | `observability.py` | ~120 | `async with trace_span("llm"):` — Langfuse tracing or structured JSON fallback |
+| **Semantic VAD** | `semantic_vad.py` | ~180 | ML turn detection (distilbert-base-uncased-mnli) + rule-based fallback, adaptive silence threshold |
+| **Latency Tracker** | `latency_tracker.py` | ~150 | `.mark("stt_start")` / P50/P95/P99 ring buffer, auto-optimisation hints (ANN, fast model) |
+| **Simulation Service** | `simulation_service.py` | ~210 | Adversarial scenario runner for CI/CD gate: injects edge-case utterances, compares actual vs expected agent behaviour, generates confidence-scored pass/fail report |
+| **Caller Enrichment** | `caller_enrichment.py` | ~200 | 4-layer caller identification pipeline: Redis cache (5-min TTL) → Contacts DB lookup → `phonenumbers` lib (carrier/region) → Truecaller Business API. Hydrates caller context before each conversation. |
+| **Speaker Verification** | `speaker_verification.py` | ~280 | ECAPA-TDNN 256-dim voiceprint enrollment and cosine-similarity verification. Stores embeddings as JSON in `VoicePrint` table. Threshold 0.75. Graceful fallback when `resemblyzer` unavailable. |
+| **Post-Call Delivery** | `post_call_delivery.py` | ~150 | Post-call webhook + CRM update pipeline triggered after every call. Dispatches `call.completed` event, syncs call outcome to HubSpot/Salesforce, appends timestamped note to Contact record. |
+| **Voicemail Detector** | `voicemail_detector.py` | ~180 | Heuristic + Whisper-based AMD (Answering Machine Detection). Detects voicemail greetings from audio energy patterns and transcript keywords. |
+| **Voice Catalog** | `voice_catalog.py` | ~130 | Manages Edge TTS + Kokoro + Piper + ElevenLabs voice inventory. Filters by language, gender, provider. Returns structured voice objects for the voice selector UI. |
+| **Agent Builder Service** | `agent_builder_service.py` | ~170 | Prompt-to-Agent 2.0 pipeline: GPT-4o/Groq structured output generates full `AgentConfiguration` from a single natural-language description. Auto-seeds knowledge base and selects voice. |
 
-### Route Files (30 files, ~142 endpoints)
+### Route Files (42 files, ~210 endpoints)
 
 | Route File | Prefix | Endpoints | Description |
 |---|---|---|---|
@@ -1534,7 +1567,7 @@ The FastAPI backend contains **13 service modules** in `python/backend/app/servi
 | `analytics.py` | `/analytics` | 6 | Overview, realtime, charts, agent comparison |
 | `logs.py` | `/api/logs` | 3 | Call log listing + rating + flagging |
 | `brands.py` | `/api/brands` | 5 | Brand CRUD (voice, topics, policies) |
-| `settings.py` | `/api/settings` | 8 | Twilio/Groq credential management |
+| `settings.py` | `/api/settings` | 8 | 10 BYOK provider keys + credential management + all_key_statuses |
 | `users.py` | `/api/users` | 3 | User management |
 | `retraining.py` | `/api/retraining` | 6 | Retraining queue + manual trigger |
 | `tts.py` | `/api/tts` | 5 | Voice presets, preview, synthesis, cloning |
@@ -1549,9 +1582,22 @@ The FastAPI backend contains **13 service modules** in `python/backend/app/servi
 | `voice_twilio_stream.py` | `/api/voice` | 5 | Twilio Media Streams WS + outbound + transfer |
 | `voice_live.py` | `/api/voice` | 1 | Gemini-live-style browser voice WS |
 | `voice_ws.py` | `/api/voice` | 1 | Legacy browser voice WS |
+| `voice.py` | `/api/voice` | 4 | Recording callbacks + outbound dial + compliance check |
+| `voice_exotel.py` | `/api/voice/exotel` | 4 | Exotel inbound/gather/status webhooks + outbound call |
 | `admin.py` | `/admin` | 7 | Pipeline CRUD + trigger |
 | `platform.py` | `/api` | 5 | Audit, notifications, health |
 | `data_explorer.py` | `/api/data-explorer` | 4 | Postgres/ChromaDB/Redis viewer |
+| `ivr.py` | `/api/ivr` | 5 | IVR tree CRUD + Twilio webhook + DTMF gather handler |
+| `recordings.py` | `/api/recordings` | 4 | List, waveform+transcript detail, presigned download, delete |
+| `coaching.py` | `/api/coaching` | 5 | List cards, approve (live prompt delta), reject, report |
+| `contacts.py` | `/api/contacts` | 7 | OmniCRM CRUD + phone lookup + note append |
+| `integrations.py` | `/api/integrations` | 7 | Integration config CRUD + connection test + post-call variables |
+| `kb.py` | `/api/kb` | 8 | Knowledge base create/list/get + document attach/detach + search + rebuild index |
+| `simulate.py` | `/api/simulate` | 3 | Run adversarial simulation + get report + CI/CD gate |
+| `voices.py` | `/api/voices` | 6 | Voice catalog list/filter + ElevenLabs voices + clone management |
+| `phone_numbers.py` | `/api/phone-numbers` | 6 | Search Twilio inventory, list owned, purchase, release, assign, unassign |
+| `live_monitor.py` | `/api/live-monitor` | 5 | List active calls, takeover, end call, whisper note, call detail |
+| `speaker_verification.py` | `/api/speaker-verification` | 4 | List voiceprints, enroll (multipart audio), verify, delete |
 
 ---
 
@@ -1820,6 +1866,119 @@ GET /health  →  { status: "ok", timestamp: "..." }
 | POST | `/api/voice/transfer/{call_sid}` | Warm transfer to human agent via Twilio REST API |
 | POST | `/api/voice/recording-status/{agent_id}` | Twilio recording callback |
 
+### Voice — Exotel
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/api/voice/exotel/inbound/{agent_id}` | Exotel inbound call webhook |
+| POST | `/api/voice/exotel/gather/{agent_id}` | Exotel gather/speech callback |
+| POST | `/api/voice/exotel/status/{agent_id}` | Exotel call status callback |
+| POST | `/api/voice/exotel/outbound/{agent_id}` | Trigger outbound Exotel call |
+
+### Phone Numbers Shop
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/phone-numbers/search` | Search Twilio available numbers (country, area code, contains filters) |
+| GET | `/api/phone-numbers/` | List tenant-owned Twilio numbers |
+| POST | `/api/phone-numbers/purchase` | Purchase a new phone number from Twilio |
+| DELETE | `/api/phone-numbers/{sid}` | Release (delete) an owned phone number |
+| POST | `/api/phone-numbers/{sid}/assign` | Assign a number to an agent (sets Twilio webhook URLs) |
+| POST | `/api/phone-numbers/{sid}/unassign` | Unassign number from its agent |
+
+### Live Call Monitor
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/live-monitor/calls` | List all active calls (real-time Twilio API + Redis state) |
+| GET | `/api/live-monitor/calls/{call_sid}` | Get full call detail with live transcript |
+| POST | `/api/live-monitor/calls/{call_sid}/takeover` | Supervisor takeover — mutes agent, connects supervisor audio |
+| POST | `/api/live-monitor/calls/{call_sid}/end` | Supervisor ends the active call |
+| POST | `/api/live-monitor/calls/{call_sid}/note` | Append timestamped whisper note to live call |
+
+### Speaker Verification (Voice Biometrics)
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/speaker-verification/` | List all enrolled voiceprints for tenant |
+| POST | `/api/speaker-verification/enroll` | Enroll voiceprint: multipart `audio` file + `phone_number` (required) + `contact_id` (optional) + `label` (optional) + `sample_rate` (default 16000). Strips WAV header automatically. |
+| POST | `/api/speaker-verification/verify` | Verify caller: multipart `audio` + `phone_number`. Returns `{ matched, matched_id, confidence, threshold }`. |
+| DELETE | `/api/speaker-verification/{voiceprint_id}` | Delete voiceprint by ID |
+
+### IVR Trees
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/ivr/` | List IVR trees for tenant |
+| POST | `/api/ivr/` | Create IVR tree (nodes JSON adjacency list) |
+| PUT | `/api/ivr/{tree_id}` | Update IVR tree |
+| DELETE | `/api/ivr/{tree_id}` | Delete IVR tree |
+| POST | `/api/ivr/voice/{tree_id}` | Twilio inbound webhook — returns root node TwiML |
+| POST | `/api/ivr/voice/{tree_id}/gather` | Twilio DTMF gather callback — BFS node traversal |
+
+### Call Recordings
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/recordings/` | List recordings (filter by agent/date) |
+| GET | `/api/recordings/{id}` | Get recording detail with waveform + timestamped transcript |
+| GET | `/api/recordings/{id}/download` | 24h presigned MinIO WAV download URL |
+| DELETE | `/api/recordings/{id}` | Delete recording from MinIO + DB |
+
+### AI Coaching
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/coaching/` | List coaching cards (filter by status/agent) |
+| POST | `/api/coaching/{id}/approve` | Approve card: applies `suggestedPromptDelta` to live agent prompt instantly |
+| POST | `/api/coaching/{id}/reject` | Reject coaching card |
+| GET | `/api/coaching/report/{agent_id}` | Per-agent coaching impact score leaderboard |
+| DELETE | `/api/coaching/{id}` | Delete coaching card |
+
+### Contacts (OmniCRM)
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/contacts/` | List contacts (intent filter, search) |
+| POST | `/api/contacts/` | Create contact |
+| GET | `/api/contacts/{id}` | Get contact detail with CRM context |
+| PUT | `/api/contacts/{id}` | Update contact fields |
+| DELETE | `/api/contacts/{id}` | Delete contact |
+| GET | `/api/contacts/lookup/{phone}` | Phone number lookup → returns matching contact |
+| POST | `/api/contacts/{id}/notes` | Append timestamped note to contact |
+
+### Integrations
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/integrations/` | List integration configs for tenant |
+| POST | `/api/integrations/` | Create integration config |
+| GET | `/api/integrations/{id}` | Get integration config |
+| PUT | `/api/integrations/{id}` | Update integration config |
+| DELETE | `/api/integrations/{id}` | Delete integration config |
+| POST | `/api/integrations/{id}/test` | Test connection to CRM/webhook |
+| GET | `/api/integrations/post-call-variables` | List available post-call variable mappings |
+
+### Knowledge Base
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/kb/` | List knowledge bases for tenant |
+| POST | `/api/kb/` | Create knowledge base |
+| GET | `/api/kb/{kb_id}` | Get knowledge base detail |
+| DELETE | `/api/kb/{kb_id}` | Delete knowledge base |
+| POST | `/api/kb/{kb_id}/documents` | Attach document to knowledge base |
+| DELETE | `/api/kb/{kb_id}/documents/{doc_id}` | Detach document |
+| POST | `/api/kb/{kb_id}/search` | Semantic search within knowledge base |
+| POST | `/api/kb/{kb_id}/rebuild` | Rebuild BM25 index for knowledge base |
+
+### Voices (Voice Catalog)
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/voices/` | List all voices (Edge TTS + Kokoro + Piper + ElevenLabs) |
+| GET | `/api/voices/filter` | Filter voices by language/gender/provider |
+| GET | `/api/voices/elevenlabs` | List ElevenLabs voice catalog (requires ElevenLabs BYOK) |
+| POST | `/api/voices/clones` | Create voice clone |
+| GET | `/api/voices/clones` | List cloned voices for tenant |
+| DELETE | `/api/voices/clones/{clone_id}` | Delete cloned voice |
+
+### Adversarial Simulation
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/api/simulate/run` | Run adversarial simulation against an agent |
+| GET | `/api/simulate/report/{run_id}` | Get simulation report (pass/fail per scenario + confidence scores) |
+| GET | `/api/simulate/gate/{agent_id}` | CI/CD gate: returns `{ pass: bool }` based on latest simulation run |
+
 ---
 
 ## Security Architecture
@@ -1978,7 +2137,7 @@ A complete breakdown of what works versus what needs attention.
 
 ### PostgreSQL — SQLAlchemy ORM (`python/backend/app/models.py`)
 
-17 models (Tenant, User, Brand, Agent, AgentConfiguration, AgentTemplate, OnboardingProgress, Document, CallLog, RetrainingExample, Pipeline, AuditLog, Notification, Campaign, CampaignContact, DNDRegistry, WebhookEndpoint):
+25 models (Tenant, User, Brand, Agent, AgentConfiguration, AgentTemplate, ClonedVoice, AgentVersion, OnboardingProgress, Document, KbAttachment, VoicePrint, CallLog, RetrainingExample, Pipeline, AuditLog, Notification, Campaign, CampaignContact, DNDRegistry, WebhookEndpoint, Contact, IVRTree, CallRecording, CoachingCard):
 
 ```
 Tenant

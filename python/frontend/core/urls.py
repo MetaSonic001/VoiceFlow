@@ -213,4 +213,10 @@ urlpatterns = [
     path("api/live-monitor/calls/<str:call_sid>/takeover/", api_proxy.live_monitor_takeover, name="api_live_monitor_takeover"),
     path("api/live-monitor/calls/<str:call_sid>/end/", api_proxy.live_monitor_end, name="api_live_monitor_end"),
     path("api/live-monitor/calls/<str:call_sid>/note/", api_proxy.live_monitor_note, name="api_live_monitor_note"),
+
+    # ── Speaker Verification (Voice Biometrics) ───────────────────────────────
+    path("api/speaker-verification/", api_proxy.speaker_verification_list, name="api_sv_list"),
+    path("api/speaker-verification/enroll/", api_proxy.speaker_verification_enroll, name="api_sv_enroll"),
+    path("api/speaker-verification/verify/", api_proxy.speaker_verification_verify, name="api_sv_verify"),
+    path("api/speaker-verification/<str:voiceprint_id>/", api_proxy.speaker_verification_delete, name="api_sv_delete"),
 ]

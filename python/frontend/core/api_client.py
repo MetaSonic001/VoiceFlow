@@ -664,6 +664,39 @@ class BackendClient:
     def live_monitor_note(self, call_sid: str, note: str):
         return self._post(f"/api/live-monitor/calls/{call_sid}/note", json={"note": note})
 
+    # ── Speaker Verification (Voice Biometrics) ─────────────────────────────
+    def list_voiceprints(self):
+        return self._get("/api/speaker-verification/")
+
+    def enroll_voiceprint(self, audio_file, phone_number: str,
+                          contact_id: str = None, label: str = None,
+                          sample_rate: int = 16000):
+        import httpx
+        headers = {k: v for k, v in self._headers.items() if k != "Content-Type"}
+        data = {"phone_number": phone_number, "sample_rate": str(sample_rate)}
+        if contact_id:
+            data["contact_id"] = contact_id
+        if label:
+            data["label"] = label
+        files = {"audio": (audio_file.name, audio_file.read(), audio_file.content_type or "audio/wav")}
+        with httpx.Client(timeout=30) as c:
+            r = c.post(self._url("/api/speaker-verification/enroll"), headers=headers, data=data, files=files)
+            r.raise_for_status()
+            return r.json()
+
+    def verify_voiceprint(self, audio_file, phone_number: str, sample_rate: int = 16000):
+        import httpx
+        headers = {k: v for k, v in self._headers.items() if k != "Content-Type"}
+        data = {"phone_number": phone_number, "sample_rate": str(sample_rate)}
+        files = {"audio": (audio_file.name, audio_file.read(), audio_file.content_type or "audio/wav")}
+        with httpx.Client(timeout=30) as c:
+            r = c.post(self._url("/api/speaker-verification/verify"), headers=headers, data=data, files=files)
+            r.raise_for_status()
+            return r.json()
+
+    def delete_voiceprint(self, voiceprint_id: str):
+        return self._delete(f"/api/speaker-verification/{voiceprint_id}")
+
 
 def get_client(request) -> BackendClient:
     """Build a BackendClient from the current Django request."""

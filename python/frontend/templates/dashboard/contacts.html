@@ -226,6 +226,96 @@
        x-text="toast.msg"></div>
 </div>
 
+<!-- ── Voice Biometrics panel ──────────────────────────────────────────────── -->
+<div x-data="voiceprintsApp()" x-init="load()" class="mt-6 space-y-4 fade-in">
+  <div class="flex items-center justify-between">
+    <div>
+      <h2 class="text-lg font-bold vf-heading bg-gradient-to-r from-violet-700 to-indigo-600 dark:from-violet-400 dark:to-indigo-400 bg-clip-text text-transparent flex items-center gap-2">
+        <svg class="w-5 h-5 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z"/></svg>
+        Voice Biometrics / Voiceprints
+      </h2>
+      <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Enroll caller voiceprints (ECAPA-TDNN 256-dim embeddings) for automatic identification on inbound calls.</p>
+    </div>
+    <button @click="enrollModal=true" class="vf-btn px-4 py-2 bg-gradient-to-r from-violet-600 to-indigo-600 text-white text-sm font-medium rounded-xl flex items-center gap-1.5">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+      Enroll Voiceprint
+    </button>
+  </div>
+
+  <div class="vf-card overflow-hidden">
+    <div x-show="loading" class="p-8 text-center text-slate-400 text-sm">Loading voiceprints…</div>
+    <div x-show="!loading && voiceprints.length === 0" class="p-10 text-center text-slate-400 text-sm">
+      <svg class="w-10 h-10 mx-auto mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z"/></svg>
+      No voiceprints enrolled yet.
+    </div>
+    <table x-show="!loading && voiceprints.length > 0" class="w-full text-sm">
+      <thead class="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700">
+        <tr>
+          <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Phone Number</th>
+          <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider hidden sm:table-cell">Label</th>
+          <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider hidden md:table-cell">Contact ID</th>
+          <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider hidden lg:table-cell">Enrolled</th>
+          <th class="px-4 py-3"></th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+        <template x-for="vp in voiceprints" :key="vp.id">
+          <tr class="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
+            <td class="px-4 py-3 font-mono text-xs text-slate-700 dark:text-slate-300" x-text="vp.phone_number || '—'"></td>
+            <td class="px-4 py-3 text-sm text-slate-700 dark:text-slate-300 hidden sm:table-cell" x-text="vp.label || '—'"></td>
+            <td class="px-4 py-3 font-mono text-xs text-slate-500 hidden md:table-cell" x-text="vp.contact_id ? vp.contact_id.slice(0,8)+'…' : '—'"></td>
+            <td class="px-4 py-3 text-xs text-slate-400 hidden lg:table-cell" x-text="vp.created_at ? new Date(vp.created_at).toLocaleDateString() : '—'"></td>
+            <td class="px-4 py-3 text-right">
+              <button @click="deleteVp(vp.id)" class="text-xs px-3 py-1 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg border border-rose-200 dark:border-rose-800 transition">Delete</button>
+            </td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Enroll modal -->
+  <div x-show="enrollModal" x-cloak @click.self="enrollModal=false"
+       class="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="vf-card-static max-w-md w-full p-6 dark:bg-slate-800 space-y-4">
+      <div class="flex items-center justify-between">
+        <h3 class="font-bold text-base vf-heading">Enroll a Voiceprint</h3>
+        <button @click="enrollModal=false" class="text-slate-400 hover:text-slate-600"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+      </div>
+      <p class="text-xs text-slate-500">Upload a WAV or raw PCM audio file (minimum 3 seconds of speech) to enroll a caller's voice biometric.</p>
+      <div class="space-y-3">
+        <div>
+          <label class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">Phone Number (E.164) *</label>
+          <input x-model="enrollForm.phone_number" placeholder="+919876543210" class="vf-input w-full text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">Label (caller name)</label>
+          <input x-model="enrollForm.label" placeholder="Rahul Sharma" class="vf-input w-full text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">Audio File (WAV / PCM) *</label>
+          <input type="file" accept=".wav,.pcm,audio/*" @change="enrollForm.file = $event.target.files[0]"
+                 class="block w-full text-sm text-slate-600 dark:text-slate-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-violet-50 file:text-violet-700 file:text-xs hover:file:bg-violet-100 transition">
+        </div>
+      </div>
+      <div class="flex gap-3 pt-1">
+        <button @click="enroll()" :disabled="enrolling || !enrollForm.phone_number || !enrollForm.file"
+                class="vf-btn flex-1 py-2.5 bg-gradient-to-r from-violet-600 to-indigo-600 text-white rounded-xl text-sm font-medium disabled:opacity-50">
+          <span x-show="!enrolling">Enroll</span><span x-show="enrolling">Enrolling…</span>
+        </button>
+        <button @click="enrollModal=false" class="flex-1 py-2.5 border border-slate-200 dark:border-slate-600 rounded-xl text-sm hover:bg-slate-50 dark:hover:bg-slate-700 transition">Cancel</button>
+      </div>
+      <p x-show="enrollError" x-text="enrollError" class="text-xs text-rose-600 dark:text-rose-400"></p>
+    </div>
+  </div>
+
+  <!-- VP toast -->
+  <div x-show="vpToast.show" x-cloak x-transition:enter="transition ease-out duration-300"
+       class="fixed bottom-20 right-6 z-50 px-5 py-3 rounded-xl shadow-lg text-sm font-medium text-white"
+       :class="vpToast.type === 'success' ? 'bg-violet-600' : 'bg-rose-600'"
+       x-text="vpToast.msg"></div>
+</div>
+
 <script>
 function contactsApp() {
   return {
@@ -296,5 +386,65 @@ function contactsApp() {
   };
 }
 function csrfToken() { const m = document.cookie.match(/csrftoken=([^;]+)/); return m ? m[1] : ''; }
+
+function voiceprintsApp() {
+  return {
+    voiceprints: [], loading: true,
+    enrollModal: false, enrolling: false,
+    enrollForm: { phone_number: '', label: '', file: null },
+    enrollError: '',
+    vpToast: { show: false, msg: '', type: 'success' },
+
+    async load() {
+      this.loading = true;
+      try {
+        const r = await fetch('/api/speaker-verification/', { headers: { 'X-CSRFToken': csrfToken() } });
+        const d = await r.json();
+        this.voiceprints = d.voiceprints || [];
+      } catch { this.notify('Failed to load voiceprints', 'error'); }
+      this.loading = false;
+    },
+
+    async enroll() {
+      if (!this.enrollForm.phone_number || !this.enrollForm.file) return;
+      this.enrolling = true; this.enrollError = '';
+      try {
+        const fd = new FormData();
+        fd.append('phone_number', this.enrollForm.phone_number);
+        fd.append('audio', this.enrollForm.file);
+        if (this.enrollForm.label) fd.append('label', this.enrollForm.label);
+        const r = await fetch('/api/speaker-verification/enroll/', {
+          method: 'POST',
+          headers: { 'X-CSRFToken': csrfToken() },
+          body: fd,
+        });
+        const d = await r.json();
+        if (!r.ok || d.error) { this.enrollError = d.error || 'Enrollment failed'; return; }
+        this.enrollModal = false;
+        this.enrollForm = { phone_number: '', label: '', file: null };
+        this.notify('Voiceprint enrolled');
+        await this.load();
+      } catch (e) { this.enrollError = e.message || 'Enrollment failed'; }
+      this.enrolling = false;
+    },
+
+    async deleteVp(id) {
+      if (!confirm('Delete this voiceprint permanently?')) return;
+      try {
+        const r = await fetch(`/api/speaker-verification/${id}/`, {
+          method: 'DELETE', headers: { 'X-CSRFToken': csrfToken() }
+        });
+        if (!r.ok) throw new Error('Delete failed');
+        this.voiceprints = this.voiceprints.filter(v => v.id !== id);
+        this.notify('Voiceprint deleted');
+      } catch (e) { this.notify(e.message, 'error'); }
+    },
+
+    notify(msg, type = 'success') {
+      this.vpToast = { show: true, msg, type };
+      setTimeout(() => this.vpToast.show = false, 3500);
+    },
+  };
+}
 </script>
 {% endblock %}
