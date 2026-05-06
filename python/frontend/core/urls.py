@@ -181,4 +181,11 @@ urlpatterns = [
     path("api/voices/clones/",                   api_proxy.voice_clones,               name="api_voice_clones"),
     path("api/voices/clones/<str:clone_id>/preview/", api_proxy.voice_clone_preview_stream, name="api_voice_clone_preview"),
     path("api/voices/clones/<str:clone_id>/",    api_proxy.voice_clone_delete,         name="api_voice_clone_delete"),
+
+    # ── Integrations ──────────────────────────────────────────────────────────
+    path("api/integrations/<str:agent_id>/",                              api_proxy.integrations_get,          name="api_integrations_get"),
+    path("api/integrations/<str:agent_id>/variables/",                    api_proxy.integrations_variables,    name="api_integrations_variables"),
+    path("api/integrations/<str:agent_id>/test/<str:int_type>/",          api_proxy.integrations_test,         name="api_integrations_test"),
+    path("api/integrations/<str:agent_id>/run-delivery/<str:call_log_id>/", api_proxy.integrations_run_delivery, name="api_integrations_run_delivery"),
+    path("api/integrations/<str:agent_id>/<str:int_type>/",               api_proxy.integrations_remove,       name="api_integrations_remove"),
 ]

@@ -531,6 +531,28 @@ class BackendClient:
     def delete_voice_clone(self, clone_id: str):
         return self._delete(f"/api/voices/clones/{clone_id}")
 
+    # ── Integrations ───────────────────────────────────────────────────
+    def get_integrations(self, agent_id: str):
+        return self._get(f"/api/integrations/{agent_id}")
+
+    def save_integrations(self, agent_id: str, data: dict):
+        return self._put(f"/api/integrations/{agent_id}", json=data)
+
+    def test_integration(self, agent_id: str, int_type: str):
+        return self._post(f"/api/integrations/{agent_id}/test/{int_type}")
+
+    def remove_integration(self, agent_id: str, int_type: str):
+        return self._delete(f"/api/integrations/{agent_id}/{int_type}")
+
+    def get_integration_variables(self, agent_id: str):
+        return self._get(f"/api/integrations/{agent_id}/variables")
+
+    def save_integration_variables(self, agent_id: str, data: dict):
+        return self._put(f"/api/integrations/{agent_id}/variables", json=data)
+
+    def run_delivery(self, agent_id: str, call_log_id: str):
+        return self._post(f"/api/integrations/{agent_id}/run-delivery/{call_log_id}")
+
 
 def get_client(request) -> BackendClient:
     """Build a BackendClient from the current Django request."""

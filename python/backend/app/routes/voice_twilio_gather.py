@@ -162,16 +162,45 @@ async def voice_gather(
 
     # Run RAG pipeline
     from app.services.rag_service import process_query
+    from app.services.voice_tools import get_tools_for_agent, TOOL_REGISTRY, voice_tool_executor
+
+    # Build per-agent tool specs from integrations config
+    agent_integrations: dict = agent.integrations or {}
+    tools_spec = get_tools_for_agent(agent_integrations)
 
     call_start = datetime.now(timezone.utc)
+    answer = "I encountered an error processing your request."
     try:
         rag_result = await process_query(
-            db, agent.tenantId, agent_id, speech_result, f"call-{call_sid}"
+            db, agent.tenantId, agent_id, speech_result, f"call-{call_sid}",
+            tools=tools_spec if tools_spec else None,
         )
-        answer = rag_result.get("response", "I'm not sure how to answer that.")
+
+        # Handle mid-call tool call (function calling)
+        if rag_result.get("tool_call"):
+            tc = rag_result["tool_call"]
+            tool_name = tc.get("tool_name", "")
+            tool_args = tc.get("tool_arguments", {})
+            logger.info("[voice_tools] mid-call tool=%s args=%s", tool_name, tool_args)
+
+            tool_def = TOOL_REGISTRY.get(tool_name)
+            tool_result: dict = {"error": f"Unknown tool: {tool_name}"}
+            if tool_def:
+                tool_result = await voice_tool_executor.execute(tool_def, tool_args, agent_integrations)
+
+            # Follow-up Groq call with tool result injected
+            import json as _json
+            tool_result_str = _json.dumps(tool_result, default=str)
+            follow_up = await process_query(
+                db, agent.tenantId, agent_id,
+                f"[Tool '{tool_name}' returned]: {tool_result_str}\nNow answer the caller naturally based on this result.",
+                f"call-{call_sid}",
+            )
+            answer = follow_up.get("response") or "Done."
+        else:
+            answer = rag_result.get("response") or "I'm not sure how to answer that."
     except Exception:
         logger.exception("RAG pipeline failed during voice call")
-        answer = "I encountered an error processing your request."
 
     call_end = datetime.now(timezone.utc)
     duration = int((call_end - call_start).total_seconds())
@@ -191,6 +220,8 @@ async def voice_gather(
             endedAt=call_end,
             durationSeconds=duration,
             transcript=transcript,
+            callSid=call_sid or None,
+            callDirection="inbound",
         )
         db.add(log)
         await db.commit()
@@ -234,6 +265,10 @@ async def _run_post_call_delivery(
     transcript: str,
     analysis: dict,
     groq_key: Optional[str],
+    caller_phone: str = "",
+    call_duration: int = 0,
+    call_sid: str = "",
+    recording_url: str = "",
 ) -> None:
     """Fire-and-forget: lead extraction + CRM/Slack/webhook delivery."""
     try:
@@ -245,6 +280,10 @@ async def _run_post_call_delivery(
             transcript=transcript,
             analysis=analysis,
             groq_key=groq_key,
+            caller_phone=caller_phone,
+            call_duration=call_duration,
+            call_sid=call_sid,
+            recording_url=recording_url,
         )
     except Exception:
         logger.exception("[post_call] delivery pipeline failed for call %s", call_log_id)
@@ -343,6 +382,9 @@ Transcript:
                             transcript=transcript,
                             analysis=analysis,
                             groq_key=groq_key,
+                            caller_phone=log.callerPhone or "",
+                            call_duration=log.durationSeconds or 0,
+                            call_sid=log.callSid or "",
                         )
                     )
                 else:

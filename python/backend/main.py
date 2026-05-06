@@ -245,6 +245,7 @@ from app.routes import kb as kb_routes
 from app.routes import dnd
 from app.routes import simulate
 from app.routes import ivr, recordings, coaching, contacts
+from app.routes import integrations as integrations_routes
 
 # WITHOUT /api prefix (matches Express)
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])
@@ -283,6 +284,7 @@ app.include_router(ivr.router, prefix="/api/ivr", tags=["IVR"])
 app.include_router(recordings.router, prefix="/api/recordings", tags=["Recordings"])
 app.include_router(coaching.router, prefix="/api/coaching", tags=["Coaching"])
 app.include_router(contacts.router, prefix="/api/contacts", tags=["Contacts"])
+app.include_router(integrations_routes.router, prefix="/api", tags=["Integrations"])
 app.include_router(platform.router, prefix="/api", tags=["Platform"])
 app.include_router(data_explorer.router, prefix="/api/data-explorer", tags=["DataExplorer"])
 

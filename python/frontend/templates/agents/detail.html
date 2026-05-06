@@ -29,6 +29,7 @@
       <button @click="tab='versions'; loadVersions()" :class="tab==='versions' ? 'border-teal-500 text-teal-600 dark:text-teal-400' : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'" class="pb-3 border-b-2 text-sm font-medium transition">Versions</button>
       <button @click="tab='conversations'; loadConversations()" :class="tab==='conversations' ? 'border-teal-500 text-teal-600 dark:text-teal-400' : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'" class="pb-3 border-b-2 text-sm font-medium transition">Conversations</button>
       <button @click="tab='kb'; loadKb()" :class="tab==='kb' ? 'border-teal-500 text-teal-600 dark:text-teal-400' : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'" class="pb-3 border-b-2 text-sm font-medium transition">Knowledge Base</button>
+      <button @click="tab='integrations'; loadIntegrations()" :class="tab==='integrations' ? 'border-teal-500 text-teal-600 dark:text-teal-400' : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'" class="pb-3 border-b-2 text-sm font-medium transition">Integrations</button>
     </nav>
   </div>
 
@@ -517,6 +518,251 @@
 </div>
 </div>
 
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     INTEGRATIONS TAB
+════════════════════════════════════════════════════════════════════════════ -->
+<div x-show="tab==='integrations'" x-transition class="space-y-6">
+
+  <!-- Section header -->
+  <div class="flex items-center justify-between">
+    <div>
+      <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Post-Call Integrations</h3>
+      <p class="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Configure CRM, notifications, and calendar connections for this agent. Agent-level settings override tenant defaults.</p>
+    </div>
+    <button @click="saveIntegrations()" :disabled="intSaving" class="vf-btn px-4 py-2 bg-gradient-to-r from-teal-500 to-cyan-500 text-white rounded-lg text-sm font-medium shadow-lg shadow-teal-500/25 hover:from-teal-600 hover:to-cyan-600 disabled:opacity-50">
+      <span x-show="!intSaving">Save All</span>
+      <span x-show="intSaving">Saving…</span>
+    </button>
+  </div>
+
+  <!-- ── Extracted Variables ────────────────────────────────────────────── -->
+  <div class="vf-card p-5">
+    <div class="flex items-center justify-between mb-4">
+      <h4 class="font-semibold text-gray-900 dark:text-white">Extracted Variables</h4>
+      <button @click="intAddVariable()" class="text-xs text-teal-600 dark:text-teal-400 hover:underline flex items-center gap-1">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        Add Variable
+      </button>
+    </div>
+    <p class="text-xs text-gray-400 mb-3">After each call, the LLM extracts these values from the transcript and stores them on the CallLog.</p>
+    <template x-for="(v, idx) in intVariables" :key="idx">
+      <div class="flex gap-2 mb-2 items-start">
+        <input x-model="v.variable" class="vf-input text-xs w-32 shrink-0" placeholder="key (e.g. patient_name)">
+        <input x-model="v.extraction_prompt" class="vf-input text-xs flex-1" placeholder="extraction prompt (e.g. What is the caller's full name?)">
+        <select x-model="v.data_type" class="vf-input text-xs w-24 shrink-0">
+          <option value="string">string</option>
+          <option value="number">number</option>
+          <option value="boolean">boolean</option>
+          <option value="date">date</option>
+          <option value="list">list</option>
+        </select>
+        <button @click="intVariables.splice(idx,1)" class="text-red-400 hover:text-red-600 mt-1.5 shrink-0">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+    </template>
+    <button @click="saveVariables()" class="mt-2 text-xs text-teal-600 dark:text-teal-400 hover:underline">Save Variables</button>
+    <template x-if="intLastExtraction && Object.keys(intLastExtraction).length">
+      <div class="mt-4 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+        <p class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Last extraction (call <span x-text="intLastCallId" class="font-mono"></span>)</p>
+        <template x-for="[k, v] in Object.entries(intLastExtraction)" :key="k">
+          <div class="flex gap-2 text-xs py-0.5"><span class="font-medium text-gray-700 dark:text-gray-300 w-36 shrink-0" x-text="k"></span><span class="text-gray-500 dark:text-gray-400" x-text="v"></span></div>
+        </template>
+      </div>
+    </template>
+  </div>
+
+  <!-- ── Email ─────────────────────────────────────────────────────────── -->
+  <div class="vf-card p-5">
+    <div class="flex items-center justify-between mb-3">
+      <h4 class="font-semibold text-gray-900 dark:text-white">Email Report</h4>
+      <div class="flex items-center gap-2">
+        <label class="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400"><input type="checkbox" x-model="intCfg.email.enabled" class="rounded"> Enabled</label>
+        <button @click="testIntegration('email')" class="text-xs text-teal-600 dark:text-teal-400 hover:underline">Test</button>
+      </div>
+    </div>
+    <div class="grid md:grid-cols-2 gap-3">
+      <div><label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Provider</label>
+        <select x-model="intCfg.email.provider" class="vf-input text-sm"><option value="smtp">SMTP</option><option value="sendgrid">SendGrid</option></select>
+      </div>
+      <div><label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">From Address</label><input x-model="intCfg.email.from_address" class="vf-input text-sm" placeholder="noreply@yourcompany.com"></div>
+      <div class="md:col-span-2"><label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Recipients (comma-separated)</label><input x-model="intCfg.email._recipients_raw" class="vf-input text-sm" placeholder="ops@company.com, cto@company.com"></div>
+      <template x-if="intCfg.email.provider==='smtp'">
+        <div class="md:col-span-2 grid md:grid-cols-2 gap-3">
+          <div><label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">SMTP Host</label><input x-model="intCfg.email.host" class="vf-input text-sm" placeholder="smtp.gmail.com"></div>
+          <div><label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Port</label><input x-model="intCfg.email.port" class="vf-input text-sm" placeholder="587"></div>
+          <div><label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Username</label><input x-model="intCfg.email.username" class="vf-input text-sm"></div>
+          <div><label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Password</label><input type="password" x-model="intCfg.email.password" class="vf-input text-sm"></div>
+        </div>
+      </template>
+      <template x-if="intCfg.email.provider==='sendgrid'">
+        <div class="md:col-span-2"><label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">SendGrid API Key</label><input type="password" x-model="intCfg.email.api_key" class="vf-input text-sm" placeholder="SG.…"></div>
+      </template>
+    </div>
+  </div>
+
+  <!-- ── HubSpot ──────────────────────────────────────────────────────── -->
+  <div class="vf-card p-5">
+    <div class="flex items-center justify-between mb-3">
+      <h4 class="font-semibold text-gray-900 dark:text-white">HubSpot</h4>
+      <div class="flex items-center gap-2">
+        <label class="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400"><input type="checkbox" x-model="intCfg.hubspot.enabled" class="rounded"> Enabled</label>
+        <button @click="testIntegration('hubspot')" class="text-xs text-teal-600 dark:text-teal-400 hover:underline">Test</button>
+      </div>
+    </div>
+    <div class="grid md:grid-cols-2 gap-3">
+      <div class="md:col-span-2"><label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Private App Access Token</label><input type="password" x-model="intCfg.hubspot.accessToken" class="vf-input text-sm" placeholder="pat-na1-…"></div>
+      <div><label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Create Deal on "interested"</label>
+        <label class="flex items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300 mt-1"><input type="checkbox" x-model="intCfg.hubspot.createDeal" class="rounded"> Auto-create Deal</label>
+      </div>
+    </div>
+    <!-- Field Mapper -->
+    <div class="mt-4">
+      <div class="flex items-center justify-between mb-2">
+        <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Field Mapper — Extracted Variable → HubSpot Property</p>
+        <button @click="intAddHsField()" class="text-xs text-teal-600 dark:text-teal-400 hover:underline">+ Add Row</button>
+      </div>
+      <template x-for="(row, i) in intHsFieldMap" :key="i">
+        <div class="flex gap-2 mb-1.5 items-center">
+          <select x-model="row.from" class="vf-input text-xs flex-1">
+            <option value="">— extracted variable —</option>
+            <template x-for="v in intVariables" :key="v.variable"><option :value="v.variable" x-text="v.variable"></option></template>
+          </select>
+          <span class="text-gray-400 text-xs">→</span>
+          <input x-model="row.to" class="vf-input text-xs flex-1" placeholder="HubSpot property name">
+          <button @click="intHsFieldMap.splice(i,1)" class="text-red-400 hover:text-red-600"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <!-- ── Salesforce ──────────────────────────────────────────────────── -->
+  <div class="vf-card p-5">
+    <div class="flex items-center justify-between mb-3">
+      <h4 class="font-semibold text-gray-900 dark:text-white">Salesforce</h4>
+      <div class="flex items-center gap-2">
+        <label class="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400"><input type="checkbox" x-model="intCfg.salesforce.enabled" class="rounded"> Enabled</label>
+        <button @click="testIntegration('salesforce')" class="text-xs text-teal-600 dark:text-teal-400 hover:underline">Test</button>
+      </div>
+    </div>
+    <div class="grid md:grid-cols-2 gap-3">
+      <div><label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Username</label><input x-model="intCfg.salesforce.username" class="vf-input text-sm"></div>
+      <div><label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Password</label><input type="password" x-model="intCfg.salesforce.password" class="vf-input text-sm"></div>
+      <div><label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Security Token</label><input type="password" x-model="intCfg.salesforce.securityToken" class="vf-input text-sm"></div>
+      <div><label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Instance URL (optional)</label><input x-model="intCfg.salesforce.instanceUrl" class="vf-input text-sm" placeholder="https://na1.salesforce.com"></div>
+      <div><label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Object Type</label>
+        <select x-model="intCfg.salesforce.objectType" class="vf-input text-sm"><option value="Lead">Lead</option><option value="Contact">Contact</option></select>
+      </div>
+    </div>
+    <!-- Field Mapper -->
+    <div class="mt-4">
+      <div class="flex items-center justify-between mb-2">
+        <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Field Mapper — Extracted Variable → Salesforce Field</p>
+        <button @click="intAddSfField()" class="text-xs text-teal-600 dark:text-teal-400 hover:underline">+ Add Row</button>
+      </div>
+      <template x-for="(row, i) in intSfFieldMap" :key="i">
+        <div class="flex gap-2 mb-1.5 items-center">
+          <select x-model="row.from" class="vf-input text-xs flex-1">
+            <option value="">— extracted variable —</option>
+            <template x-for="v in intVariables" :key="v.variable"><option :value="v.variable" x-text="v.variable"></option></template>
+          </select>
+          <span class="text-gray-400 text-xs">→</span>
+          <input x-model="row.to" class="vf-input text-xs flex-1" placeholder="Salesforce field API name">
+          <button @click="intSfFieldMap.splice(i,1)" class="text-red-400 hover:text-red-600"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <!-- ── Slack ─────────────────────────────────────────────────────────── -->
+  <div class="vf-card p-5">
+    <div class="flex items-center justify-between mb-3">
+      <h4 class="font-semibold text-gray-900 dark:text-white">Slack</h4>
+      <div class="flex items-center gap-2">
+        <label class="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400"><input type="checkbox" x-model="intCfg.slack.enabled" class="rounded"> Enabled</label>
+        <button @click="testIntegration('slack')" class="text-xs text-teal-600 dark:text-teal-400 hover:underline">Test</button>
+      </div>
+    </div>
+    <div class="grid md:grid-cols-2 gap-3">
+      <div class="md:col-span-2"><label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Bot Token</label><input type="password" x-model="intCfg.slack.botToken" class="vf-input text-sm" placeholder="xoxb-…"></div>
+      <div><label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Channel</label><input x-model="intCfg.slack.channel" class="vf-input text-sm" placeholder="#calls"></div>
+    </div>
+  </div>
+
+  <!-- ── GoHighLevel ────────────────────────────────────────────────────── -->
+  <div class="vf-card p-5">
+    <div class="flex items-center justify-between mb-3">
+      <h4 class="font-semibold text-gray-900 dark:text-white">GoHighLevel</h4>
+      <div class="flex items-center gap-2">
+        <label class="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400"><input type="checkbox" x-model="intCfg.gohighlevel.enabled" class="rounded"> Enabled</label>
+        <button @click="testIntegration('gohighlevel')" class="text-xs text-teal-600 dark:text-teal-400 hover:underline">Test</button>
+      </div>
+    </div>
+    <div class="grid md:grid-cols-2 gap-3">
+      <div class="md:col-span-2"><label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">API Key</label><input type="password" x-model="intCfg.gohighlevel.apiKey" class="vf-input text-sm" placeholder="GHL API key"></div>
+      <div><label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Workflow ID (optional — triggers automation)</label><input x-model="intCfg.gohighlevel.workflowId" class="vf-input text-sm"></div>
+    </div>
+  </div>
+
+  <!-- ── Cal.com ────────────────────────────────────────────────────────── -->
+  <div class="vf-card p-5">
+    <div class="flex items-center justify-between mb-3">
+      <h4 class="font-semibold text-gray-900 dark:text-white">Cal.com (Mid-Call Booking)</h4>
+      <button @click="testIntegration('calcom')" class="text-xs text-teal-600 dark:text-teal-400 hover:underline">Test</button>
+    </div>
+    <p class="text-xs text-gray-400 mb-3">Agent will use <code class="bg-gray-100 dark:bg-gray-800 px-1 rounded">book_calcom_appointment</code> tool mid-call when the caller wants to book.</p>
+    <div class="grid md:grid-cols-2 gap-3">
+      <div class="md:col-span-2"><label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">API Key</label><input type="password" x-model="intCfg.calcom.apiKey" class="vf-input text-sm" placeholder="cal_live_..."></div>
+      <div><label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Event Type ID</label><input x-model="intCfg.calcom.eventTypeId" class="vf-input text-sm" placeholder="123456"></div>
+    </div>
+  </div>
+
+  <!-- ── Google Calendar ──────────────────────────────────────────────── -->
+  <div class="vf-card p-5">
+    <div class="flex items-center justify-between mb-3">
+      <h4 class="font-semibold text-gray-900 dark:text-white">Google Calendar (Mid-Call Booking)</h4>
+      <button @click="testIntegration('gcal')" class="text-xs text-teal-600 dark:text-teal-400 hover:underline">Test</button>
+    </div>
+    <div class="grid md:grid-cols-2 gap-3">
+      <div><label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Calendar ID</label><input x-model="intCfg.gcal.calendarId" class="vf-input text-sm" placeholder="primary or calendar@group.calendar.google.com"></div>
+      <div class="md:col-span-2"><label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Service Account JSON</label><textarea x-model="intCfg.gcal.credentialsJson" class="vf-input text-xs font-mono h-28" placeholder='Paste service account JSON here ({"type":"service_account",...})'></textarea></div>
+    </div>
+  </div>
+
+  <!-- ── Webhooks ───────────────────────────────────────────────────────── -->
+  <div class="vf-card p-5">
+    <div class="flex items-center justify-between mb-3">
+      <h4 class="font-semibold text-gray-900 dark:text-white">Webhooks</h4>
+      <button @click="intAddWebhook()" class="text-xs text-teal-600 dark:text-teal-400 hover:underline flex items-center gap-1">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        Add Webhook
+      </button>
+    </div>
+    <p class="text-xs text-gray-400 mb-3">HMAC-SHA256 signed. Verify with <code class="bg-gray-100 dark:bg-gray-800 px-1 rounded">X-VoiceFlow-Signature</code> + <code class="bg-gray-100 dark:bg-gray-800 px-1 rounded">X-VoiceFlow-Timestamp</code>.</p>
+    <template x-for="(wh, i) in intCfg.webhooks" :key="i">
+      <div class="border border-gray-100 dark:border-gray-700 rounded-lg p-3 mb-2 space-y-2">
+        <div class="flex items-center gap-2">
+          <input x-model="wh.url" class="vf-input text-sm flex-1" placeholder="https://…">
+          <label class="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 shrink-0"><input type="checkbox" x-model="wh.enabled" class="rounded"> Enabled</label>
+          <button @click="testWebhook(wh)" class="text-xs text-teal-600 dark:text-teal-400 hover:underline shrink-0">Test</button>
+          <button @click="intCfg.webhooks.splice(i,1)" class="text-red-400 hover:text-red-600 shrink-0"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+        </div>
+        <div class="flex gap-2">
+          <input x-model="wh.secret" type="password" class="vf-input text-xs flex-1" placeholder="HMAC secret (optional)">
+          <input x-model="wh.label" class="vf-input text-xs w-36 shrink-0" placeholder="event label (call.completed)">
+        </div>
+      </div>
+    </template>
+    <p x-show="!intCfg.webhooks || !intCfg.webhooks.length" class="text-xs text-gray-400 italic">No webhooks configured.</p>
+  </div>
+
+  <!-- test result toast inline -->
+  <div x-show="intTestResult" x-transition class="p-3 rounded-lg text-sm" :class="intTestOk ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300' : 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400'">
+    <span x-text="intTestResult"></span>
+  </div>
+
+</div>
+
 <script>
 function agentDetailApp() {
   const raw = JSON.parse(document.getElementById('vf-agent-data').textContent || '{}');
@@ -788,6 +1034,106 @@ function agentDetailApp() {
         this._pollKbStatus(attId, tries + 1);
       }, 5000);
     },
+
+    // ── Integrations ──────────────────────────────────────────────────────
+    intCfg: {
+      email:       { enabled: false, provider: 'smtp', host: '', port: 587, username: '', password: '', from_address: '', api_key: '', _recipients_raw: '' },
+      hubspot:     { enabled: false, accessToken: '', createDeal: false },
+      salesforce:  { enabled: false, username: '', password: '', securityToken: '', instanceUrl: '', objectType: 'Lead' },
+      slack:       { enabled: false, botToken: '', channel: '#calls' },
+      gohighlevel: { enabled: false, apiKey: '', workflowId: '' },
+      calcom:      { apiKey: '', eventTypeId: '' },
+      gcal:        { calendarId: 'primary', credentialsJson: '' },
+      webhooks:    [],
+    },
+    intVariables: [],
+    intHsFieldMap: [],
+    intSfFieldMap: [],
+    intSaving: false,
+    intTestResult: '',
+    intTestOk: false,
+    intLastExtraction: {},
+    intLastCallId: null,
+
+    async loadIntegrations() {
+      try {
+        const agentId = this.agent.id;
+        const [intData, varData] = await Promise.all([
+          apiFetch(`/api/integrations/${agentId}`),
+          apiFetch(`/api/integrations/${agentId}/variables`),
+        ]);
+        const cfg = intData.integrations || {};
+        // Merge fetched config into defaults
+        for (const key of Object.keys(this.intCfg)) {
+          if (cfg[key]) this.intCfg[key] = { ...this.intCfg[key], ...cfg[key] };
+        }
+        // Restore raw recipients string
+        if (Array.isArray(this.intCfg.email?.recipients)) {
+          this.intCfg.email._recipients_raw = this.intCfg.email.recipients.join(', ');
+        }
+        // Restore field maps
+        const hm = cfg.hubspot?.fieldMap || {};
+        this.intHsFieldMap = Object.entries(hm).map(([from, to]) => ({ from, to }));
+        const sm = cfg.salesforce?.fieldMap || {};
+        this.intSfFieldMap = Object.entries(sm).map(([from, to]) => ({ from, to }));
+
+        this.intVariables = varData.post_call_actions || [];
+        this.intLastExtraction = varData.last_extraction || {};
+        this.intLastCallId = varData.last_call_id || null;
+      } catch(e) { showToast('Failed to load integrations: ' + (e.message || e), 'error'); }
+    },
+
+    async saveIntegrations() {
+      this.intSaving = true;
+      // Build fieldMap objects from arrays
+      const hsMap = {};
+      for (const row of this.intHsFieldMap) { if (row.from && row.to) hsMap[row.from] = row.to; }
+      const sfMap = {};
+      for (const row of this.intSfFieldMap) { if (row.from && row.to) sfMap[row.from] = row.to; }
+      // Parse recipients
+      const recipients = (this.intCfg.email._recipients_raw || '').split(',').map(s => s.trim()).filter(Boolean);
+      const configToSave = JSON.parse(JSON.stringify(this.intCfg));
+      configToSave.email.recipients = recipients;
+      delete configToSave.email._recipients_raw;
+      configToSave.hubspot.fieldMap = hsMap;
+      configToSave.salesforce.fieldMap = sfMap;
+      try {
+        await apiFetch(`/api/integrations/${this.agent.id}`, { method: 'PUT', json: { config: configToSave } });
+        showToast('Integrations saved', 'success');
+      } catch(e) { showToast('Save failed: ' + (e.message || e), 'error'); }
+      this.intSaving = false;
+    },
+
+    async saveVariables() {
+      try {
+        await apiFetch(`/api/integrations/${this.agent.id}/variables`, {
+          method: 'PUT', json: { post_call_actions: this.intVariables }
+        });
+        showToast('Variables saved', 'success');
+      } catch(e) { showToast('Save failed: ' + (e.message || e), 'error'); }
+    },
+
+    async testIntegration(type) {
+      this.intTestResult = ''; this.intTestOk = false;
+      try {
+        await this.saveIntegrations();
+        const r = await apiFetch(`/api/integrations/${this.agent.id}/test/${type}`, { method: 'POST' });
+        this.intTestOk = r.ok;
+        this.intTestResult = r.detail || (r.ok ? 'Connected ✓' : 'Connection failed');
+      } catch(e) { this.intTestResult = 'Error: ' + (e.message || e); }
+      setTimeout(() => { this.intTestResult = ''; }, 6000);
+    },
+
+    async testWebhook(wh) {
+      if (!wh.url) { showToast('Enter a URL first', 'error'); return; }
+      const r = await apiFetch(`/api/integrations/${this.agent.id}/test/webhook`, { method: 'POST' });
+      showToast(r.ok ? 'Webhook OK ✓' : ('Failed: ' + r.detail), r.ok ? 'success' : 'error');
+    },
+
+    intAddVariable() { this.intVariables.push({ variable: '', extraction_prompt: '', data_type: 'string' }); },
+    intAddWebhook() { (this.intCfg.webhooks = this.intCfg.webhooks || []).push({ url: '', secret: '', enabled: true, label: 'call.completed' }); },
+    intAddHsField() { this.intHsFieldMap.push({ from: '', to: '' }); },
+    intAddSfField() { this.intSfFieldMap.push({ from: '', to: '' }); },
   };
 }
 </script>

@@ -1265,3 +1265,68 @@ def voice_clone_delete(request, clone_id):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)
 
+
+# ── Integrations proxy ────────────────────────────────────────────────────────
+
+@login_required
+@require_http_methods(["GET"])
+def integrations_get(request, agent_id):
+    try:
+        return JsonResponse(get_client(request).get_integrations(agent_id))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@require_http_methods(["PUT"])
+def integrations_save(request, agent_id):
+    import json as _json
+    try:
+        body = _json.loads(request.body)
+    except Exception:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+    try:
+        return JsonResponse(get_client(request).save_integrations(agent_id, body))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@require_http_methods(["POST"])
+def integrations_test(request, agent_id, int_type):
+    try:
+        return JsonResponse(get_client(request).test_integration(agent_id, int_type))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@require_http_methods(["DELETE"])
+def integrations_remove(request, agent_id, int_type):
+    try:
+        return JsonResponse(get_client(request).remove_integration(agent_id, int_type))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@require_http_methods(["GET", "PUT"])
+def integrations_variables(request, agent_id):
+    import json as _json
+    client = get_client(request)
+    try:
+        if request.method == "GET":
+            return JsonResponse(client.get_integration_variables(agent_id))
+        body = _json.loads(request.body)
+        return JsonResponse(client.save_integration_variables(agent_id, body))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@require_http_methods(["POST"])
+def integrations_run_delivery(request, agent_id, call_log_id):
+    try:
+        return JsonResponse(get_client(request).run_delivery(agent_id, call_log_id))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)

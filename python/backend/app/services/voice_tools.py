@@ -116,6 +116,53 @@ BUILT_IN_TOOLS: list[VoiceTool] = [
             {"name": "query", "type": "string", "required": True},
         ],
     ),
+    VoiceTool(
+        name="check_calcom_availability",
+        description="Check available appointment slots on Cal.com for the configured event type.",
+        url="__calcom__",
+        method="GET",
+        parameters=[
+            {"name": "date", "type": "string", "required": True,  # ISO date YYYY-MM-DD
+             "description": "The date to check availability for (YYYY-MM-DD)"},
+        ],
+    ),
+    VoiceTool(
+        name="book_calcom_appointment",
+        description="Book an appointment via Cal.com.",
+        url="__calcom__",
+        method="POST",
+        parameters=[
+            {"name": "name", "type": "string", "required": True},
+            {"name": "email", "type": "string", "required": True},
+            {"name": "start", "type": "string", "required": True,
+             "description": "ISO 8601 datetime e.g. 2025-06-10T10:00:00Z"},
+            {"name": "notes", "type": "string", "required": False},
+        ],
+    ),
+    VoiceTool(
+        name="check_gcal_availability",
+        description="Check Google Calendar free/busy slots for a given time window.",
+        url="__gcal__",
+        method="GET",
+        parameters=[
+            {"name": "date", "type": "string", "required": True,
+             "description": "ISO date YYYY-MM-DD to check"},
+        ],
+    ),
+    VoiceTool(
+        name="book_gcal_appointment",
+        description="Create a Google Calendar event.",
+        url="__gcal__",
+        method="POST",
+        parameters=[
+            {"name": "summary", "type": "string", "required": True},
+            {"name": "start", "type": "string", "required": True,
+             "description": "ISO 8601 datetime e.g. 2025-06-10T10:00:00Z"},
+            {"name": "end", "type": "string", "required": True},
+            {"name": "attendee_email", "type": "string", "required": False},
+            {"name": "description", "type": "string", "required": False},
+        ],
+    ),
 ]
 
 # Quick lookup by name
@@ -133,14 +180,21 @@ class VoiceToolExecutor:
         # Cache filler mulaw bytes per tool name to avoid re-synthesising on every call
         self._filler_cache: dict[str, bytes] = {}
 
-    async def execute(self, tool: VoiceTool, arguments: dict) -> dict:
+    async def execute(self, tool: VoiceTool, arguments: dict, agent_integrations: dict | None = None) -> dict:
         """
         Call the external API described by *tool* with *arguments*.
         Returns the parsed JSON response or an error dict.
+        agent_integrations: the agent.integrations dict (contains calcom/gcal keys)
         """
         # Built-in tools handled locally
         if tool.name == "web_search":
             return await self._execute_web_search(arguments)
+
+        if tool.name in ("check_calcom_availability", "book_calcom_appointment"):
+            return await self._execute_calcom(tool.name, arguments, agent_integrations or {})
+
+        if tool.name in ("check_gcal_availability", "book_gcal_appointment"):
+            return await self._execute_gcal(tool.name, arguments, agent_integrations or {})
 
         if not tool.url:
             logger.warning("[voice_tools] tool '%s' has no URL configured", tool.name)
@@ -184,6 +238,144 @@ class VoiceToolExecutor:
         except Exception as exc:
             logger.exception("[voice_tools] tool='%s' unexpected error", tool.name)
             return {"error": str(exc)}
+
+    async def _execute_calcom(self, action: str, arguments: dict, agent_integrations: dict) -> dict:
+        """
+        Execute Cal.com v1 API calls for availability checking and booking.
+        Reads: agent_integrations.calcom.apiKey + agent_integrations.calcom.eventTypeId
+        """
+        calcom_cfg = agent_integrations.get("calcom", {})
+        api_key = calcom_cfg.get("apiKey", "")
+        event_type_id = calcom_cfg.get("eventTypeId", "")
+        base = "https://api.cal.com/v1"
+
+        if not api_key:
+            return {"error": "Cal.com API key not configured for this agent"}
+
+        try:
+            async with httpx.AsyncClient(timeout=12) as client:
+                if action == "check_calcom_availability":
+                    date = arguments.get("date", "")
+                    params = {"apiKey": api_key, "dateFrom": date, "dateTo": date}
+                    if event_type_id:
+                        params["eventTypeId"] = event_type_id
+                    resp = await client.get(f"{base}/slots", params=params)
+                    if resp.status_code == 200:
+                        slots_data = resp.json()
+                        # Flatten slots into a readable list
+                        all_slots: list[str] = []
+                        for day_slots in slots_data.get("slots", {}).values():
+                            for slot in day_slots:
+                                all_slots.append(slot.get("time", ""))
+                        return {"available_slots": all_slots, "date": date}
+                    return {"error": f"Cal.com returned {resp.status_code}", "body": resp.text[:200]}
+
+                elif action == "book_calcom_appointment":
+                    booking_payload = {
+                        "eventTypeId": int(event_type_id) if event_type_id else None,
+                        "start": arguments.get("start", ""),
+                        "responses": {
+                            "name": arguments.get("name", ""),
+                            "email": arguments.get("email", ""),
+                            "notes": arguments.get("notes", ""),
+                        },
+                        "timeZone": "UTC",
+                        "language": "en",
+                    }
+                    resp = await client.post(
+                        f"{base}/bookings",
+                        params={"apiKey": api_key},
+                        json=booking_payload,
+                    )
+                    if resp.status_code in (200, 201):
+                        data = resp.json()
+                        return {
+                            "booking_id": data.get("uid"),
+                            "status": data.get("status"),
+                            "start": data.get("startTime"),
+                            "end": data.get("endTime"),
+                        }
+                    return {"error": f"Cal.com booking failed ({resp.status_code})", "body": resp.text[:300]}
+        except Exception as exc:
+            logger.warning("[voice_tools] Cal.com error: %s", exc)
+            return {"error": str(exc)}
+        return {"error": "unknown action"}
+
+    async def _execute_gcal(self, action: str, arguments: dict, agent_integrations: dict) -> dict:
+        """
+        Execute Google Calendar API calls via service account or OAuth2 credentials.
+        Reads: agent_integrations.gcal.credentialsJson (service account JSON string)
+               agent_integrations.gcal.calendarId (default "primary")
+        """
+        gcal_cfg = agent_integrations.get("gcal", {})
+        credentials_json = gcal_cfg.get("credentialsJson", "")
+        calendar_id = gcal_cfg.get("calendarId", "primary")
+
+        if not credentials_json:
+            return {"error": "Google Calendar credentials not configured for this agent"}
+
+        try:
+            import json as _json
+
+            creds_dict = _json.loads(credentials_json) if isinstance(credentials_json, str) else credentials_json
+
+            def _build_service():
+                from google.oauth2 import service_account  # type: ignore
+                from googleapiclient.discovery import build  # type: ignore
+                scopes = ["https://www.googleapis.com/auth/calendar"]
+                creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=scopes)
+                return build("calendar", "v3", credentials=creds)
+
+            loop = asyncio.get_event_loop()
+
+            if action == "check_gcal_availability":
+                date = arguments.get("date", "")
+                time_min = f"{date}T00:00:00Z"
+                time_max = f"{date}T23:59:59Z"
+
+                def _freebusy():
+                    svc = _build_service()
+                    return svc.freebusy().query(body={
+                        "timeMin": time_min,
+                        "timeMax": time_max,
+                        "items": [{"id": calendar_id}],
+                    }).execute()
+
+                data = await loop.run_in_executor(None, _freebusy)
+                busy = data.get("calendars", {}).get(calendar_id, {}).get("busy", [])
+                return {
+                    "date": date,
+                    "busy_slots": busy,
+                    "available": len(busy) == 0,
+                }
+
+            elif action == "book_gcal_appointment":
+                event_body = {
+                    "summary": arguments.get("summary", "VoiceFlow Appointment"),
+                    "description": arguments.get("description", ""),
+                    "start": {"dateTime": arguments.get("start"), "timeZone": "UTC"},
+                    "end": {"dateTime": arguments.get("end"), "timeZone": "UTC"},
+                }
+                attendee = arguments.get("attendee_email")
+                if attendee:
+                    event_body["attendees"] = [{"email": attendee}]
+
+                def _create():
+                    svc = _build_service()
+                    return svc.events().insert(calendarId=calendar_id, body=event_body).execute()
+
+                event = await loop.run_in_executor(None, _create)
+                return {
+                    "event_id": event.get("id"),
+                    "html_link": event.get("htmlLink"),
+                    "start": event.get("start", {}).get("dateTime"),
+                }
+        except ImportError:
+            return {"error": "google-api-python-client not installed. Run: pip install google-api-python-client google-auth"}
+        except Exception as exc:
+            logger.warning("[voice_tools] GCal error: %s", exc)
+            return {"error": str(exc)}
+        return {"error": "unknown action"}
 
     async def _execute_web_search(self, arguments: dict) -> dict:
         """
@@ -272,3 +464,58 @@ _FILLER_PHRASES: dict[str, str] = {
 
 # Module-level singleton
 voice_tool_executor = VoiceToolExecutor()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Groq-compatible tool spec builder
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def get_tools_for_agent(agent_integrations: dict | None = None) -> list[dict]:
+    """
+    Return a list of Groq/OpenAI-compatible function-call tool specs for
+    the tools that are enabled in the given agent_integrations dict.
+
+    Always included: web_search (if duckduckgo-search installed)
+    Conditional on agent_integrations keys:
+      - calcom.apiKey → check_calcom_availability, book_calcom_appointment
+      - gcal.credentialsJson → check_gcal_availability, book_gcal_appointment
+
+    The returned list can be passed directly to Groq's `tools` parameter.
+    """
+    integrations = agent_integrations or {}
+    enabled_names: list[str] = []
+
+    if _DDGS_AVAILABLE:
+        enabled_names.append("web_search")
+
+    if integrations.get("calcom", {}).get("apiKey"):
+        enabled_names += ["check_calcom_availability", "book_calcom_appointment"]
+
+    if integrations.get("gcal", {}).get("credentialsJson"):
+        enabled_names += ["check_gcal_availability", "book_gcal_appointment"]
+
+    tools_spec: list[dict] = []
+    for name in enabled_names:
+        tool = TOOL_REGISTRY.get(name)
+        if not tool:
+            continue
+        required = [p["name"] for p in tool.parameters if p.get("required")]
+        properties = {}
+        for p in tool.parameters:
+            prop: dict = {"type": p.get("type", "string")}
+            if p.get("description"):
+                prop["description"] = p["description"]
+            properties[p["name"]] = prop
+        tools_spec.append({
+            "type": "function",
+            "function": {
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": properties,
+                    "required": required,
+                },
+            },
+        })
+    return tools_spec

@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS agents (
     "simulationSuite" JSONB,
     "deploymentReadinessScore" INTEGER,
     "versionNumber" INTEGER DEFAULT 1,
+    integrations JSONB,
     "createdAt" TIMESTAMPTZ DEFAULT now(),
     "updatedAt" TIMESTAMPTZ DEFAULT now()
 );
@@ -190,8 +191,13 @@ CREATE TABLE IF NOT EXISTS call_logs (
     "ratingNotes" TEXT,
     "flaggedForRetraining" BOOLEAN DEFAULT false,
     retrained BOOLEAN DEFAULT false,
+    "callSid" TEXT,
+    "callDirection" TEXT,
+    "recordingUrl" TEXT,
+    "extractedVariables" JSONB,
     "createdAt" TIMESTAMPTZ DEFAULT now()
 );
+CREATE INDEX IF NOT EXISTS ix_call_logs_call_sid ON call_logs ("callSid");
 
 -- Retraining Examples
 CREATE TABLE IF NOT EXISTS retraining_examples (

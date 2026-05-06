@@ -126,6 +126,18 @@ class Agent(Base):
     welcome_message: Mapped[Optional[str]] = mapped_column("welcomeMessage", Text, nullable=True)
     post_call_actions: Mapped[Optional[Any]] = mapped_column("postCallActions", JSON, nullable=True)
     # [{variable, extraction_prompt, data_type}]
+    integrations: Mapped[Optional[Any]] = mapped_column("integrations", JSON, nullable=True)
+    # Per-agent integration config — overrides tenant.settings.integrations
+    # {
+    #   calcom:   {enabled, apiKey, eventTypeId, timezone},
+    #   gcal:     {enabled, calendarId, credentialsJson},
+    #   email:    {enabled, provider, host, port, username, password, recipients},
+    #   hubspot:  {enabled, accessToken, fieldMap, createDeal, dealPipeline},
+    #   salesforce: {enabled, instanceUrl, username, password, securityToken, objectType, fieldMap},
+    #   slack:    {enabled, botToken, channel},
+    #   webhooks: [{url, secret, enabled, label}],
+    #   gohighlevel: {enabled, apiKey, locationId},
+    # }
     language_config: Mapped[Optional[Any]] = mapped_column("languageConfig", JSON, nullable=True)
     # {primary_language, secondary_languages, geography, formality_level}
     caller_personas: Mapped[Optional[Any]] = mapped_column("callerPersonas", JSON, nullable=True)
@@ -345,6 +357,11 @@ class CallLog(Base):
     tenantId: Mapped[str] = mapped_column("tenantId", String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
     agentId: Mapped[str] = mapped_column("agentId", String, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False)
     callerPhone: Mapped[Optional[str]] = mapped_column("callerPhone", String, nullable=True)
+    callSid: Mapped[Optional[str]] = mapped_column("callSid", String, nullable=True)           # Twilio/provider CallSid
+    callDirection: Mapped[Optional[str]] = mapped_column("callDirection", String, nullable=True)  # inbound | outbound
+    recordingUrl: Mapped[Optional[str]] = mapped_column("recordingUrl", String, nullable=True)  # recording link
+    extractedVariables: Mapped[Optional[Any]] = mapped_column("extractedVariables", JSON, nullable=True)
+    # Populated by extract_variables() post-call using agent.post_call_actions
     startedAt: Mapped[datetime] = mapped_column("startedAt", DateTime(timezone=True), nullable=False)
     endedAt: Mapped[Optional[datetime]] = mapped_column("endedAt", DateTime(timezone=True), nullable=True)
     durationSeconds: Mapped[Optional[int]] = mapped_column("durationSeconds", Integer, nullable=True)

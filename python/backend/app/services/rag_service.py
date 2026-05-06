@@ -917,8 +917,21 @@ async def generate_response(
     conversation_history: list[dict],
     token_limit: int = 4096,
     model: str = "llama-3.1-8b-instant",
-) -> str:
-    """Call Groq with context, history, and retry logic."""
+    tools: list[dict] | None = None,
+) -> dict:
+    """
+    Call Groq with context, history, and retry logic.
+
+    When `tools` is provided (Groq/OpenAI function-calling format), the function
+    may return a tool_call result instead of a plain text response:
+
+        {"type": "tool_call", "tool_name": "...", "tool_arguments": {...}}
+    or
+        {"type": "text", "content": "..."}
+
+    Callers inspect the "type" key to decide whether to execute a tool.
+    For backward-compatibility, returns a plain str when tools=None.
+    """
     # Build context from retrieved documents
     context_text = ""
     if context_chunks:
@@ -938,11 +951,21 @@ async def generate_response(
     # Add conversation history
     for turn in conversation_history:
         role = turn.get("role", "user")
-        if role in ("user", "assistant"):
+        if role in ("user", "assistant", "tool"):
             messages.append({"role": role, "content": turn.get("content", "")})
 
     # Add current query
     messages.append({"role": "user", "content": query})
+
+    request_body: dict = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": min(token_limit, 4096),
+        "temperature": 0.7,
+    }
+    if tools:
+        request_body["tools"] = tools
+        request_body["tool_choice"] = "auto"
 
     async with httpx.AsyncClient(timeout=60) as client:
         for attempt in range(MAX_RETRIES):
@@ -953,16 +976,37 @@ async def generate_response(
                         "Authorization": f"Bearer {groq_key}",
                         "Content-Type": "application/json",
                     },
-                    json={
-                        "model": model,
-                        "messages": messages,
-                        "max_tokens": min(token_limit, 4096),
-                        "temperature": 0.7,
-                    },
+                    json=request_body,
                 )
 
                 if resp.status_code == 200:
-                    return resp.json()["choices"][0]["message"]["content"]
+                    choice = resp.json()["choices"][0]
+                    message = choice.get("message", {})
+
+                    # Function / tool call response
+                    if tools and message.get("tool_calls"):
+                        tc = message["tool_calls"][0]
+                        fn = tc.get("function", {})
+                        import json as _json
+                        try:
+                            args = _json.loads(fn.get("arguments", "{}"))
+                        except Exception:
+                            args = {}
+                        result = {
+                            "type": "tool_call",
+                            "tool_name": fn.get("name", ""),
+                            "tool_arguments": args,
+                            "tool_call_id": tc.get("id", ""),
+                        }
+                        if tools is None:
+                            # backward-compat: shouldn't reach here, but be safe
+                            return message.get("content", "")
+                        return result
+
+                    content = message.get("content", "")
+                    if tools is None:
+                        return content
+                    return {"type": "text", "content": content}
 
                 if resp.status_code == 429:
                     wait = 2.0 * (attempt + 1)
@@ -985,7 +1029,10 @@ async def generate_response(
                 if attempt < MAX_RETRIES - 1:
                     await asyncio.sleep(1)
 
-    return "I'm sorry, the AI service is temporarily unavailable. Please try again."
+    fallback = "I'm sorry, the AI service is temporarily unavailable. Please try again."
+    if tools is None:
+        return fallback
+    return {"type": "text", "content": fallback}
 
 
 # ── 7. Full RAG Pipeline ─────────────────────────────────────────────────────
@@ -996,6 +1043,7 @@ async def process_query(
     agent_id: str,
     query: str,
     session_id: str = "default",
+    tools: list[dict] | None = None,
 ) -> dict:
     """
     Full RAG pipeline:
@@ -1063,7 +1111,7 @@ async def process_query(
         }
 
     # 8. Generate response
-    response_text = await generate_response(
+    response_result = await generate_response(
         groq_key=groq_key,
         system_prompt=system_prompt,
         query=query,
@@ -1071,7 +1119,19 @@ async def process_query(
         conversation_history=ctx["conversationHistory"],
         token_limit=ctx["tokenLimit"],
         model=ctx["model"],
+        tools=tools,
     )
+
+    # Handle tool_call vs text response
+    if tools and isinstance(response_result, dict) and response_result.get("type") == "tool_call":
+        return {
+            "response": None,
+            "tool_call": response_result,
+            "sources": [],
+            "model": ctx["model"],
+        }
+
+    response_text = response_result if isinstance(response_result, str) else response_result.get("content", "")
 
     # 9. Save conversation turn
     history = ctx["conversationHistory"]
