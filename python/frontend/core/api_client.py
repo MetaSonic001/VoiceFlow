@@ -459,6 +459,24 @@ class BackendClient:
     def auto_simulate_agent(self, agent_id: str, data: dict):
         return self._post(f"/api/agents/{agent_id}/auto-simulate", json=data)
 
+    def update_agent_telephony(self, agent_id: str, data: dict):
+        return self._put(f"/api/agents/{agent_id}/telephony", json=data)
+
+    def configure_agent_whatsapp(self, agent_id: str, data: dict):
+        return self._post(f"/api/agents/{agent_id}/whatsapp", json=data)
+
+    def run_agent_simulation(self, agent_id: str, data: dict):
+        return self._post(f"/api/simulate/{agent_id}", json=data)
+
+    def run_adversarial_simulation(self, agent_id: str, data: dict):
+        return self._post(f"/api/simulate/{agent_id}/adversarial", json=data)
+
+    def run_simulation_gate(self, agent_id: str, data: dict):
+        return self._post(f"/api/simulate/{agent_id}/gate", json=data)
+
+    def list_templates(self):
+        return self._get("/api/templates")
+
 
 def get_client(request) -> BackendClient:
     """Build a BackendClient from the current Django request."""

@@ -1043,3 +1043,59 @@ def agent_auto_simulate(request, agent_id):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
+
+# ── Agent Telephony & WhatsApp ────────────────────────────────────────────────
+
+@login_required
+@require_http_methods(["PUT"])
+def agent_telephony(request, agent_id):
+    """Update telephony provider and TTS settings for an agent."""
+    try:
+        return JsonResponse(get_client(request).update_agent_telephony(agent_id, _json_body(request)))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@require_http_methods(["POST"])
+def agent_whatsapp(request, agent_id):
+    """Configure WhatsApp channel for an agent."""
+    try:
+        return JsonResponse(get_client(request).configure_agent_whatsapp(agent_id, _json_body(request)))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+# ── Simulation Endpoints ──────────────────────────────────────────────────────
+
+@login_required
+@require_http_methods(["POST"])
+def agent_simulate(request, agent_id):
+    """Run simulation scenarios for an agent."""
+    try:
+        return JsonResponse(get_client(request).run_agent_simulation(agent_id, _json_body(request)))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@require_http_methods(["POST"])
+def agent_simulate_adversarial(request, agent_id):
+    """Generate adversarial simulation scenarios for an agent."""
+    try:
+        return JsonResponse(get_client(request).run_adversarial_simulation(agent_id, _json_body(request)))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+# ── Agent Templates ───────────────────────────────────────────────────────────
+
+@login_required
+@require_http_methods(["GET"])
+def templates_list(request):
+    """List available agent templates."""
+    try:
+        return JsonResponse(get_client(request).list_templates(), safe=False)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+

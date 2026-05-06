@@ -26,7 +26,7 @@ from app.models import Agent, Campaign
 
 logger = logging.getLogger("voiceflow.ab_testing")
 
-router = APIRouter(prefix="/api/ab", tags=["ab-testing"])
+router = APIRouter(prefix="/api/ab-testing", tags=["ab-testing"])
 
 _AB_REDIS_DB = 5
 _WINNER_MIN_CALLS = 100        # calls per variant before auto-promotion
@@ -44,7 +44,71 @@ async def _get_redis() -> aioredis.Redis:
     )
 
 
-# ── POST /api/ab/agents/{id}/variant ─────────────────────────────────────────
+# ── GET /api/ab-testing/variants ──────────────────────────────────────────────
+
+@router.get("/variants")
+async def list_variants(
+    auth: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all A/B variant agents for this tenant."""
+    from sqlalchemy import select as sa_select
+    results = await db.execute(
+        sa_select(Agent).where(
+            Agent.tenantId == auth.tenant_id,
+            Agent.name.like("%(Variant)%"),
+        ).order_by(Agent.createdAt.desc()).limit(50)
+    )
+    variants = results.scalars().all()
+    r = await _get_redis()
+    output = []
+    for v in variants:
+        config_raw = await r.get(f"ab:variant:{v.id}:config")
+        config = json.loads(config_raw) if config_raw else {}
+        stats_raw = await r.get(f"ab:variant:{v.id}:stats")
+        stats = json.loads(stats_raw) if stats_raw else {}
+        output.append({
+            "variant_id": v.id,
+            "name": v.name,
+            "status": v.status,
+            "original_id": config.get("original_id"),
+            "changes": config.get("changes", {}),
+            "calls": stats.get("calls", 0),
+        })
+    await r.close()
+    return output
+
+
+# ── POST /api/ab-testing/{agent_id}/variant ────────────────────────────────────
+
+@router.post("/{agent_id}/variant")
+async def create_agent_variant_by_id(
+    agent_id: str,
+    request: Request,
+    auth: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Same as /agents/{id}/variant but with flatter URL for proxy compatibility."""
+    class _FakeRequest:
+        async def json(self_):
+            return await request.json()
+    # reuse create_agent_variant logic
+    return await create_agent_variant(agent_id, request, auth, db)
+
+
+# ── GET /api/ab-testing/{test_id}/results ─────────────────────────────────────
+
+@router.get("/{campaign_id}/results")
+async def get_campaign_results_flat(
+    campaign_id: str,
+    auth: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Flat URL alias for GET /campaigns/{id}/results."""
+    return await get_campaign_results(campaign_id, auth, db)
+
+
+# ── POST /api/ab-testing/agents/{id}/variant ─────────────────────────────────
 
 @router.post("/agents/{id}/variant")
 async def create_agent_variant(
@@ -78,7 +142,7 @@ async def create_agent_variant(
         templateId=original.templateId,
         brandId=original.brandId,
         channels=original.channels,
-        telephonyProvider=original.telephonyProvider,
+        telephony_provider=original.telephony_provider,
         llmPreferences=changes.get("llmPreferences", original.llmPreferences),
         tokenLimit=original.tokenLimit,
         tenantId=auth.tenant_id,
@@ -103,7 +167,7 @@ async def create_agent_variant(
     return {"variant_id": variant.id, "original_id": id}
 
 
-# ── POST /api/ab/campaigns/{id}/split ────────────────────────────────────────
+# ── POST /api/ab-testing/campaigns/{id}/split ────────────────────────────────
 
 @router.post("/campaigns/{id}/split")
 async def create_campaign_split(
@@ -158,7 +222,7 @@ async def create_campaign_split(
     return {"campaign_id": id, "variant_a": variant_a, "variant_b": variant_b, "split_ratio": 0.5}
 
 
-# ── GET /api/ab/campaigns/{id}/results ───────────────────────────────────────
+# ── GET /api/ab-testing/campaigns/{id}/results ─────────────────────────────────
 
 @router.get("/campaigns/{id}/results")
 async def get_campaign_results(

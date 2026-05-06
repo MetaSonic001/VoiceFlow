@@ -80,6 +80,15 @@ CREATE TABLE IF NOT EXISTS agents (
     "avgResponseTime" TEXT,
     "chromaCollection" TEXT,
     "configPath" TEXT,
+    "telephonyProvider" TEXT DEFAULT 'twilio-gather',
+    "contextBreakdown" JSONB,
+    "welcomeMessage" TEXT,
+    "postCallActions" JSONB,
+    "languageConfig" JSONB,
+    "callerPersonas" JSONB,
+    "simulationSuite" JSONB,
+    "deploymentReadinessScore" INTEGER,
+    "versionNumber" INTEGER DEFAULT 1,
     "createdAt" TIMESTAMPTZ DEFAULT now(),
     "updatedAt" TIMESTAMPTZ DEFAULT now()
 );
@@ -199,3 +208,15 @@ CREATE TABLE IF NOT EXISTS _prisma_migrations (
     started_at TIMESTAMPTZ DEFAULT now(),
     applied_steps_count INTEGER DEFAULT 0
 );
+
+-- Agent Versions
+CREATE TABLE IF NOT EXISTS agent_versions (
+    id TEXT PRIMARY KEY,
+    "agentId" TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    "tenantId" TEXT NOT NULL,
+    "versionNumber" INTEGER DEFAULT 1,
+    "changeDescription" TEXT,
+    snapshot JSONB NOT NULL,
+    "createdAt" TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ix_agent_versions_agent_id ON agent_versions ("agentId");

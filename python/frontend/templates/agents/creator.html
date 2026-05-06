@@ -543,9 +543,9 @@ function agentCreator() {
       if (!this.prompt.trim() || this.prompt.length < 20) return;
       this.intentLoading = true;
       try {
-        const res = await fetch('/api/agents/generate-from-prompt/preview', {
+        const res = await fetch('/api/agents/generate-from-prompt/preview/', {
           method: 'POST',
-          headers: {'Content-Type': 'application/json'},
+          headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken')},
           body: JSON.stringify({prompt: this.prompt, extract_only: true}),
         });
         if (res.ok) {
@@ -574,7 +574,7 @@ function agentCreator() {
       try {
         const res = await fetch('/api/agents/generate-from-prompt/preview', {
           method: 'POST',
-          headers: {'Content-Type': 'application/json'},
+          headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken')},
           body: JSON.stringify({prompt: this.prompt, extract_only: false}),
         });
         clearInterval(stageTimer);
@@ -673,7 +673,7 @@ function agentCreator() {
       }, 2000);
 
       try {
-        const res = await fetch('/api/agents/generate-from-prompt/create', {
+        const res = await fetch('/api/agents/generate-from-prompt/create/', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({config: this.config, auto_simulate: true}),

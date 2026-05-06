@@ -59,6 +59,10 @@ urlpatterns = [
     path("api/agents/<str:agent_id>/activate/", api_proxy.agent_activate, name="api_agent_activate"),
     path("api/agents/<str:agent_id>/pause/", api_proxy.agent_pause, name="api_agent_pause"),
     path("api/agents/<str:agent_id>/deploy/", api_proxy.agent_deploy, name="api_agent_deploy"),
+    path("api/agents/<str:agent_id>/telephony/", api_proxy.agent_telephony, name="api_agent_telephony"),
+    path("api/agents/<str:agent_id>/whatsapp/", api_proxy.agent_whatsapp, name="api_agent_whatsapp"),
+    path("api/agents/<str:agent_id>/simulate/", api_proxy.agent_simulate, name="api_agent_simulate"),
+    path("api/agents/<str:agent_id>/simulate/adversarial/", api_proxy.agent_simulate_adversarial, name="api_agent_simulate_adversarial"),
     path("api/chat/", api_proxy.chat_send, name="api_chat"),
     path("api/audio/", api_proxy.audio_send, name="api_audio"),
     path("api/tts/", api_proxy.tts_synthesize, name="api_tts"),
@@ -124,10 +128,10 @@ urlpatterns = [
     path("api/ab-testing/<str:agent_id>/create-variant/", api_proxy.ab_create_variant, name="api_ab_create_variant"),
     path("api/ab-testing/<str:test_id>/results/", api_proxy.ab_results, name="api_ab_results"),
 
-    # DND
+    # DND — bulk must come BEFORE the <number_id> param to avoid shadowing
     path("api/dnd/", api_proxy.dnd_api, name="api_dnd"),
-    path("api/dnd/<str:number_id>/", api_proxy.dnd_delete, name="api_dnd_delete"),
     path("api/dnd/bulk/", api_proxy.dnd_bulk, name="api_dnd_bulk"),
+    path("api/dnd/<str:number_id>/", api_proxy.dnd_delete, name="api_dnd_delete"),
 
     # ── IVR Trees ──────────────────────────────────────────────────────
     path("api/ivr/", api_proxy.ivr_list, name="api_ivr_list"),
@@ -158,4 +162,7 @@ urlpatterns = [
     path("api/agents/<str:agent_id>/versions/<str:version_id>/restore/", api_proxy.agent_version_restore, name="api_agent_version_restore"),
     path("api/agents/<str:agent_id>/revision-diff/", api_proxy.agent_revision_diff, name="api_agent_revision_diff"),
     path("api/agents/<str:agent_id>/auto-simulate/", api_proxy.agent_auto_simulate, name="api_agent_auto_simulate"),
+
+    # ── Agent Templates ──────────────────────────────────────────────────
+    path("api/templates/", api_proxy.templates_list, name="api_templates"),
 ]
