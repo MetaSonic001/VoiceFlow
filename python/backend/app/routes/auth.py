@@ -16,6 +16,11 @@ from app.config import settings
 from pydantic import BaseModel
 from typing import Optional
 
+# Compatibility: some route modules import `require_agent_access` and `AuthContext`
+# from `app.routes.auth`. Re-export from the centralized `app.auth` module so
+# older import locations remain valid.
+from app.auth import get_auth as require_agent_access, AuthContext
+
 router = APIRouter()
 
 
