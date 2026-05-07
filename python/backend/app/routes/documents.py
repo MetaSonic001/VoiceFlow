@@ -2,6 +2,7 @@
 /api/documents routes — mirrors Express src/routes/documents.ts
 Supports file upload to MinIO + document ingestion pipeline.
 """
+import asyncio
 import os
 import uuid
 from datetime import datetime, timezone
@@ -21,6 +22,11 @@ import logging
 logger = logging.getLogger("voiceflow.documents")
 
 router = APIRouter()
+
+
+def _log_task_exc(task: asyncio.Task) -> None:
+    if not task.cancelled() and (exc := task.exception()):
+        logger.error("Background task failed: %s", exc, exc_info=exc)
 
 
 def _doc_to_dict(doc: Document) -> dict:
@@ -159,7 +165,6 @@ async def upload_document(
     await db.refresh(doc)
 
     # Trigger ingestion pipeline in background
-    import asyncio
     from app.services.ingestion_service import ingest_file
 
     async def _run_ingestion():
@@ -188,7 +193,8 @@ async def upload_document(
         except Exception:
             logger.exception("Ingestion background task failed")
 
-    asyncio.create_task(_run_ingestion())
+    t = asyncio.create_task(_run_ingestion())
+    t.add_done_callback(_log_task_exc)
 
     return JSONResponse(_doc_to_dict(doc), status_code=201)
 
@@ -212,7 +218,6 @@ async def create_document(body: dict, auth: AuthContext = Depends(get_auth), db:
 
     # Trigger URL ingestion if URL provided
     if url:
-        import asyncio
         from app.services.ingestion_service import ingest_urls
 
         async def _run_url_ingestion():
@@ -238,7 +243,8 @@ async def create_document(body: dict, auth: AuthContext = Depends(get_auth), db:
             except Exception:
                 logger.exception("URL ingestion failed")
 
-        asyncio.create_task(_run_url_ingestion())
+        t = asyncio.create_task(_run_url_ingestion())
+        t.add_done_callback(_log_task_exc)
 
     return JSONResponse(_doc_to_dict(doc), status_code=201)
 

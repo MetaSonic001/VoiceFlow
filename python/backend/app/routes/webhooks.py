@@ -13,6 +13,9 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
+import ipaddress
+import re as _re
+from urllib.parse import urlparse
 
 from app.database import get_db
 from app.auth import AuthContext, get_auth
@@ -39,6 +42,30 @@ def _endpoint_to_dict(ep: WebhookEndpoint, reveal_secret: bool = False) -> dict:
     }
 
 
+def _validate_webhook_url(url: str) -> bool:
+    """
+    Reject non-HTTP/HTTPS schemes and private/loopback IP ranges to prevent SSRF.
+    """
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return False
+        hostname = parsed.hostname or ""
+        # Reject localhost / loopback
+        if hostname in ("localhost", "127.0.0.1", "::1"):
+            return False
+        # Reject private/reserved networks
+        try:
+            ip = ipaddress.ip_address(hostname)
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                return False
+        except ValueError:
+            pass  # hostname is a domain, not an IP — allow
+        return True
+    except Exception:
+        return False
+
+
 # ── Create ────────────────────────────────────────────────────────────────────
 
 @router.post("/")
@@ -53,6 +80,8 @@ async def create_webhook(
     url: str = (body.get("url") or "").strip()
     if not url:
         raise HTTPException(status_code=400, detail="url is required")
+    if not _validate_webhook_url(url):
+        raise HTTPException(status_code=400, detail="url must be a public HTTP/HTTPS endpoint")
 
     events = body.get("events", [])
     if isinstance(events, str):

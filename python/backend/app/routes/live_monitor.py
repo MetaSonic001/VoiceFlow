@@ -36,13 +36,21 @@ router = APIRouter()
 # Redis helpers
 # ──────────────────────────────────────────────────────────────────────────────
 
+_redis_pool: aioredis.Redis | None = None
+
+
 def _redis() -> aioredis.Redis:
-    return aioredis.Redis(
-        host=settings.REDIS_HOST,
-        port=settings.REDIS_PORT,
-        db=2,
-        decode_responses=True,
-    )
+    """Return the module-level Redis connection pool (lazily created)."""
+    global _redis_pool
+    if _redis_pool is None:
+        _redis_pool = aioredis.Redis(
+            host=settings.REDIS_HOST,
+            port=settings.REDIS_PORT,
+            db=2,
+            decode_responses=True,
+            max_connections=10,
+        )
+    return _redis_pool
 
 
 async def _scan_active_calls(r: aioredis.Redis) -> list[dict[str, Any]]:
@@ -128,30 +136,27 @@ async def list_active_calls(
 ):
     """Return all currently active calls (from Redis) for this tenant."""
     r = _redis()
-    try:
-        all_calls = await _scan_active_calls(r)
-        # Filter to this tenant
-        tenant_calls = [c for c in all_calls if c.get("tenant_id") == auth.tenant_id]
+    all_calls = await _scan_active_calls(r)
+    # Filter to this tenant
+    tenant_calls = [c for c in all_calls if c.get("tenant_id") == auth.tenant_id]
 
-        enriched = []
-        for call in tenant_calls:
-            sid = call["call_sid"]
-            meta = await _get_call_metadata(r, sid)
-            call.update(meta)
-            call = await _enrich_call(call, db)
-            call["transcript"] = await _get_call_transcript(r, sid)
-            call["extracted_vars"] = await _get_extracted_vars(r, sid)
-            # Compute duration
-            start = call.get("start_time")
-            if isinstance(start, (int, float)):
-                call["duration_seconds"] = int(time.time() - start)
-            else:
-                call["duration_seconds"] = None
-            enriched.append(call)
+    enriched = []
+    for call in tenant_calls:
+        sid = call["call_sid"]
+        meta = await _get_call_metadata(r, sid)
+        call.update(meta)
+        call = await _enrich_call(call, db)
+        call["transcript"] = await _get_call_transcript(r, sid)
+        call["extracted_vars"] = await _get_extracted_vars(r, sid)
+        # Compute duration
+        start = call.get("start_time")
+        if isinstance(start, (int, float)):
+            call["duration_seconds"] = int(time.time() - start)
+        else:
+            call["duration_seconds"] = None
+        enriched.append(call)
 
-        return {"calls": enriched, "total": len(enriched)}
-    finally:
-        await r.aclose()
+    return {"calls": enriched, "total": len(enriched)}
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -166,26 +171,23 @@ async def get_active_call(
 ):
     """Get full detail for one active call."""
     r = _redis()
-    try:
-        raw = await r.get(f"call_state:{call_sid}")
-        if not raw:
-            raise HTTPException(404, "Call not found or already ended")
-        call = json.loads(raw)
-        if call.get("tenant_id") != auth.tenant_id:
-            raise HTTPException(403, "Access denied")
+    raw = await r.get(f"call_state:{call_sid}")
+    if not raw:
+        raise HTTPException(404, "Call not found or already ended")
+    call = json.loads(raw)
+    if call.get("tenant_id") != auth.tenant_id:
+        raise HTTPException(403, "Access denied")
 
-        call["call_sid"] = call_sid
-        meta = await _get_call_metadata(r, call_sid)
-        call.update(meta)
-        call = await _enrich_call(call, db)
-        call["transcript"] = await _get_call_transcript(r, call_sid)
-        call["extracted_vars"] = await _get_extracted_vars(r, call_sid)
-        start = call.get("start_time")
-        if isinstance(start, (int, float)):
-            call["duration_seconds"] = int(time.time() - start)
-        return call
-    finally:
-        await r.aclose()
+    call["call_sid"] = call_sid
+    meta = await _get_call_metadata(r, call_sid)
+    call.update(meta)
+    call = await _enrich_call(call, db)
+    call["transcript"] = await _get_call_transcript(r, call_sid)
+    call["extracted_vars"] = await _get_extracted_vars(r, call_sid)
+    start = call.get("start_time")
+    if isinstance(start, (int, float)):
+        call["duration_seconds"] = int(time.time() - start)
+    return call
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -209,15 +211,12 @@ async def takeover_call(
     Uses Twilio's Calls API to redirect the call with new TwiML.
     """
     r = _redis()
-    try:
-        raw = await r.get(f"call_state:{call_sid}")
-        if not raw:
-            raise HTTPException(404, "Call not found or already ended")
-        state = json.loads(raw)
-        if state.get("tenant_id") != auth.tenant_id:
-            raise HTTPException(403, "Access denied")
-    finally:
-        await r.aclose()
+    raw = await r.get(f"call_state:{call_sid}")
+    if not raw:
+        raise HTTPException(404, "Call not found or already ended")
+    state = json.loads(raw)
+    if state.get("tenant_id") != auth.tenant_id:
+        raise HTTPException(403, "Access denied")
 
     result = await db.execute(select(Tenant).where(Tenant.id == auth.tenant_id))
     tenant = result.scalar_one_or_none()
@@ -275,15 +274,12 @@ async def end_call(
 ):
     """Force-end a Twilio call."""
     r = _redis()
-    try:
-        raw = await r.get(f"call_state:{call_sid}")
-        if not raw:
-            raise HTTPException(404, "Call not found or already ended")
-        state = json.loads(raw)
-        if state.get("tenant_id") != auth.tenant_id:
-            raise HTTPException(403, "Access denied")
-    finally:
-        await r.aclose()
+    raw = await r.get(f"call_state:{call_sid}")
+    if not raw:
+        raise HTTPException(404, "Call not found or already ended")
+    state = json.loads(raw)
+    if state.get("tenant_id") != auth.tenant_id:
+        raise HTTPException(403, "Access denied")
 
     result = await db.execute(select(Tenant).where(Tenant.id == auth.tenant_id))
     tenant = result.scalar_one_or_none()
@@ -332,25 +328,21 @@ async def add_supervisor_note(
 ):
     """Attach a supervisor note to an active call (stored in Redis)."""
     r = _redis()
-    try:
-        raw = await r.get(f"call_state:{call_sid}")
-        if not raw:
-            raise HTTPException(404, "Call not found")
-        state = json.loads(raw)
-        if state.get("tenant_id") != auth.tenant_id:
-            raise HTTPException(403, "Access denied")
+    raw = await r.get(f"call_state:{call_sid}")
+    if not raw:
+        raise HTTPException(404, "Call not found")
+    state = json.loads(raw)
+    if state.get("tenant_id") != auth.tenant_id:
+        raise HTTPException(403, "Access denied")
 
-        notes_raw = await r.get(f"call_notes:{call_sid}")
-        notes = json.loads(notes_raw) if notes_raw else []
-        notes.append({
-            "note": body.note[:500],
-            "ts": time.time(),
-            "supervisor": auth.user_id,
-        })
-        await r.setex(f"call_notes:{call_sid}", 7200, json.dumps(notes))
-    finally:
-        await r.aclose()
-
+    notes_raw = await r.get(f"call_notes:{call_sid}")
+    notes = json.loads(notes_raw) if notes_raw else []
+    notes.append({
+        "note": body.note[:500],
+        "ts": time.time(),
+        "supervisor": auth.user_id,
+    })
+    await r.setex(f"call_notes:{call_sid}", 7200, json.dumps(notes))
     return {"success": True}
 
 
@@ -376,22 +368,18 @@ async def inject_whisper_hint(
     voice_twilio_gather handler on the next speech turn.
     """
     r = _redis()
-    try:
-        raw = await r.get(f"call_state:{call_sid}")
-        if not raw:
-            raise HTTPException(404, "Call not found or already ended")
-        state = json.loads(raw)
-        if state.get("tenant_id") != auth.tenant_id:
-            raise HTTPException(403, "Access denied")
+    raw = await r.get(f"call_state:{call_sid}")
+    if not raw:
+        raise HTTPException(404, "Call not found or already ended")
+    state = json.loads(raw)
+    if state.get("tenant_id") != auth.tenant_id:
+        raise HTTPException(403, "Access denied")
 
-        hint = body.hint[:500].strip()
-        if not hint:
-            raise HTTPException(400, "hint must not be empty")
+    hint = body.hint[:500].strip()
+    if not hint:
+        raise HTTPException(400, "hint must not be empty")
 
-        # TTL of 90s — must be consumed within one voice turn
-        await r.setex(f"whisper_hint:{call_sid}", 90, hint)
-        logger.info("[whisper] supervisor %s injected hint for call %s", auth.user_id, call_sid)
-    finally:
-        await r.aclose()
-
+    # TTL of 90s — must be consumed within one voice turn
+    await r.setex(f"whisper_hint:{call_sid}", 90, hint)
+    logger.info("[whisper] supervisor %s injected hint for call %s", auth.user_id, call_sid)
     return {"success": True, "hint": hint, "ttl_seconds": 90}

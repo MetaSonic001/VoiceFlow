@@ -3,6 +3,7 @@
 Uses integrated ingestion service (Docling + PaddleOCR + ChromaDB + BM25).
 """
 import asyncio
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, Query, UploadFile, File, Form
@@ -22,7 +23,13 @@ from app.services.ingestion_service import (
     get_job_status,
 )
 
+logger = logging.getLogger("voiceflow.ingestion")
 router = APIRouter()
+
+
+def _log_task_exc(task: asyncio.Task) -> None:
+    if not task.cancelled() and (exc := task.exception()):
+        logger.error("Background ingestion task failed: %s", exc, exc_info=exc)
 
 
 @router.post("/start")
@@ -87,10 +94,10 @@ async def start_ingestion(body: dict, auth: AuthContext = Depends(get_auth), db:
                     )
                 await session.commit()
         except Exception:
-            import logging
-            logging.getLogger("voiceflow.ingestion").exception("Background ingestion failed")
+            logger.exception("Background ingestion failed")
 
-    asyncio.create_task(_background_ingest())
+    t = asyncio.create_task(_background_ingest())
+    t.add_done_callback(_log_task_exc)
 
     return {"jobId": job_id, "documents": documents, "status": "processing"}
 
@@ -130,10 +137,10 @@ async def ingest_company(body: dict, auth: AuthContext = Depends(get_auth), db: 
                 max_pages=max_pages,
             )
         except Exception:
-            import logging
-            logging.getLogger("voiceflow.ingestion").exception("Company ingestion failed")
+            logger.exception("Company ingestion failed")
 
-    asyncio.create_task(_background())
+    t = asyncio.create_task(_background())
+    t.add_done_callback(_log_task_exc)
 
     return {"jobId": job_id, "status": "processing", "websiteUrl": website_url}
 

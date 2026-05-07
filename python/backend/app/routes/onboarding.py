@@ -427,10 +427,17 @@ async def deploy_agent(request: Request, auth: AuthContext = Depends(get_auth), 
             status_code=400,
         )
 
-    # In demo mode, just return a mock number
+    # Phone number provisioning requires real Twilio credentials.
+    # The demo stub has been removed — callers must configure Twilio first.
     agent.status = "active"
     await db.commit()
-    return {"success": True, "phone_number": "+1-555-DEMO", "already_provisioned": False}
+    return JSONResponse(
+        {
+            "error": "Phone provisioning requires Twilio credentials. Please configure your Twilio Account SID and Auth Token in Settings, then retry.",
+            "code": "TWILIO_NOT_CONFIGURED",
+        },
+        status_code=400,
+    )
 
 
 # ── Status ───────────────────────────────────────────────────────────────────

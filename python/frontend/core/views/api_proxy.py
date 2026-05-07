@@ -228,6 +228,26 @@ def onboarding_agent_config(request):
         return JsonResponse({"error": str(e)}, status=400)
 
 
+@login_required
+@require_http_methods(["POST"])
+def onboarding_configure_voice(request):
+    """POST /onboarding/voice — save voice + tone settings for onboarding step."""
+    try:
+        return JsonResponse(get_client(request)._post("/onboarding/voice", _json_body(request)))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
+@login_required
+@require_http_methods(["POST"])
+def onboarding_setup_channels(request):
+    """POST /onboarding/channels — set plan type and telephony provider during onboarding."""
+    try:
+        return JsonResponse(get_client(request)._post("/onboarding/channels", _json_body(request)))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
 # ── Knowledge ──────────────────────────────────────────────────────────
 
 @login_required
@@ -456,6 +476,21 @@ assemblyai_api_key = _byok_provider_view("save_assemblyai_api_key", "delete_asse
 truecaller_api_key = _byok_provider_view("save_truecaller_api_key", "delete_truecaller_api_key")
 
 
+@login_required
+@require_http_methods(["GET", "POST", "DELETE"])
+def exotel_credentials(request):
+    """GET/POST/DELETE /api/settings/exotel — Exotel BYOK credentials."""
+    client = get_client(request)
+    try:
+        if request.method == "DELETE":
+            return JsonResponse(client._delete("/api/settings/exotel"))
+        if request.method == "POST":
+            return JsonResponse(client._post("/api/settings/exotel", _json_body(request)))
+        return JsonResponse(client._get("/api/settings/exotel"))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+
 # ── Analytics / Call Logs / Retraining / System / Users / Billing ──────
 
 @login_required
@@ -556,7 +591,7 @@ def analytics_export_csv(request):
             params["agentId"] = request.GET["agentId"]
         resp = req_lib.get(
             client._url("/analytics/export.csv"),
-            headers=client._headers(),
+            headers=client._headers,
             params=params,
             timeout=30,
         )
@@ -641,7 +676,7 @@ def billing_calculator(request):
     """Proxy the no-auth billing calculator to FastAPI. Auth not required (public pricing page)."""
     from django.conf import settings as dj_settings
     import httpx as _httpx
-    fastapi_url = getattr(dj_settings, "FASTAPI_URL", "http://localhost:8040")
+    fastapi_url = getattr(dj_settings, "BACKEND_API_URL", "http://localhost:8040").rstrip("/")
     params = {
         "calls_per_day": request.GET.get("calls_per_day", "50"),
         "avg_duration_seconds": request.GET.get("avg_duration_seconds", "120"),
@@ -736,13 +771,6 @@ def system_health(request):
         return JsonResponse(client.get_system_health())
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
-
-
-@login_required
-@require_http_methods(["GET"])
-def system_health_check(request):
-    """Alias endpoint for system page JS refresh."""
-    return system_health(request)
 
 
 # ── Call log flag ──────────────────────────────────────────────────────
@@ -1180,7 +1208,7 @@ def coaching_from_recording(request):
     try:
         import json as _json
         body = _json.loads(request.body)
-        return JsonResponse(get_client(request)._post("/coaching/from-recording", body), status=201)
+        return JsonResponse(get_client(request)._post("/api/coaching/from-recording", body), status=201)
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
@@ -1241,7 +1269,7 @@ def agent_revise(request, agent_id):
     try:
         import json as _json
         body = _json.loads(request.body)
-        return JsonResponse(get_client(request)._post(f"/agents/{agent_id}/revise", body))
+        return JsonResponse(get_client(request)._post(f"/api/agents/{agent_id}/revise", body))
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
@@ -1449,7 +1477,7 @@ def voice_clone_preview_stream(request, clone_id):
     from django.http import StreamingHttpResponse
     from django.conf import settings as django_settings
     backend = getattr(django_settings, "BACKEND_API_URL", "http://127.0.0.1:8040").rstrip("/")
-    headers = get_client(request)._headers()
+    headers = get_client(request)._headers
     try:
         resp = httpx.get(f"{backend}/api/voices/clones/{clone_id}/preview", headers=headers, timeout=15)
         content_type = resp.headers.get("content-type", "audio/mpeg")
@@ -1485,21 +1513,6 @@ def integrations_get(request, agent_id):
             return JsonResponse({"error": str(e)}, status=400)
     try:
         return JsonResponse(get_client(request).get_integrations(agent_id))
-    except Exception as e:
-        return JsonResponse({"error": str(e)}, status=400)
-
-
-# kept for backward-compat — URL pattern routes PUT to integrations_get above
-@login_required
-@require_http_methods(["PUT"])
-def integrations_save(request, agent_id):
-    import json as _json
-    try:
-        body = _json.loads(request.body)
-    except Exception:
-        return JsonResponse({"error": "Invalid JSON"}, status=400)
-    try:
-        return JsonResponse(get_client(request).save_integrations(agent_id, body))
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)
 
@@ -1754,6 +1767,7 @@ def background_sound_config(request, agent_id):
 # ── SIP Trunking ──────────────────────────────────────────────────────────────
 
 @login_required
+@require_http_methods(["GET", "POST"])
 def sip_trunks_list(request):
     try:
         client = get_client(request)
@@ -1766,6 +1780,7 @@ def sip_trunks_list(request):
 
 
 @login_required
+@require_http_methods(["GET", "DELETE"])
 def sip_trunk_detail(request, trunk_id):
     try:
         client = get_client(request)
@@ -1777,6 +1792,7 @@ def sip_trunk_detail(request, trunk_id):
 
 
 @login_required
+@require_http_methods(["POST"])
 def sip_trunk_test(request, trunk_id):
     try:
         return JsonResponse(get_client(request)._post(f"/api/sip-trunking/trunks/{trunk_id}/test", json={}))
@@ -1785,6 +1801,7 @@ def sip_trunk_test(request, trunk_id):
 
 
 @login_required
+@require_http_methods(["GET"])
 def sip_webhook_uri(request, agent_id):
     try:
         return JsonResponse(get_client(request)._get(f"/api/sip-trunking/webhook-uri/{agent_id}"))
@@ -1861,8 +1878,8 @@ def crm_field_mapping(request):
     try:
         client = get_client(request)
         if request.method == "POST":
-            return JsonResponse(client._post("/crm/field-mapping", _json_body(request)))
-        return JsonResponse(client._get("/crm/field-mapping"))
+            return JsonResponse(client._post("/api/crm/field-mapping", _json_body(request)))
+        return JsonResponse(client._get("/api/crm/field-mapping"))
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
@@ -1873,7 +1890,7 @@ def crm_lookup(request):
     """Look up enriched contact data by phone number from the connected CRM."""
     try:
         phone = request.GET.get("phone", "")
-        return JsonResponse(get_client(request)._get("/crm/lookup", params={"phone": phone}))
+        return JsonResponse(get_client(request)._get("/api/crm/lookup", params={"phone": phone}))
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
@@ -1885,8 +1902,8 @@ def crm_connect_hubspot(request):
     try:
         client = get_client(request)
         if request.method == "DELETE":
-            return JsonResponse(client._delete("/crm/connect/hubspot"))
-        return JsonResponse(client._post("/crm/connect/hubspot", _json_body(request)))
+            return JsonResponse(client._delete("/api/crm/connect/hubspot"))
+        return JsonResponse(client._post("/api/crm/connect/hubspot", _json_body(request)))
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
@@ -1898,8 +1915,8 @@ def crm_connect_salesforce(request):
     try:
         client = get_client(request)
         if request.method == "DELETE":
-            return JsonResponse(client._delete("/crm/connect/salesforce"))
-        return JsonResponse(client._post("/crm/connect/salesforce", _json_body(request)))
+            return JsonResponse(client._delete("/api/crm/connect/salesforce"))
+        return JsonResponse(client._post("/api/crm/connect/salesforce", _json_body(request)))
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 

@@ -32,30 +32,33 @@ router = APIRouter()
 
 _CONV_TTL = 86400  # 24 hours
 
+# ── Redis pool (module-level — one shared connection pool) ────────────────────
 
-# ── Redis helper ──────────────────────────────────────────────────────────────
+_wa_redis_pool: aioredis.Redis | None = None
 
-def _redis() -> aioredis.Redis:
-    return aioredis.Redis(
-        host=settings.REDIS_HOST,
-        port=settings.REDIS_PORT,
-        db=4,
-        decode_responses=True,
-    )
+
+def _get_redis() -> aioredis.Redis:
+    global _wa_redis_pool
+    if _wa_redis_pool is None:
+        _wa_redis_pool = aioredis.Redis(
+            host=settings.REDIS_HOST,
+            port=settings.REDIS_PORT,
+            db=4,
+            decode_responses=True,
+            max_connections=10,
+        )
+    return _wa_redis_pool
 
 
 # ── Conversation history helpers ──────────────────────────────────────────────
 
 async def _load_history(tenant_id: str, agent_id: str, session_id: str) -> list[dict]:
-    r = _redis()
     try:
-        raw = await r.get(f"whatsapp:{tenant_id}:{agent_id}:{session_id}")
+        raw = await _get_redis().get(f"whatsapp:{tenant_id}:{agent_id}:{session_id}")
         if raw:
             return json.loads(raw)
     except Exception:
         logger.warning("[whatsapp] failed to load conversation history")
-    finally:
-        await r.aclose()
     return []
 
 
@@ -65,17 +68,14 @@ async def _save_history(
     session_id: str,
     history: list[dict],
 ) -> None:
-    r = _redis()
     try:
-        await r.setex(
+        await _get_redis().setex(
             f"whatsapp:{tenant_id}:{agent_id}:{session_id}",
             _CONV_TTL,
             json.dumps(history),
         )
     except Exception:
         logger.warning("[whatsapp] failed to save conversation history")
-    finally:
-        await r.aclose()
 
 
 # ── Twilio Messaging API helper ───────────────────────────────────────────────

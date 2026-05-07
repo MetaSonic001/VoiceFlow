@@ -121,13 +121,14 @@ async def delete_recording(
     try:
         from minio import Minio
         from app.config import settings
-        client = Minio(
-            settings.MINIO_ENDPOINT.replace("http://", "").replace("https://", ""),
-            access_key=settings.MINIO_ROOT_USER,
-            secret_key=settings.MINIO_ROOT_PASSWORD,
-            secure=settings.MINIO_ENDPOINT.startswith("https"),
-        )
-        client.remove_object("voiceflow-recordings", rec.minioKey)
+        if settings.MINIO_ENDPOINT and settings.MINIO_ACCESS_KEY and settings.MINIO_SECRET_KEY:
+            client = Minio(
+                settings.MINIO_ENDPOINT.replace("http://", "").replace("https://", ""),
+                access_key=settings.MINIO_ACCESS_KEY,
+                secret_key=settings.MINIO_SECRET_KEY,
+                secure=settings.MINIO_ENDPOINT.startswith("https"),
+            )
+            client.remove_object("voiceflow-recordings", rec.minioKey)
     except Exception as exc:
         logger.warning("[recordings] MinIO delete failed for %s: %s", rec.minioKey, exc)
     await db.delete(rec)

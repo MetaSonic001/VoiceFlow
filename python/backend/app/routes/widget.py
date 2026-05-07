@@ -84,20 +84,22 @@ async def widget_embed_js(
     if not agent:
         return PlainTextResponse("console.error('VoiceFlow: Agent not found');", status_code=404)
 
-    # Sanitise injected values (no quotes / script injection)
+    # Sanitise injected values using json.dumps to prevent JS string injection
+    import json as _json
     import re as _re
     safe_color = color if _re.match(r'^#[0-9a-fA-F]{3,8}$', color) else "#6366f1"
-    safe_name = (widget_name or agent.name or "AI Agent").replace("'", "\\'").replace("\\", "")[:80]
-    safe_greeting = greeting.replace("'", "\\'").replace("\\", "")[:240]
+    # json.dumps produces a valid JS string literal including surrounding quotes
+    safe_name_js = _json.dumps((widget_name or agent.name or "AI Agent")[:80])
+    safe_greeting_js = _json.dumps(greeting[:240])
 
     js = r"""
 (function() {
   /* VoiceFlow Embeddable Chat Widget — auto-injected */
   var AGENT_ID = '""" + agent_id + r"""';
-  var AGENT_NAME = '""" + safe_name + r"""';
+  var AGENT_NAME = """ + safe_name_js + r""";
   var API_BASE = window.location.protocol + '//' + window.location.host;
   var PRIMARY = '""" + safe_color + r"""';
-  var GREETING = '""" + safe_greeting + r"""';
+  var GREETING = """ + safe_greeting_js + r""";
 
   /* ── Simple Markdown renderer (bold, italic, code, links) ── */
   function md(text) {

@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
+import hmac
 import json
 import logging
 import struct
@@ -52,6 +54,30 @@ _tts = TTSRouter()
 _FRAME_BYTES = 320          # 20ms × 8000Hz × 2 bytes/sample
 _SILENCE_FRAMES_THRESHOLD = 24  # ~480ms of silence → flush utterance
 _INTERRUPT_RMS_THRESHOLD = 800.0
+
+
+def _validate_exotel_webhook(request: Request, form_data: dict) -> bool:
+    """
+    Validate an inbound Exotel webhook request.
+
+    Exotel does not sign webhooks like Twilio. Instead, we support an optional
+    pre-shared secret: set EXOTEL_WEBHOOK_SECRET in the environment.  Exotel
+    should then be configured to append ?token=<secret> to its callback URLs.
+    If the env var is not set, all requests are allowed (suitable for dev).
+    """
+    secret = settings.EXOTEL_WEBHOOK_SECRET if hasattr(settings, "EXOTEL_WEBHOOK_SECRET") else None
+    if not secret:
+        import os as _os
+        secret = _os.getenv("EXOTEL_WEBHOOK_SECRET")
+    if not secret:
+        return True
+    # Accept token either as a query param or in the form body
+    provided = (
+        request.query_params.get("token")
+        or form_data.get("token")
+        or ""
+    )
+    return hmac.compare_digest(provided, secret)
 
 
 # ── Credentials helper ───────────────────────────────────────────────────────
@@ -115,6 +141,13 @@ async def exotel_inbound(agent_id: str, request: Request):
     Returns Exotel Passthru XML to connect to the WebSocket audio stream.
     Exotel Passthru docs: https://developer.exotel.com/api/passthru
     """
+    form = await request.form()
+    if not _validate_exotel_webhook(request, dict(form)):
+        return Response(
+            content='<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>',
+            media_type="application/xml",
+            status_code=403,
+        )
     async with AsyncSessionLocal() as db:
         result = await db.execute(select(Agent).where(Agent.id == agent_id))
         agent = result.scalar_one_or_none()

@@ -71,12 +71,12 @@ async def rate_log(log_id: str, body: dict, auth: AuthContext = Depends(get_auth
     if rating not in (1, -1):
         return JSONResponse({"error": "rating must be 1 or -1"}, status_code=400)
 
-    result = await db.execute(select(CallLog).where(CallLog.id == log_id))
+    result = await db.execute(
+        select(CallLog).where(CallLog.id == log_id, CallLog.tenantId == auth.tenant_id)
+    )
     log = result.scalar_one_or_none()
     if not log:
         return JSONResponse({"error": "Log not found"}, status_code=404)
-    if log.tenantId != auth.tenant_id:
-        return JSONResponse({"error": "Forbidden"}, status_code=403)
 
     log.rating = rating
     log.ratingNotes = body.get("notes")
@@ -87,12 +87,12 @@ async def rate_log(log_id: str, body: dict, auth: AuthContext = Depends(get_auth
 
 @router.post("/{log_id}/flag")
 async def flag_log(log_id: str, auth: AuthContext = Depends(get_auth), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(CallLog).where(CallLog.id == log_id))
+    result = await db.execute(
+        select(CallLog).where(CallLog.id == log_id, CallLog.tenantId == auth.tenant_id)
+    )
     log = result.scalar_one_or_none()
     if not log:
         return JSONResponse({"error": "Log not found"}, status_code=404)
-    if log.tenantId != auth.tenant_id:
-        return JSONResponse({"error": "Forbidden"}, status_code=403)
 
     log.flaggedForRetraining = True
     await db.commit()

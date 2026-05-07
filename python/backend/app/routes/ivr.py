@@ -24,9 +24,28 @@ from app.database import get_db
 from app.auth import AuthContext, get_auth
 from app.models import IVRTree
 from app.services.ivr_service import render_gather_twiml, resolve_dtmf
+from app.config import settings
 
 logger = logging.getLogger("voiceflow.ivr_routes")
 router = APIRouter()
+
+
+def _validate_twilio_signature(request: Request, form_data: dict) -> bool:
+    """Validate Twilio request signature. Returns True if valid or creds not configured."""
+    auth_token = settings.TWILIO_AUTH_TOKEN
+    if not auth_token:
+        return True
+    try:
+        from twilio.request_validator import RequestValidator
+        validator = RequestValidator(auth_token)
+        signature = request.headers.get("X-Twilio-Signature", "")
+        proto = request.headers.get("x-forwarded-proto", "https")
+        host = request.headers.get("host", "localhost")
+        url = f"{proto}://{host}{request.url.path}"
+        return validator.validate(url, form_data, signature)
+    except Exception:
+        logger.warning("[ivr] signature validation error — allowing request")
+        return True
 
 
 # ── CRUD ──────────────────────────────────────────────────────────────────────
@@ -141,6 +160,9 @@ async def delete_ivr_tree(
 @router.api_route("/voice/{tree_id}", methods=["GET", "POST"])
 async def ivr_root(tree_id: str, request: Request, db: AsyncSession = Depends(get_db)):
     """Render the root IVR menu TwiML."""
+    form = await request.form()
+    if not _validate_twilio_signature(request, dict(form)):
+        return Response(content="Forbidden", status_code=403, media_type="text/plain")
     result = await db.execute(select(IVRTree).where(IVRTree.id == tree_id, IVRTree.isActive == True))
     tree = result.scalar_one_or_none()
     if not tree:
@@ -159,6 +181,8 @@ async def ivr_root(tree_id: str, request: Request, db: AsyncSession = Depends(ge
 async def ivr_gather(tree_id: str, request: Request, db: AsyncSession = Depends(get_db)):
     """Handle DTMF input and route to next node or agent."""
     form = await request.form()
+    if not _validate_twilio_signature(request, dict(form)):
+        return Response(content="Forbidden", status_code=403, media_type="text/plain")
     digit = str(form.get("Digits", "")).strip()
     node_id = str(request.query_params.get("node", "root"))
 

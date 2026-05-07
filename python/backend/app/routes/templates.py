@@ -31,7 +31,10 @@ def _template_dict(t: AgentTemplate) -> dict:
 
 
 @router.get("/")
-async def list_templates(db: AsyncSession = Depends(get_db)):
+async def list_templates(
+    _auth: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_db),
+):
     result = await db.execute(
         select(AgentTemplate)
         .where(AgentTemplate.isActive.is_(True))
@@ -42,7 +45,11 @@ async def list_templates(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{template_id}")
-async def get_template(template_id: str, db: AsyncSession = Depends(get_db)):
+async def get_template(
+    template_id: str,
+    _auth: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_db),
+):
     result = await db.execute(select(AgentTemplate).where(AgentTemplate.id == template_id))
     t = result.scalar_one_or_none()
     if not t:

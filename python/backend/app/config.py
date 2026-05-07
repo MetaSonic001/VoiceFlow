@@ -77,6 +77,12 @@ class Settings(BaseSettings):
     # Owner accounts — never billed (comma-separated tenant IDs)
     OWNER_TENANT_IDS: str = ""
 
+    # Security
+    # Set to false in production to reject header-auth requests with empty x-tenant-id
+    ALLOW_DEMO_FALLBACK: bool = True
+    # Pre-shared secret appended as ?token= to Exotel callback URLs
+    EXOTEL_WEBHOOK_SECRET: Optional[str] = None
+
     # MinIO (optional)
     MINIO_ENDPOINT: Optional[str] = None
     MINIO_ACCESS_KEY: Optional[str] = None

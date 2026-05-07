@@ -80,7 +80,7 @@ _SARVAM_TTS_PER_MIN_INR: float = (0.0000165 * 600 * 4) * _USD_TO_INR
 _EDGE_TTS_PER_MIN_INR: float = 0.0
 
 # Exotel inbound (India)
-_EXOTEL_INBOUND_PER_MIN_INR: float = 0.40
+_EXOTEL_INBOUND_PER_MIN_INR: float = 0.50
 _EXOTEL_OUTBOUND_PER_MIN_INR: float = 0.80
 
 # Twilio India (fallback / international customers)
@@ -233,6 +233,7 @@ async def fire_stripe_meter_event(
 
     try:
         import stripe  # type: ignore
+        import uuid as _uuid
         stripe.api_key = stripe_key
 
         event = stripe.billing.MeterEvent.create(
@@ -241,6 +242,7 @@ async def fire_stripe_meter_event(
                 "stripe_customer_id": tenant.stripeCustomerId,
                 "value": str(billed_minutes),
             },
+            identifier=f"vf-{tenant.id}-{_uuid.uuid4().hex}",  # idempotency key
         )
         return event.get("identifier") or event.get("id")
     except Exception as e:
@@ -278,8 +280,13 @@ async def log_call_usage(
             return None
 
         plan_type = tenant.planType or "free"
-        # Also increment the tenant's lifetime call count (for free-tier cap)
-        tenant.totalCallCount = (tenant.totalCallCount or 0) + 1
+        # Atomically increment the tenant's lifetime call count (race-safe UPDATE)
+        from sqlalchemy import update as sa_update
+        await db.execute(
+            sa_update(Tenant)
+            .where(Tenant.id == tenant_id)
+            .values(totalCallCount=Tenant.totalCallCount + 1)
+        )
         await db.flush()
 
         raw_cost, billed = compute_billed_amount_inr(

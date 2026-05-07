@@ -55,6 +55,7 @@ help: ## Show this help
 	@Write-Host '    make makemigrations    Run Django makemigrations only'
 	@Write-Host '    make db-check          Verify Postgres creds (auto-fix stale volume)'
 	@Write-Host '    make ensure-langfuse-db  Create langfuse_db if missing (safe on existing installs)'
+	@Write-Host '    make alembic-upgrade   Run Alembic migrations on Windows (upgrade existing DB)'
 	@Write-Host '    make langfuse          Start Langfuse observability (optional, port 3001)'
 	@Write-Host '    make superuser         Create Django admin superuser'
 	@Write-Host '    make seed              Seed default agent templates'
@@ -366,6 +367,12 @@ format: ## Auto-format with black + ruff (Linux/macOS/CI)
 alembic-migrate: SHELL := /bin/bash
 alembic-migrate: ## Run Alembic migrations (Linux/macOS/CI)  —  alembic upgrade head
 	cd backend && uv run alembic upgrade head
+
+.PHONY: alembic-upgrade
+alembic-upgrade: ## Run Alembic migrations on Windows (upgrades existing DB schema)
+	@Write-Host 'Running Alembic migrations...' -ForegroundColor Yellow
+	@Push-Location backend; uv run alembic upgrade head; Pop-Location
+	@Write-Host 'Alembic migrations applied.' -ForegroundColor Green
 
 .PHONY: migrate-all
 migrate-all: SHELL := /bin/bash

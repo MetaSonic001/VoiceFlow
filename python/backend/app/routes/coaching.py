@@ -13,6 +13,7 @@ GET  /api/coaching/agents/{agent_id}/report — full coaching report for an agen
 """
 from __future__ import annotations
 
+import re as _re
 import logging
 from datetime import datetime, timezone
 
@@ -27,6 +28,22 @@ from app.models import CoachingCard, Agent
 
 logger = logging.getLogger("voiceflow.coaching_routes")
 router = APIRouter()
+
+_INJECTION_BLOCKLIST = _re.compile(
+    r"(ignore\s+previous|forget\s+(all|everything|prior)|new\s+instructions?|system\s*:\s*|<\s*/?\s*(system|inst|s)|\[INST\]|\[/INST\]|you\s+are\s+now|act\s+as\s+a|disregard|jailbreak|DAN\s+mode)",
+    _re.IGNORECASE,
+)
+
+
+def _sanitize_prompt_delta(delta: str | None) -> str | None:
+    """Strip prompt-injection patterns from a coaching card delta before appending to systemPrompt."""
+    if not delta:
+        return delta
+    if _INJECTION_BLOCKLIST.search(delta):
+        logger.warning("[coaching] blocking prompt delta containing injection pattern")
+        return None
+    # Limit size to prevent system prompt bloat
+    return delta[:2000]
 
 
 def _card_dict(c: CoachingCard) -> dict:
@@ -110,10 +127,12 @@ async def approve_coaching_card(
         return JSONResponse({"error": "Agent not found"}, status_code=404)
 
     if card.suggestedPromptDelta:
-        current_prompt = agent.systemPrompt or ""
-        separator = "\n\n--- Coaching Card Applied ---\n"
-        agent.systemPrompt = current_prompt + separator + card.suggestedPromptDelta
-        card.appliedAt = datetime.now(timezone.utc)
+        sanitized_delta = _sanitize_prompt_delta(card.suggestedPromptDelta)
+        if sanitized_delta:
+            current_prompt = agent.systemPrompt or ""
+            separator = "\n\n--- Coaching Card Applied ---\n"
+            agent.systemPrompt = current_prompt + separator + sanitized_delta
+            card.appliedAt = datetime.now(timezone.utc)
 
     card.status = "approved"
     card.approvedBy = auth.user_id

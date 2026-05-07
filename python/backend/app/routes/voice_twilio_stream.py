@@ -139,27 +139,9 @@ async def handle_inbound_call(agent: Agent, request: Request) -> Response:
     return Response(content=str(resp), media_type="application/xml")
 
 
-@router.post("/inbound/{agent_id}")
-async def voice_inbound(agent_id: str, request: Request):
-    """Twilio inbound webhook — validates signature then returns Media Stream TwiML."""
-    form = await request.form()
-    if not _validate_twilio_signature(request, dict(form)):
-        logger.warning("[twilio_stream] invalid Twilio signature on /inbound/%s", agent_id)
-        return Response(content="Forbidden", status_code=403, media_type="text/plain")
-
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(select(Agent).where(Agent.id == agent_id))
-        agent = result.scalar_one_or_none()
-
-    if not agent:
-        from twilio.twiml.voice_response import VoiceResponse
-
-        resp = VoiceResponse()
-        resp.say("Agent not found.")
-        resp.hangup()
-        return Response(content=str(resp), media_type="application/xml")
-
-    return await handle_inbound_call(agent, request)
+# NOTE: /inbound/{agent_id} is intentionally NOT registered here.
+# voice_inbound_router.py owns that route and calls handle_inbound_call() directly.
+# Registering it here would create a silent route collision.
 
 
 @router.post("/outbound/{agent_id}")

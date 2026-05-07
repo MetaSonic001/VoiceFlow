@@ -29,6 +29,11 @@ logger = logging.getLogger("voiceflow.campaigns")
 router = APIRouter()
 
 
+def _log_task_exc(task: asyncio.Task) -> None:
+    if not task.cancelled() and (exc := task.exception()):
+        logger.error("Background task failed: %s", exc, exc_info=exc)
+
+
 # ── Helper ────────────────────────────────────────────────────────────────────
 
 def _campaign_to_dict(c: Campaign) -> dict:
@@ -218,7 +223,8 @@ async def start_campaign(
         raise HTTPException(status_code=400, detail="No pending contacts to dial")
 
     # Launch worker without blocking the request
-    asyncio.create_task(campaign_worker.process_campaign(campaign_id))
+    t = asyncio.create_task(campaign_worker.process_campaign(campaign_id))
+    t.add_done_callback(_log_task_exc)
 
     return {"status": "started", "contactsEnqueued": enqueued}
 
@@ -350,12 +356,13 @@ async def amd_callback(campaign_id: str, request: Request):
     if call_sid:
         from app.services.campaign_worker import campaign_worker
 
-        asyncio.create_task(
+        t = asyncio.create_task(
             campaign_worker.handle_amd_result(
                 call_sid=call_sid,
                 answered_by=answered_by,
                 campaign_id=campaign_id,
             )
         )
+        t.add_done_callback(_log_task_exc)
 
     return JSONResponse({"received": True})

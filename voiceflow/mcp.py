@@ -39,14 +39,13 @@ def build_mcp_server(agent: "VoiceAgent", name: str | None = None):
     mcp = FastMCP(server_name)
 
     registered = 0
-    for fn_name, fn in agent._tools.items():
-        schema = fn._voice_tool_schema  # set by @voice_tool decorator
+    # _tools is a list[Callable]; each fn has _voice_tool_meta and _voice_tool_schema attrs
+    for fn in agent._tools:
+        fn_name = fn.__name__
+        schema = getattr(fn, "_voice_tool_schema", {})  # set by @voice_tool decorator
 
         # Build a dynamic async wrapper that MCP can call
-        def _make_handler(func, fn_schema):
-            params = fn_schema.get("parameters", {}).get("properties", {})
-            required = fn_schema.get("parameters", {}).get("required", [])
-
+        def _make_handler(func, fn_name_: str, fn_schema: dict):
             async def _handler(**kwargs: Any) -> str:
                 try:
                     result = await execute_tool(func, kwargs)
@@ -55,21 +54,24 @@ def build_mcp_server(agent: "VoiceAgent", name: str | None = None):
                     logger.error("[MCP tool %s] error: %s", func.__name__, exc)
                     return f"Error: {exc}"
 
-            _handler.__name__ = fn_name
+            _handler.__name__ = fn_name_
             _handler.__doc__ = fn_schema.get("description", "")
             return _handler
 
-        handler = _make_handler(fn, schema)
+        handler = _make_handler(fn, fn_name, schema)
         mcp.tool(name=fn_name, description=schema.get("description", ""))(handler)
         registered += 1
+
+    tool_names = [fn.__name__ for fn in agent._tools]
 
     # -- MCP Resource: agent info
     @mcp.resource("voiceflow://agent/info")
     def agent_info() -> str:
+        prompt_preview = (agent.prompt or "")[:500]
         return (
             f"Agent: {agent.name}\n"
-            f"System Prompt: {agent.system_prompt[:500]}...\n"
-            f"Tools: {list(agent._tools.keys())}\n"
+            f"System Prompt: {prompt_preview}...\n"
+            f"Tools: {tool_names}\n"
         )
 
     # -- MCP Prompt: improve agent
@@ -77,7 +79,7 @@ def build_mcp_server(agent: "VoiceAgent", name: str | None = None):
     def improve_prompt() -> str:
         return (
             f"Here is the current system prompt for the voice agent '{agent.name}':\n\n"
-            f"{agent.system_prompt}\n\n"
+            f"{agent.prompt or ''}\n\n"
             "Please suggest 3 concrete improvements to make this agent:\n"
             "1. More empathetic and natural-sounding\n"
             "2. Better at handling objections\n"

@@ -2,6 +2,8 @@
 /api/agents routes — mirrors Express src/routes/agents.ts
 GET /, GET /:id, POST /, PUT /:id, DELETE /:id
 """
+import asyncio
+import logging
 from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy import select, func, or_
@@ -13,7 +15,13 @@ from app.database import get_db
 from app.auth import AuthContext, get_auth
 from app.models import Agent, Document, User
 
+logger = logging.getLogger("voiceflow.agents")
 router = APIRouter()
+
+
+def _log_task_exc(task: asyncio.Task) -> None:
+    if not task.cancelled() and (exc := task.exception()):
+        logger.error("Background task failed: %s", exc, exc_info=exc)
 
 
 def _agent_to_dict(agent: Agent, doc_count: int = 0) -> dict:
@@ -181,8 +189,8 @@ async def update_agent(agent_id: str, request_data: dict, auth: AuthContext = De
 
     # ── CI/CD gate: auto-run simulation suite when systemPrompt changes ─────
     if prompt_changed and agent.simulation_suite:
-        import asyncio
-        asyncio.create_task(_auto_simulate_on_prompt_change(str(agent.id), str(agent.tenantId)))
+        t = asyncio.create_task(_auto_simulate_on_prompt_change(str(agent.id), str(agent.tenantId)))
+        t.add_done_callback(_log_task_exc)
 
     return _agent_to_dict(agent)
 

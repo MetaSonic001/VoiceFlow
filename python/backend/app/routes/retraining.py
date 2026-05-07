@@ -1,6 +1,7 @@
 """
 /api/retraining routes — mirrors Express src/routes/retraining.ts
 """
+import logging
 import json
 import math
 from datetime import datetime, timezone
@@ -14,6 +15,7 @@ from app.database import get_db
 from app.auth import AuthContext, get_auth
 from app.models import RetrainingExample, CallLog, Agent
 
+logger = logging.getLogger("voiceflow.retraining")
 router = APIRouter()
 
 
@@ -150,8 +152,8 @@ async def process_retraining(auth: AuthContext = Depends(get_auth), db: AsyncSes
                                 )
                                 db.add(example)
                                 count += 1
-        except Exception:
-            pass  # Skip unparseable transcripts
+        except Exception as _exc:
+            logger.warning("[retraining] failed to parse transcript for log %s: %s", log.id, _exc)
         log.retrained = True
 
     await db.commit()

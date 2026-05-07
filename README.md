@@ -2,14 +2,15 @@
 
 A multi-tenant SaaS platform for building, deploying, and managing AI-powered voice and chat agents. Businesses onboard through a guided wizard, upload their knowledge base, and receive a domain-specific AI agent that answers customer queries over phone (Twilio), browser-based WebSocket voice calls, or a web chat interface — using Retrieval-Augmented Generation (RAG) over their own documents with hierarchical context injection and policy-based retrieval scoring.
 
-> **Status (June 2026):** The full pipeline is functional end-to-end — **43 route files (~225 endpoints), 31 service modules, 26 ORM models, 33 dashboard pages.** The Architecture Bible is **fully implemented**: coaching cards with auto-generation, simulation CI/CD auto-gates, live whisper injection, pre-call CRM enrichment wired to voice pipeline, background ambient sound service, SIP Trunking / BYOC dashboard, mid-call language switching (Sarvam + Whisper), analytics KPIs (resolution rate, escalation rate, top intents, failure modes, cost estimate), IVR visual SVG node editor, and MCP `batch_campaign` + `get_real_time_call_status` tools. **Billing system implemented:** `UsageLog` model, `billing_service.py` with Stripe Billing Meter integration, platform-key fallback for managed tenants, owner-account bypass, and `/api/billing/*` endpoints. Full `pip install voiceflow` developer SDK with plugin architecture. MCP server for Claude Desktop integration. **Modern UI: glassmorphism, micro-interactions, 15+ CSS animations, dark mode on all 33 pages.** Stack: Django 6 (HTMX + Alpine.js) frontend + FastAPI backend + Docker services (Postgres, Redis, ChromaDB, MinIO). See [What's New (June 2026)](#whats-new-june-2026) and [Implementation Status](#implementation-status) for the full breakdown.
+> **Status (May 2026):** The full pipeline is functional end-to-end — **43 route files (~225 endpoints), 31 service modules, 26 ORM models, 33 dashboard pages.** The Architecture Bible is **fully implemented**: coaching cards with auto-generation, simulation CI/CD auto-gates, live whisper injection, pre-call CRM enrichment wired to voice pipeline, background ambient sound service, SIP Trunking / BYOC dashboard, mid-call language switching (Sarvam + Whisper), analytics KPIs (resolution rate, escalation rate, top intents, failure modes, cost estimate), IVR visual SVG node editor, and MCP `batch_campaign` + `get_real_time_call_status` tools. **Billing system implemented:** `UsageLog` model, `billing_service.py` with Stripe Billing Meter integration, platform-key fallback for managed tenants, owner-account bypass, and `/api/billing/*` endpoints. Full `pip install voiceflow` developer SDK with plugin architecture. MCP server for Claude Desktop integration. **Modern UI: glassmorphism, micro-interactions, 15+ CSS animations, dark mode on all 33 pages.** Stack: Django 6 (HTMX + Alpine.js) frontend + FastAPI backend + Docker services (Postgres, Redis, ChromaDB, MinIO). See [What's New (May 2026 — Security & Production Hardening)](#whats-new-may-2026--security--production-hardening) and [What's New (May 2026)](#whats-new-may-2026) and [Implementation Status](#implementation-status) for the full breakdown.
 
 ---
 
 ## Table of Contents
 
 1. [What This Project Does](#what-this-project-does)
-2. [What's New (May 2026)](#whats-new-may-2026)
+2. [What's New (May 2026 — Security & Production Hardening)](#whats-new-may-2026--security--production-hardening)
+3. [What's New (May 2026)](#whats-new-may-2026)
 3. [System Architecture](#system-architecture)
 3. [Repository Structure](#repository-structure)
 4. [Tech Stack](#tech-stack)
@@ -34,7 +35,7 @@ A multi-tenant SaaS platform for building, deploying, and managing AI-powered vo
 
 ---
 
-## What's New (June 2026)
+## What's New (May 2026 — Security & Production Hardening)
 
 ### Architecture Bible — Final Completion Pass
 
@@ -1513,6 +1514,9 @@ Primary runtime configuration is loaded from `python/.env` (created by `make env
 | `CHROMA_HOST` | No | `localhost` | ChromaDB host |
 | `CHROMA_PORT` | No | `8030` | ChromaDB port |
 | `BACKEND_API_URL` | No | `http://localhost:8040` | FastAPI URL used by Django frontend |
+| `ALLOW_DEMO_FALLBACK` | No | `true` | Set to `false` in production to reject requests missing auth headers (disables the `DEMO_TENANT` dev fallback) |
+| `EXOTEL_WEBHOOK_SECRET` | No | — | HMAC-SHA256 secret for validating Exotel webhook signatures. Required in production when using Exotel. |
+| `OWNER_TENANT_IDS` | No | — | Comma-separated tenant UUIDs that bypass billing and get admin access |
 | `GROQ_API_KEY` | No* | — | Platform fallback LLM key. Optional if tenants provide their own via Settings. |
 | `MINIO_ENDPOINT` | No | `localhost:9020` | MinIO API endpoint |
 | `MINIO_ACCESS_KEY` | No | `minioadmin` | MinIO access key |

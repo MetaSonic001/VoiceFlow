@@ -40,8 +40,16 @@ class AuthContext:
 
 def _parse_auth_headers(request: Request) -> AuthContext:
     # Empty header values must fall back (Django may send x-user-id: "")
-    tenant_id = (request.headers.get("x-tenant-id") or "").strip() or DEMO_TENANT
-    user_id = (request.headers.get("x-user-id") or "").strip() or DEMO_USER
+    tenant_id = (request.headers.get("x-tenant-id") or "").strip()
+    user_id = (request.headers.get("x-user-id") or "").strip()
+    if not tenant_id or not user_id:
+        if not settings.ALLOW_DEMO_FALLBACK:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication required",
+            )
+        tenant_id = tenant_id or DEMO_TENANT
+        user_id = user_id or DEMO_USER
     return AuthContext(tenant_id=tenant_id, user_id=user_id)
 
 

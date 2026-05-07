@@ -7,7 +7,7 @@ import logging
 import os
 
 import chromadb
-import redis
+import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -54,15 +54,16 @@ async def data_overview(auth: AuthContext = Depends(get_auth), db: AsyncSession 
     try:
         host = os.getenv("REDIS_HOST", "localhost")
         port = int(os.getenv("REDIS_PORT", "8020"))
-        r = redis.Redis(host=host, port=port, decode_responses=True)
-        r.ping()
-        redis_info["keys"] = r.dbsize()
-        for key in r.scan_iter("bm25:*", count=100):
+        r = aioredis.Redis(host=host, port=port, decode_responses=True)
+        await r.ping()
+        redis_info["keys"] = await r.dbsize()
+        async for _key in r.scan_iter("bm25:*", count=100):
             redis_info["bm25_indexes"] += 1
-        for key in r.scan_iter("job:*", count=100):
+        async for _key in r.scan_iter("job:*", count=100):
             redis_info["jobs"] += 1
-        for key in r.scan_iter("conversation:*", count=100):
+        async for _key in r.scan_iter("conversation:*", count=100):
             redis_info["conversations"] += 1
+        await r.aclose()
     except Exception as e:
         redis_info["error"] = str(e)
 
@@ -81,7 +82,7 @@ async def postgres_detail(auth: AuthContext = Depends(get_auth), db: AsyncSessio
     if tenant:
         tenant_data = {
             "id": tenant.id, "name": tenant.name, "domain": tenant.domain,
-            "settings": tenant.settings, "isActive": tenant.isActive,
+            "isActive": tenant.isActive,
             "createdAt": str(tenant.createdAt),
         }
 
@@ -168,24 +169,24 @@ async def redis_detail(auth: AuthContext = Depends(get_auth)):
     try:
         host = os.getenv("REDIS_HOST", "localhost")
         port = int(os.getenv("REDIS_PORT", "8020"))
-        r = redis.Redis(host=host, port=port, decode_responses=True)
-        r.ping()
+        r = aioredis.Redis(host=host, port=port, decode_responses=True)
+        await r.ping()
     except Exception as e:
         return {"error": f"Redis unavailable: {e}"}
 
     result = {"jobs": [], "bm25_indexes": [], "conversations": [], "other_keys": []}
 
-    for key in r.scan_iter("*", count=500):
-        ttl = r.ttl(key)
+    async for key in r.scan_iter("*", count=500):
+        ttl = await r.ttl(key)
         if key.startswith("job:"):
             try:
-                data = json.loads(r.get(key) or "{}")
+                data = json.loads(await r.get(key) or "{}")
                 result["jobs"].append({"key": key, "ttl": ttl, **data})
             except Exception:
                 result["jobs"].append({"key": key, "ttl": ttl})
         elif key.startswith("bm25:"):
             try:
-                data = json.loads(r.get(key) or "{}")
+                data = json.loads(await r.get(key) or "{}")
                 result["bm25_indexes"].append({
                     "key": key, "ttl": ttl,
                     "doc_count": len(data.get("documents", [])),
@@ -195,6 +196,7 @@ async def redis_detail(auth: AuthContext = Depends(get_auth)):
         elif key.startswith("conversation:"):
             result["conversations"].append({"key": key, "ttl": ttl})
         else:
-            result["other_keys"].append({"key": key, "ttl": ttl, "type": r.type(key)})
+            result["other_keys"].append({"key": key, "ttl": ttl, "type": await r.type(key)})
 
+    await r.aclose()
     return result

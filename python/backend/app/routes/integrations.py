@@ -144,7 +144,7 @@ async def test_integration(
             from hubspot import HubSpot  # type: ignore
             client = HubSpot(access_token=_d(cfg.get("accessToken", "")))
             import asyncio
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             me = await loop.run_in_executor(None, lambda: client.crm.contacts.basic_api.get_page(limit=1))
             ok = True
             detail = f"Connected — {(me.results[0].id if me.results else 'no contacts yet')}"
@@ -160,7 +160,7 @@ async def test_integration(
                     instance_url=cfg.get("instanceUrl") or None,
                 )
                 return sf.query("SELECT Id FROM Lead LIMIT 1")
-            await asyncio.get_event_loop().run_in_executor(None, _test)
+            await asyncio.get_running_loop().run_in_executor(None, _test)
             ok = True
             detail = "Salesforce connection successful"
 
@@ -191,7 +191,7 @@ async def test_integration(
                         smtp.starttls(context=ctx)
                         if cfg.get("username") and cfg.get("password"):
                             smtp.login(cfg["username"], _d(cfg["password"]))
-                await asyncio.get_event_loop().run_in_executor(None, _test)
+                await asyncio.get_running_loop().run_in_executor(None, _test)
                 ok = True
                 detail = "SMTP connection successful"
 

@@ -159,26 +159,32 @@ async def crm_lookup(
     sf_instance = cfg.get("salesforceInstanceUrl", "https://login.salesforce.com")
     if sf_token:
         try:
+            import re as _re
             import httpx
-            soql = f"SELECT Id,FirstName,LastName,Email,Company,LeadSource,Status FROM Lead WHERE Phone='{phone}' LIMIT 1"
-            async with httpx.AsyncClient(timeout=8) as client:
-                r = await client.get(
-                    f"{sf_instance}/services/data/v57.0/query",
-                    headers={"Authorization": f"Bearer {sf_token}"},
-                    params={"q": soql},
-                )
-                if r.status_code == 200:
-                    records = r.json().get("records", [])
-                    if records:
-                        rec = records[0]
-                        context["salesforce"] = {
-                            "firstName": rec.get("FirstName"),
-                            "lastName": rec.get("LastName"),
-                            "email": rec.get("Email"),
-                            "company": rec.get("Company"),
-                            "leadSource": rec.get("LeadSource"),
-                            "status": rec.get("Status"),
-                        }
+            # Validate phone to prevent SOQL injection — only allow digits, +, -, (, ), spaces
+            safe_phone = _re.sub(r"[^0-9+\-() ]", "", phone)[:20]
+            if not safe_phone:
+                logger.warning("[crm_lookup] rejected malformed phone for SOQL: %r", phone)
+            else:
+                soql = f"SELECT Id,FirstName,LastName,Email,Company,LeadSource,Status FROM Lead WHERE Phone='{safe_phone}' LIMIT 1"
+                async with httpx.AsyncClient(timeout=8) as client:
+                    r = await client.get(
+                        f"{sf_instance}/services/data/v57.0/query",
+                        headers={"Authorization": f"Bearer {sf_token}"},
+                        params={"q": soql},
+                    )
+                    if r.status_code == 200:
+                        records = r.json().get("records", [])
+                        if records:
+                            rec = records[0]
+                            context["salesforce"] = {
+                                "firstName": rec.get("FirstName"),
+                                "lastName": rec.get("LastName"),
+                                "email": rec.get("Email"),
+                                "company": rec.get("Company"),
+                                "leadSource": rec.get("LeadSource"),
+                                "status": rec.get("Status"),
+                            }
         except Exception as exc:
             logger.warning("[crm_lookup] Salesforce error: %s", exc)
 

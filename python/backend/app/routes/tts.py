@@ -13,9 +13,10 @@ import io
 import logging
 
 import edge_tts
-from fastapi import APIRouter, File, UploadFile
+from fastapi import APIRouter, Depends, File, UploadFile
 from fastapi.responses import JSONResponse
 
+from app.auth import AuthContext, get_auth
 from app.services.tts_router import TTSRouter
 
 router = APIRouter()
@@ -139,7 +140,7 @@ async def preset_voices():
 
 
 @router.post("/preview")
-async def preview_voice(body: dict):
+async def preview_voice(body: dict, _auth: AuthContext = Depends(get_auth)):
     voice_id = body.get("voiceId", "preset-aria")
     text = body.get("text", PREVIEW_SENTENCE)
     engine = body.get("engine") or _engine_from_voice_id(voice_id)

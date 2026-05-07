@@ -31,17 +31,26 @@ router = APIRouter(prefix="/api/ab-testing", tags=["ab-testing"])
 _AB_REDIS_DB = 5
 _WINNER_MIN_CALLS = 100        # calls per variant before auto-promotion
 _WINNER_MIN_DIFF = 0.10        # 10% conversion rate difference
+_CONFIG_TTL = 90 * 24 * 3600   # 90 days in seconds
 
 
-# ── Redis helper ──────────────────────────────────────────────────────────────
+# ── Redis helper ──────────────────────────────────────────────────────────────────
 
-async def _get_redis() -> aioredis.Redis:
-    return aioredis.Redis(
-        host=settings.REDIS_HOST,
-        port=settings.REDIS_PORT,
-        db=_AB_REDIS_DB,
-        decode_responses=True,
-    )
+_ab_redis_pool: aioredis.Redis | None = None
+
+
+def _get_redis() -> aioredis.Redis:
+    """Return the module-level Redis connection pool (lazily created)."""
+    global _ab_redis_pool
+    if _ab_redis_pool is None:
+        _ab_redis_pool = aioredis.Redis(
+            host=settings.REDIS_HOST,
+            port=settings.REDIS_PORT,
+            db=_AB_REDIS_DB,
+            decode_responses=True,
+            max_connections=10,
+        )
+    return _ab_redis_pool
 
 
 # ── GET /api/ab-testing/variants ──────────────────────────────────────────────
@@ -60,7 +69,7 @@ async def list_variants(
         ).order_by(Agent.createdAt.desc()).limit(50)
     )
     variants = results.scalars().all()
-    r = await _get_redis()
+    r = _get_redis()
     output = []
     for v in variants:
         config_raw = await r.get(f"ab:variant:{v.id}:config")
@@ -75,7 +84,6 @@ async def list_variants(
             "changes": config.get("changes", {}),
             "calls": stats.get("calls", 0),
         })
-    await r.close()
     return output
 
 
@@ -152,16 +160,15 @@ async def create_agent_variant(
     await db.commit()
     await db.refresh(variant)
 
-    # Store variant config in Redis
-    r = await _get_redis()
+    # Store variant config in Redis with 90-day TTL
+    r = _get_redis()
     variant_config = {
         "variant_id": variant.id,
         "original_id": id,
         "tenant_id": auth.tenant_id,
         "changes": changes,
     }
-    await r.set(f"ab:variant:{variant.id}:config", json.dumps(variant_config))
-    await r.close()
+    await r.set(f"ab:variant:{variant.id}:config", json.dumps(variant_config), ex=_CONFIG_TTL)
 
     logger.info("[ab] created variant %s from original %s", variant.id, id)
     return {"variant_id": variant.id, "original_id": id}
@@ -195,15 +202,15 @@ async def create_campaign_split(
     if not variant_a or not variant_b:
         raise HTTPException(status_code=400, detail="variant_a and variant_b are required")
 
-    r = await _get_redis()
+    r = _get_redis()
     split_config = {
         "campaign_id": id,
         "variant_a": variant_a,
         "variant_b": variant_b,
         "split_ratio": 0.5,
     }
-    await r.set(f"ab:campaign:{id}:split", json.dumps(split_config))
-    # Initialise stats for both variants
+    await r.set(f"ab:campaign:{id}:split", json.dumps(split_config), ex=_CONFIG_TTL)
+    # Initialise stats for both variants (no TTL — stats persist for campaign lifetime)
     for vid in (variant_a, variant_b):
         if not await r.exists(f"ab:variant:{vid}:stats"):
             await r.set(
@@ -216,7 +223,6 @@ async def create_campaign_split(
                     "sentiment_sum": 0.0,
                 }),
             )
-    await r.close()
 
     logger.info("[ab] campaign %s split configured: A=%s B=%s", id, variant_a, variant_b)
     return {"campaign_id": id, "variant_a": variant_a, "variant_b": variant_b, "split_ratio": 0.5}
@@ -241,10 +247,9 @@ async def get_campaign_results(
       - sentiment_score    — mean sentiment (−1 … +1)
       - conversion_rate    — conversions / calls
     """
-    r = await _get_redis()
+    r = _get_redis()
     split_raw = await r.get(f"ab:campaign:{id}:split")
     if not split_raw:
-        await r.close()
         raise HTTPException(status_code=404, detail="No A/B split configured for this campaign")
 
     split = json.loads(split_raw)
@@ -265,7 +270,6 @@ async def get_campaign_results(
 
     stats_a = _load_stats(await r.get(f"ab:variant:{variant_a}:stats"))
     stats_b = _load_stats(await r.get(f"ab:variant:{variant_b}:stats"))
-    await r.close()
 
     def _metrics(stats: dict) -> dict:
         calls = max(stats["calls"], 1)
@@ -314,7 +318,7 @@ async def record_ab_call(
 ) -> None:
     """Update Redis stats for a completed call in an A/B test. Fire-and-forget."""
     try:
-        r = await _get_redis()
+        r = _get_redis()
         key = f"ab:variant:{variant_id}:stats"
         raw = await r.get(key)
         stats = json.loads(raw) if raw else {
@@ -327,6 +331,5 @@ async def record_ab_call(
         stats["escalations"] += int(escalated)
         stats["sentiment_sum"] += sentiment
         await r.set(key, json.dumps(stats))
-        await r.close()
     except Exception:
         logger.exception("[ab] failed to record call for variant %s", variant_id)

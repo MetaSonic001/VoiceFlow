@@ -430,7 +430,7 @@ function onboardingApp() {
           // Save LLM provider + key
           if (this.llmProvider !== 'ollama' && this.llmApiKey.trim()) {
             try {
-              await apiFetch('/api/settings/', {method:'POST', json:{
+              await apiFetch('/api/settings/', {method:'PUT', json:{
                 llmProvider: this.llmProvider,
                 llmApiKey: this.llmApiKey,
               }});

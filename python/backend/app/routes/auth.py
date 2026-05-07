@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 import jwt as pyjwt
+import bcrypt
 
 from fastapi.responses import JSONResponse
 
@@ -28,9 +29,20 @@ class EmailBody(BaseModel):
     email: str
 
 
+class LoginBody(BaseModel):
+    email: str
+    password: str
+
+
+class SignupBody(BaseModel):
+    email: str
+    password: str
+
+
 def _make_token(user_id: str, tenant_id: str, email: str) -> str:
     payload = {
-        "userId": user_id,
+        "sub": user_id,          # RFC 7519 subject claim
+        "userId": user_id,       # kept for legacy SDK tokens already issued
         "tenantId": tenant_id,
         "email": email,
         "exp": datetime.now(timezone.utc) + timedelta(hours=24),
@@ -89,10 +101,24 @@ async def clerk_sync(body: EmailBody, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/login")
-async def login(body: EmailBody, db: AsyncSession = Depends(get_db)):
+async def login(body: LoginBody, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.email == body.email))
     user = result.scalar_one_or_none()
     if not user:
+        return JSONResponse({"error": "Invalid credentials"}, status_code=401)
+
+    # Reject if account has no password hash (e.g. created via clerk_sync before passwords were enabled)
+    if not user.passwordHash:
+        return JSONResponse({"error": "Account requires password setup"}, status_code=401)
+
+    try:
+        password_valid = bcrypt.checkpw(
+            body.password.encode(), user.passwordHash.encode()
+        )
+    except Exception:
+        password_valid = False
+
+    if not password_valid:
         return JSONResponse({"error": "Invalid credentials"}, status_code=401)
 
     r = await db.execute(select(Tenant).where(Tenant.id == user.tenantId))
@@ -110,11 +136,16 @@ async def login(body: EmailBody, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/signup")
-async def signup(body: EmailBody, db: AsyncSession = Depends(get_db)):
+async def signup(body: SignupBody, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.email == body.email))
     existing = result.scalar_one_or_none()
     if existing:
         return JSONResponse({"error": "User already exists"}, status_code=400)
+
+    if len(body.password) < 8:
+        return JSONResponse({"error": "Password must be at least 8 characters"}, status_code=400)
+
+    pw_hash = bcrypt.hashpw(body.password.encode(), bcrypt.gensalt()).decode()
 
     tenant = Tenant(name=f"{body.email.split('@')[0]}'s Organization")
     db.add(tenant)
@@ -124,7 +155,7 @@ async def signup(body: EmailBody, db: AsyncSession = Depends(get_db)):
     db.add(brand)
     await db.flush()
 
-    user = User(email=body.email, tenantId=tenant.id, brandId=brand.id)
+    user = User(email=body.email, tenantId=tenant.id, brandId=brand.id, passwordHash=pw_hash)
     db.add(user)
     await db.flush()
     await db.commit()
