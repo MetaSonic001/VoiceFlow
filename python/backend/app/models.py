@@ -36,6 +36,25 @@ class Tenant(Base):
     createdAt: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
     updatedAt: Mapped[datetime] = mapped_column("updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
+    # ── Billing / plan fields ─────────────────────────────────────────────────
+    # mcp | pro | free
+    # mcp = Managed Cloud Plan (₹3.5/min all-in, VoiceFlow holds API keys)
+    # pro = BYOK + Platform Fee (₹2/min orchestration, customer holds own keys)
+    planType: Mapped[str] = mapped_column("planType", String, default="free", nullable=False)
+    # pro sub-tier: free | starter | growth | scale | pilot
+    # mcp sub-tier: payg | pilot
+    planTier: Mapped[str] = mapped_column("planTier", String, default="free", nullable=False)
+    stripeCustomerId: Mapped[Optional[str]] = mapped_column("stripeCustomerId", String, nullable=True)
+    stripeSubscriptionId: Mapped[Optional[str]] = mapped_column("stripeSubscriptionId", String, nullable=True)
+    # MCP minute balance (pre-purchased or pilot credit)
+    managedMinutesBalance: Mapped[int] = mapped_column("managedMinutesBalance", Integer, default=0)
+    # Pilot plan: free usage window (MCP cost and DID rental waived for 30 days)
+    pilotPlanEndDate: Mapped[Optional[datetime]] = mapped_column(
+        "pilotPlanEndDate", DateTime(timezone=True), nullable=True
+    )
+    # Total lifetime call count (enforces free-tier 20-call cap before card required)
+    totalCallCount: Mapped[int] = mapped_column("totalCallCount", Integer, default=0)
+
     users = relationship("User", back_populates="tenant", cascade="all, delete-orphan")
     brands = relationship("Brand", back_populates="tenant", cascade="all, delete-orphan")
     agents = relationship("Agent", back_populates="tenant", cascade="all, delete-orphan")
@@ -49,6 +68,7 @@ class Tenant(Base):
     cloned_voices = relationship("ClonedVoice", back_populates="tenant", cascade="all, delete-orphan")
     kb_attachments = relationship("KbAttachment", back_populates="tenant", cascade="all, delete-orphan")
     voice_prints = relationship("VoicePrint", back_populates="tenant", cascade="all, delete-orphan")
+    usage_logs = relationship("UsageLog", back_populates="tenant", cascade="all, delete-orphan")
 
 
 # ── User ──────────────────────────────────────────────────────────────────────
@@ -698,3 +718,37 @@ class CoachingCard(Base):
 
     tenant = relationship("Tenant")
     agent = relationship("Agent")
+
+
+# ── UsageLog ──────────────────────────────────────────────────────────────────
+
+class UsageLog(Base):
+    """
+    Per-call billing record for managed-plan tenants.
+    One row per call end event. Used to drive Stripe metered billing
+    and to render the usage dashboard.
+    """
+    __tablename__ = "usage_logs"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    tenantId: Mapped[str] = mapped_column(
+        "tenantId", String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    callLogId: Mapped[Optional[str]] = mapped_column(
+        "callLogId", String, ForeignKey("call_logs.id", ondelete="SET NULL"), nullable=True
+    )
+    # Voice call duration in seconds (billed on per-minute basis, ceiling)
+    durationSeconds: Mapped[int] = mapped_column("durationSeconds", Integer, nullable=False, default=0)
+    # Comma-separated provider list used on this call, e.g. "groq,sarvam_stt,edge_tts,exotel"
+    providersUsed: Mapped[Optional[str]] = mapped_column("providersUsed", String, nullable=True)
+    # Raw platform cost (what VoiceFlow pays providers) in INR paise / 100
+    costRupees: Mapped[float] = mapped_column("costRupees", Float, nullable=False, default=0.0)
+    # Amount billed to the tenant in INR (costRupees × markup)
+    billedRupees: Mapped[float] = mapped_column("billedRupees", Float, nullable=False, default=0.0)
+    # Stripe Billing Meter event ID for audit trail
+    stripeEventId: Mapped[Optional[str]] = mapped_column("stripeEventId", String, nullable=True)
+    createdAt: Mapped[datetime] = mapped_column(
+        "createdAt", DateTime(timezone=True), server_default=func.now()
+    )
+
+    tenant = relationship("Tenant", back_populates="usage_logs")

@@ -292,6 +292,16 @@ async def voice_gather(
         await db.refresh(log)
         log_id = log.id
         background_tasks.add_task(analyze_call, log_id, agent.tenantId)
+
+        # Fire usage billing in background (managed-plan tenants billed per minute)
+        from app.services.billing_service import log_call_usage
+        background_tasks.add_task(
+            log_call_usage,
+            agent.tenantId,
+            log_id,
+            duration,
+            None,   # providers_used=None → billing_service uses defaults
+        )
     except Exception:
         logger.exception("Failed to persist voice call log")
 

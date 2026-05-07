@@ -253,6 +253,7 @@ from app.routes import speaker_verification as speaker_verification_routes
 from app.routes import background_sound as background_sound_routes
 from app.routes import sip_trunking as sip_trunking_routes
 from app.routes import crm as crm_routes
+from app.routes import billing as billing_routes
 
 # WITHOUT /api prefix (matches Express)
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])
@@ -301,6 +302,7 @@ app.include_router(live_monitor.router, prefix="/api/live-monitor", tags=["LiveM
 app.include_router(speaker_verification_routes.router, prefix="/api/speaker-verification", tags=["SpeakerVerification"])
 app.include_router(background_sound_routes.router, prefix="/api/background-sound", tags=["BackgroundSound"])
 app.include_router(sip_trunking_routes.router, prefix="/api/sip-trunking", tags=["SIPTrunking"])
+app.include_router(billing_routes.router, prefix="/api/billing", tags=["Billing"])
 
 
 # ── Twilio proxy (matches Express /twilio/numbers) ──────────────────────────

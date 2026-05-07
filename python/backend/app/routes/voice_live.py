@@ -357,5 +357,10 @@ async def _save_live_call_log(
             from app.routes.voice_twilio_gather import analyze_call
             asyncio.create_task(analyze_call(log_id, tenant_id))
 
+        # Fire usage billing (managed-plan tenants billed per minute)
+        if log_id and tenant_id:
+            from app.services.billing_service import log_call_usage
+            asyncio.create_task(log_call_usage(tenant_id, log_id, duration, None))
+
     except Exception:
         logger.exception("[voice_live] failed to save call log")

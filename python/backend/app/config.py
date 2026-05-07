@@ -57,6 +57,26 @@ class Settings(BaseSettings):
     TWILIO_AUTH_TOKEN: Optional[str] = None
     TWILIO_WEBHOOK_BASE_URL: Optional[str] = None
 
+    # Platform API keys — used for MCP (Managed Cloud Plan) tenants who don't
+    # supply their own keys. Set these in production; leave blank in dev.
+    PLATFORM_GROQ_KEY: Optional[str] = None
+    PLATFORM_SARVAM_KEY: Optional[str] = None
+    PLATFORM_OPENAI_KEY: Optional[str] = None
+    PLATFORM_GEMINI_KEY: Optional[str] = None
+    PLATFORM_TWILIO_SID: Optional[str] = None
+    PLATFORM_TWILIO_TOKEN: Optional[str] = None
+    PLATFORM_EXOTEL_SID: Optional[str] = None
+    PLATFORM_EXOTEL_KEY: Optional[str] = None
+    PLATFORM_EXOTEL_TOKEN: Optional[str] = None
+
+    # Stripe billing
+    STRIPE_SECRET_KEY: Optional[str] = None
+    STRIPE_WEBHOOK_SECRET: Optional[str] = None
+    STRIPE_VOICE_MINUTES_METER_ID: Optional[str] = None
+
+    # Owner accounts — never billed (comma-separated tenant IDs)
+    OWNER_TENANT_IDS: str = ""
+
     # MinIO (optional)
     MINIO_ENDPOINT: Optional[str] = None
     MINIO_ACCESS_KEY: Optional[str] = None

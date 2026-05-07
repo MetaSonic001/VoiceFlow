@@ -1,0 +1,160 @@
+# VoiceFlow Platform Pricing Config
+# Last updated: 2026-05-07
+# Strategy: Two-tier model.
+#   MCP (Managed Cloud Plan): ₹3.5/min all-inclusive loss leader → drives acquisition
+#   Pro (BYOK Platform Fee):  ₹2/min pure orchestration fee → near-100% margin
+# Update provider costs whenever Groq/Sarvam/Exotel pricing changes.
+
+last_updated: "2026-05-07"
+usd_to_inr: 84.0
+
+providers:
+  groq:
+    # Groq's pricing: https://console.groq.com/settings/billing (verified June 2026)
+    llama_70b_versatile:
+      model: "llama-3.3-70b-versatile"
+      input_per_1m_tokens_usd: 0.59
+      output_per_1m_tokens_usd: 0.79
+      use_case: "complex"          # queries with > 15 words / tool use
+    llama_8b_instant:
+      model: "llama-3.1-8b-instant"
+      input_per_1m_tokens_usd: 0.05
+      output_per_1m_tokens_usd: 0.08
+      use_case: "simple"           # short transactional queries
+    # Typical token usage per voice turn:  input ~800, output ~200 tokens
+    avg_tokens_per_turn:
+      input: 800
+      output: 200
+
+  sarvam:
+    # Sarvam AI Indian-language STT/TTS (verified June 2026)
+    stt:
+      per_second_usd: 0.000092        # $0.0055/min
+    tts:
+      per_char_usd: 0.0000165         # ~$0.01 per 600 chars
+
+  exotel:
+    # Exotel India telephony (verified June 2026)
+    inbound_india:
+      per_minute_inr: 0.50
+    outbound_india:
+      per_minute_inr: 1.00
+    number_rental_inr: 150.0          # per DID per month
+
+  twilio:
+    # Twilio India pricing
+    inbound_india:
+      per_minute_inr: 1.40
+    outbound_india:
+      per_minute_inr: 1.60
+    number_rental_inr: 420.0
+
+  edge_tts:
+    # Microsoft Edge TTS — free (used in BYOK plan as default)
+    cost_usd: 0.0
+
+# ── Business model unit economics (MCP / managed plan) ───────────────────────
+# Raw platform cost per minute (what VoiceFlow actually pays providers):
+#   Groq 70B — 4 turns × 800 in + 200 out tokens = ~4,000 tokens → $0.0028 → ₹0.24
+#   Groq 70B — per minute (3–4 turns)                                    ₹0.72 – ₹0.96
+#   Sarvam STT — $0.000092/s × 60s                                       ₹0.46
+#   Edge TTS (CPU local / Microsoft Edge)                                 ₹0.00
+#   Exotel inbound India                                                  ₹0.50
+#   ─────────────────────────────────────────────────────────────────────────
+#   Total raw cost/min (typical call):                                 ~₹1.70–2.00
+#
+# MCP charges ₹3.5/min → ~₹1.5–1.8 gross margin per minute (75–85% GM)
+# Loss leader for <1,000 min/month SMBs; up-sell to Pro at 1,000+ min
+
+platform_markup: 2.5   # informational only — actual charge uses tier rates below
+
+# ── Tier 1: VoiceFlow MCP (Managed Cloud Plan) ───────────────────────────────
+# Target: SMBs, non-technical users, < 1,000 min/month
+# VoiceFlow handles ALL API keys (Groq + Exotel + Sarvam/Edge TTS)
+# 50% cheaper than Bolna (₹7/min), 80% cheaper than Retell (~₹19/min)
+mcp_plan:
+  name: "VoiceFlow MCP (Managed Cloud)"
+  per_minute_inr: 3.5
+  per_minute_usd: 0.042
+  raw_cost_per_minute_inr: 1.85      # to validate margin
+  includes:
+    - "Groq LLM (70B for complex, 8B for simple)"
+    - "Sarvam STT or Whisper"
+    - "Edge TTS (CPU-local, free)"
+    - "Exotel Indian PSTN calls"
+    - "No API keys needed by customer"
+  pilot:
+    free_days: 30
+    free_minutes: 100
+    description: "First 30 days free — we absorb cost as CAC"
+
+# ── Tier 2: VoiceFlow Pro (BYOK + Platform Orchestration Fee) ────────────────
+# Target: Businesses > 1,000 min/month who want cost control
+# Customer brings their own Groq + Exotel/Twilio keys.
+# VoiceFlow charges ₹2/min for orchestration only (RAG, routing, analytics).
+# Platform cost = ₹0 (customer pays providers directly)
+# Gross margin = ₹2/min = effectively 100%
+pro_plan:
+  name: "VoiceFlow Pro (BYOK)"
+  platform_fee_per_minute_inr: 2.0
+  platform_fee_per_minute_usd: 0.024
+  raw_platform_cost_inr: 0.0     # customer pays their own providers
+  gross_margin_percent: 100
+  includes:
+    - "RAG + Knowledge Base"
+    - "IVR Builder"
+    - "CRM sync (HubSpot/Salesforce)"
+    - "A/B testing"
+    - "Campaign dialer"
+    - "Multi-language (Sarvam)"
+    - "Analytics & Coaching Cards"
+    - "MCP server (Claude Desktop)"
+  monthly_subscription_options:
+    # Optional flat fee for agent count entitlement (on top of per-min)
+    starter:
+      price_inr: 999
+      price_usd: 19
+      max_agents: 2
+    growth:
+      price_inr: 2499
+      price_usd: 49
+      max_agents: 8
+    scale:
+      price_inr: 5999
+      price_usd: 149
+      max_agents: unlimited
+      includes_white_label: true
+
+# ── Free / Pilot tier ─────────────────────────────────────────────────────────
+free_tier:
+  max_agents: 2
+  test_calls: 20
+  card_required_after: 20     # force card entry on 21st call
+  description: "2 agents, 20 test calls free. Card required for more."
+
+# ── Effective rates for billing_service.py ────────────────────────────────────
+# These are the ONLY values billing_service.py should use for per-minute billing:
+effective_per_minute_inr_mcp: 3.5      # MCP (managed) rate
+effective_per_minute_inr_pro: 2.0      # Pro (BYOK orchestration) rate
+effective_per_minute_inr_managed: 3.5  # alias kept for backward compat
+
+# ── Add-ons ───────────────────────────────────────────────────────────────────
+addons:
+  indian_did_exotel:
+    name: "Indian Phone Number via Exotel"
+    retail_price_inr: 400
+    cost_price_inr: 150           # Exotel DID rental + KYC overhead
+    margin_inr: 250
+    price_usd: 5
+    period: "monthly"
+    pilot_period_free: true       # first 30 days: ₹0 to customer
+  white_label:
+    name: "White-Label Dashboard"
+    price_inr: 0
+    available_on: "scale"
+    description: "Agency resell at margin — VoiceFlow powers, they price"
+  agency_reseller:
+    name: "Agency / White-Label Reseller"
+    vf_charge_per_minute_inr: 1.5  # VoiceFlow charges agency ₹1.5/min
+    agency_sells_at_inr: 10.0      # agency pockets ₹8.5/min
+    description: "Fastest growth: agencies bring 100 clients overnight"

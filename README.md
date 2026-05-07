@@ -2,7 +2,7 @@
 
 A multi-tenant SaaS platform for building, deploying, and managing AI-powered voice and chat agents. Businesses onboard through a guided wizard, upload their knowledge base, and receive a domain-specific AI agent that answers customer queries over phone (Twilio), browser-based WebSocket voice calls, or a web chat interface — using Retrieval-Augmented Generation (RAG) over their own documents with hierarchical context injection and policy-based retrieval scoring.
 
-> **Status (June 2026):** The full pipeline is functional end-to-end — **42 route files (~220 endpoints), 30 service modules, 25 ORM models, 33 dashboard pages.** The Architecture Bible is **fully implemented**: coaching cards with auto-generation, simulation CI/CD auto-gates, live whisper injection, pre-call CRM enrichment wired to voice pipeline, background ambient sound service, SIP Trunking / BYOC dashboard, mid-call language switching (Sarvam + Whisper), analytics KPIs (resolution rate, escalation rate, top intents, failure modes, cost estimate), IVR visual SVG node editor, and MCP `batch_campaign` + `get_real_time_call_status` tools. Full `pip install voiceflow` developer SDK with plugin architecture. MCP server for Claude Desktop integration. **Modern UI: glassmorphism, micro-interactions, 15+ CSS animations, dark mode on all 33 pages.** Stack: Django 6 (HTMX + Alpine.js) frontend + FastAPI backend + Docker services (Postgres, Redis, ChromaDB, MinIO). See [What's New (June 2026)](#whats-new-june-2026) and [Implementation Status](#implementation-status) for the full breakdown.
+> **Status (June 2026):** The full pipeline is functional end-to-end — **43 route files (~225 endpoints), 31 service modules, 26 ORM models, 33 dashboard pages.** The Architecture Bible is **fully implemented**: coaching cards with auto-generation, simulation CI/CD auto-gates, live whisper injection, pre-call CRM enrichment wired to voice pipeline, background ambient sound service, SIP Trunking / BYOC dashboard, mid-call language switching (Sarvam + Whisper), analytics KPIs (resolution rate, escalation rate, top intents, failure modes, cost estimate), IVR visual SVG node editor, and MCP `batch_campaign` + `get_real_time_call_status` tools. **Billing system implemented:** `UsageLog` model, `billing_service.py` with Stripe Billing Meter integration, platform-key fallback for managed tenants, owner-account bypass, and `/api/billing/*` endpoints. Full `pip install voiceflow` developer SDK with plugin architecture. MCP server for Claude Desktop integration. **Modern UI: glassmorphism, micro-interactions, 15+ CSS animations, dark mode on all 33 pages.** Stack: Django 6 (HTMX + Alpine.js) frontend + FastAPI backend + Docker services (Postgres, Redis, ChromaDB, MinIO). See [What's New (June 2026)](#whats-new-june-2026) and [Implementation Status](#implementation-status) for the full breakdown.
 
 ---
 
@@ -29,6 +29,8 @@ A multi-tenant SaaS platform for building, deploying, and managing AI-powered vo
 18. [Known Limitations & Technical Debt](#known-limitations--technical-debt)
 19. [Patent — Multi-Tenant RAG Voice Agent System](#patent--multi-tenant-rag-voice-agent-system)
 20. [What Remains — Startup Readiness Checklist](#what-remains--startup-readiness-checklist)
+21. [Business Model & Pricing](#business-model--pricing)
+22. [Deployment Guide](#deployment-guide)
 
 ---
 
@@ -51,6 +53,7 @@ All Architecture & Feature Bible items are now fully implemented end-to-end:
 | IVR visual node editor | ✅ Complete | SVG-based drag-and-drop canvas in IVR modal — "Visual Editor" tab with drag nodes, edge drawing from parentId, selected node inline edit panel |
 | MCP batch_campaign | ✅ Complete | `batch_campaign()` tool — creates campaign, uploads contacts CSV, starts campaign immediately or scheduled |
 | MCP get_real_time_call_status | ✅ Complete | `get_real_time_call_status()` tool — reads live call state + transcript from Redis via `/api/live-monitor/calls/` |
+| Billing & Platform Key System | ✅ Complete | `UsageLog` ORM model, `billing_service.py` (Stripe Billing Meters), `/api/billing/*` (usage/invoices/plan/estimate/pricing/**calculator**), `pricing_config.yaml`, `get_api_key()` platform-key fallback in `credentials.py`, onboarding MCP/Pro branch, owner-account bypass via `OWNER_TENANT_IDS`, pilot plan (`pilotPlanEndDate`) + free-tier cap (`totalCallCount`) on `Tenant` model |
 
 ## What's New (May 2026)
 
@@ -499,7 +502,7 @@ Django frontend redirects to /onboarding or /dashboard
   Step 2: Agent Creation     → POST /onboarding/agent       → creates Agent row
   Step 3: Knowledge Upload   → POST /onboarding/knowledge   → triggers ingestion
   Step 4: Voice & Personality→ POST /onboarding/voice       → Edge + Kokoro voice preview
-  Step 5: Channel Setup      → POST /onboarding/channels    → Twilio BYOK / WebSocket
+  Step 5: Channel Setup      → POST /onboarding/channels    → MCP (₹3.5/min managed) / Pro (BYOK ₹2/min) / WebSocket
   Step 6: Testing Sandbox    → UI tests chat/voice in real-time
   Step 7: Go Live / Deploy   → POST /onboarding/deploy      → activates agent (demo mode returns mock number)
 ```
@@ -1615,7 +1618,7 @@ The FastAPI backend contains **28 service modules** in `python/backend/app/servi
 | `kb.py` | `/api/kb` | 8 | Knowledge base create/list/get + document attach/detach + search + rebuild index |
 | `simulate.py` | `/api/simulate` | 3 | Run adversarial simulation + get report + CI/CD gate |
 | `voices.py` | `/api/voices` | 6 | Voice catalog list/filter + ElevenLabs voices + clone management |
-| `phone_numbers.py` | `/api/phone-numbers` | 6 | Search Twilio inventory, list owned, purchase, release, assign, unassign |
+| `phone_numbers.py` | `/api/phone-numbers` | 12 | Search Twilio/Exotel inventory, list owned, purchase, release, assign, unassign + 6 Exotel Number Shop endpoints |
 | `live_monitor.py` | `/api/live-monitor` | 5 | List active calls, takeover, end call, whisper note, call detail |
 | `speaker_verification.py` | `/api/speaker-verification` | 4 | List voiceprints, enroll (multipart audio), verify, delete |
 
@@ -1749,6 +1752,16 @@ x-user-id: <user_uuid>
 | POST | `/api/settings/groq` | Save & verify tenant Groq API key (validates against live Groq API, encrypts with AES-256-GCM) |
 | GET | `/api/settings/groq` | Get Groq key status (masked key, verified flag, usingPlatformKey boolean) |
 | DELETE | `/api/settings/groq` | Remove tenant Groq API key (reverts to platform default) |
+
+### Billing
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| GET | `/api/billing/usage` | Required | Current month usage summary + call history |
+| GET | `/api/billing/invoices` | Required | Past Stripe invoices for this tenant |
+| POST | `/api/billing/plan` | Required | Switch planType (`mcp`/`pro`/`free`) + attach Stripe payment method |
+| GET | `/api/billing/estimate` | None | Cost estimate for given duration + providers + plan_type |
+| GET | `/api/billing/calculator` | None | Monthly cost calculator: `?calls_per_day=100&avg_duration_seconds=120&plan_type=mcp` |
+| GET | `/api/billing/pricing` | None | Full `pricing_config.yaml` as JSON (MCP plan, Pro plan, free tier, addons) |
 
 ### Call Logs
 | Method | Endpoint | Description |
@@ -1903,6 +1916,16 @@ GET /health  →  { status: "ok", timestamp: "..." }
 | DELETE | `/api/phone-numbers/{sid}` | Release (delete) an owned phone number |
 | POST | `/api/phone-numbers/{sid}/assign` | Assign a number to an agent (sets Twilio webhook URLs) |
 | POST | `/api/phone-numbers/{sid}/unassign` | Unassign number from its agent |
+
+#### Exotel Number Shop (India)
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/phone-numbers/exotel/available` | List purchasable Indian Exophones (DIDs); falls back to my.exotel.com guide if API unavailable |
+| GET | `/api/phone-numbers/exotel/owned` | List Exophones owned by this tenant with agent assignments |
+| POST | `/api/phone-numbers/exotel/purchase` | Purchase an Exophone; auto-activates 30-day pilot for MCP tenants |
+| POST | `/api/phone-numbers/exotel/configure/{number}` | Set webhook URL on Exotel → assigns number to an agent |
+| POST | `/api/phone-numbers/exotel/outbound` | Initiate outbound call via Exotel (campaign dialer) |
+| POST | `/api/phone-numbers/exotel/pilot` | Manually activate 30-day free pilot for an MCP tenant (one-time, idempotent) |
 
 ### Live Call Monitor
 | Method | Endpoint | Description |
@@ -2584,7 +2607,7 @@ A forward-looking assessment of what needs to happen to take VoiceFlow from "wor
 
 | Item | Effort | Description |
 |---|---|---|
-| **Billing / Stripe integration** | 2 wk | Frontend page exists at `/dashboard/billing`; needs Stripe subscriptions, usage metering, invoice generation |
+| **Billing / Stripe integration** | ✅ Done | `UsageLog` model + `billing_service.py` + `/api/billing/*` routes + `pricing_config.yaml`. **MCP plan: ₹3.5/min** all-inclusive (loss leader); **Pro plan: ₹2/min** orchestration-only (~100% margin). Pilot bypass (30 days free). Free tier: 20-call cap (`totalCallCount`). Stripe Billing Meter events. Owner bypass via `OWNER_TENANT_IDS`. |
 | **Email notifications** | 1 wk | Frontend page exists at `/dashboard/notifications`; needs backend email service (SendGrid/SES) + in-app notification store |
 | **Backup / restore** | 1 wk | Frontend page exists at `/dashboard/backup`; needs PostgreSQL dump + ChromaDB export logic |
 | **True RTCPeerConnection audio** | 1 wk | Current WebSocket sends audio as binary frames; upgrade to RTCPeerConnection with STUN/TURN for lower latency |
@@ -2625,6 +2648,301 @@ If you start all services (`make init && make all`):
 13. Explore data → interactive Data Explorer with knowledge base, call log, and agent data visualisation
 14. Browse interactive API docs → FastAPI Swagger UI at `/docs` (raw spec at `/openapi.json`)
 15. Filter audit logs → searchable, filterable audit trail with action-type badges and real-time refresh
+
+---
+
+## Business Model & Pricing
+
+VoiceFlow uses a **two-tier model** designed to maximize acquisition (MCP) and margin (Pro):
+
+- **MCP (Managed Cloud Plan):** ₹3.5/min all-inclusive. Loss leader to acquire SMBs fast. 50% cheaper than Bolna, 80% cheaper than Retell. VoiceFlow holds all API keys.
+- **Pro (BYOK + Platform Fee):** ₹2/min orchestration only. Customer brings their own Groq + Exotel keys. ~100% gross margin for VoiceFlow.
+
+### Why This Works Against the Competition
+
+| Platform | Rate | What's Included |
+|---|---|---|
+| **Retell AI** | ~₹19/min | LLM + TTS + Telephony (US-focused) |
+| **Bolna (India)** | ~₹7/min | Platform fee + your telephony |
+| **Vapi** | ~₹10–25/min | ElevenLabs TTS + GPT-4o + telephony |
+| **VoiceFlow MCP** | **₹3.5/min** | Groq 70B + Edge TTS + Exotel — all included |
+| **VoiceFlow Pro** | **₹2/min** | Orchestration only — you pay providers |
+
+VoiceFlow's CPU-only TTS stack (Edge TTS = ₹0/min) is the key unlock. While competitors pay ElevenLabs ₹3.36/min for TTS, VoiceFlow pays zero.
+
+---
+
+### Tier 1 — VoiceFlow MCP (Managed Cloud Plan)
+
+**Target:** SMBs, agencies, non-technical users, < 1,000 min/month  
+**Setup:** One-click signup, no API keys, VoiceFlow provisions everything  
+**Pricing:** ₹3.5/min (₹0.042/min USD equivalent)
+
+| Item | Cost (VoiceFlow pays) |
+|---|---|
+| Groq 70B LLM (4 turns/min) | ~₹0.96 |
+| Sarvam STT | ~₹0.46 |
+| Edge TTS (CPU-local) | ₹0.00 |
+| Exotel inbound | ₹0.40 |
+| **Total raw cost/min** | **~₹1.82** |
+| **MCP charge to customer** | **₹3.5/min** |
+| **Gross margin** | **~48% (₹1.68/min)** |
+
+**Pilot plan:** First 30 days free + 100 minutes credited → absorbed as Customer Acquisition Cost.
+
+---
+
+### Tier 2 — VoiceFlow Pro (BYOK + Platform Fee)
+
+**Target:** Businesses > 1,000 min/month who want cost control  
+**Setup:** Simple wizard — connect Groq + Exotel/Twilio keys in 5 minutes  
+**Pricing:** ₹2/min orchestration fee (customer pays providers directly at ~₹1.82/min)
+
+| Sub-tier | Monthly | Max Agents |
+|---|---|---|
+| Free | ₹0 | 2 (20 test calls, card required at 21st) |
+| Starter | ₹999 | 2 |
+| Growth | ₹2,499 | 8 |
+| Scale | ₹5,999 | Unlimited + white-label |
+
+**International (USD):** Free / $19 / $49 / $149 per month.
+
+**Gross margin on Pro:** ₹2/min, VoiceFlow cost = ₹0 → ~100% margin.
+
+---
+
+### Free Tier
+
+- 2 agents, 20 test calls total
+- Card required before the 21st call (Stripe PaymentElement — no charge until limit hit)
+- Purpose: Frictionless signup → product-led growth
+
+---
+
+### Unit Economics Summary
+
+| Metric | MCP | Pro |
+|---|---|---|
+| VoiceFlow rate | ₹3.5/min | ₹2/min |
+| Platform raw cost | ~₹1.82/min | ₹0/min |
+| Gross margin/min | ~₹1.68 (48%) | ₹2.00 (100%) |
+| Break-even at | 1 customer × 100 min | 1 customer × 1 min |
+| At 10k min/month | ₹16,800 GP | ₹20,000 GP |
+
+Up-sell path: MCP customer hits 1,000 min → sales call → "Switch to Pro, save ₹1,500/month on your Groq/Exotel bill."
+
+---
+
+### Telephony Strategy: Exotel (India) + Telnyx (Global)
+
+**Phase 1 (India MVP):** Exotel — built for Indian PSTN with DLT compliance.
+- API: `GET /api/phone-numbers/exotel/available` → list Exophones
+- API: `POST /api/phone-numbers/exotel/purchase` → buy DID (₹150 cost, ₹400 retail)
+- API: `POST /api/phone-numbers/exotel/configure/{number}` → set webhook → agent
+- API: `POST /api/phone-numbers/exotel/outbound` → initiate campaign calls
+- API: `POST /api/phone-numbers/exotel/pilot` → activate 30-day free DID rental
+
+**Phase 2 (Global):** Add Telnyx — same API pattern, covers US/UK/India +91 from one account.
+
+---
+
+### Agency White-Label Growth Hack
+
+Offer reseller tiers to Indian call centers and digital agencies:
+
+| Party | Rate | Margin |
+|---|---|---|
+| VoiceFlow charges agency | ₹1.5/min | VoiceFlow earns ₹1.5/min |
+| Agency sells to their clients | ₹10/min | Agency earns ₹8.5/min |
+| Speed to 100 clients | Overnight | Agency does the selling |
+
+Config in `pricing_config.yaml > addons.agency_reseller`.
+
+---
+
+### Dynamic Pricing Calculator
+
+Backend endpoint at `GET /api/billing/calculator`:
+```
+?calls_per_day=100&avg_duration_seconds=120&plan_type=mcp
+```
+Returns monthly cost estimates for MCP and Pro plans, plus competitor comparison (Bolna, Retell). Use this to power the public pricing page slider.
+
+---
+
+## Deployment Guide
+
+### Phase 1 — Railway (₹2,500/month, first 5 customers)
+
+Railway is the fastest path to production with zero DevOps. All services run as separate Railway services sharing a private network.
+
+```
+Service             | Plan    | RAM  | Cost/month (est.)
+--------------------|---------|------|---
+FastAPI backend     | Hobby   | 512MB| $5
+Django frontend     | Hobby   | 256MB| $5
+PostgreSQL          | Hobby   | 0.5GB| $5
+Redis               | Hobby   | 256MB| $5
+ChromaDB            | Hobby   | 512MB| $5
+MinIO               | Hobby   | 256MB| $5
+Total                                 ~$30/month ≈ ₹2,500
+```
+
+**Steps:**
+
+1. Push repo to GitHub
+2. Create Railway project → "Deploy from GitHub"
+3. Add each service (use `railway.json` Procfile per service)
+4. Set environment variables in Railway Dashboard (copy from `.env.example`)
+5. Get Railway's auto-generated HTTPS URL → set `TWILIO_WEBHOOK_BASE_URL`
+6. Point Twilio webhook URLs to Railway domain
+7. Done — no nginx, no SSL config, no Kubernetes
+
+Railway auto-handles HTTPS, rolling deploys, and logs.
+
+**Limitations at Railway:** No persistent local disk for ChromaDB + MinIO → use Railway's Postgres addon + switch MinIO to Cloudflare R2 ($0.015/GB).
+
+---
+
+### Phase 2 — Hetzner VPS (₹1,200/month, 10–50 customers)
+
+When you need more RAM and persistent storage:
+
+```
+Hetzner CX32 (4 vCPU, 8 GB RAM, 80 GB SSD)  = €8.40/month ≈ ₹750
+Hetzner Floating IP (optional)               = €1.19/month
+Cloudflare Zero Trust tunnel (HTTPS/proxy)   = Free
+Total                                          ~₹1,200/month
+```
+
+Use `docker-compose.yml` + `make init && make all`. Add Caddy as reverse proxy.
+
+---
+
+### Phase 3 — AWS ECS / Fargate (₹15,000+/month, 50+ customers)
+
+See previous architecture discussion for full AWS plan. Budget ~$180/month base + $1.50/active tenant/month.
+
+---
+
+### LLM Routing Strategy
+
+VoiceFlow routes LLM calls intelligently to balance cost vs. quality:
+
+```
+Query length ≤ 15 words (simple intent)?
+  → llama-3.1-8b-instant   (Groq)   @ $0.05/1M tokens
+  → ~10× cheaper than 70B
+
+Query length > 15 words OR tool use?
+  → llama-3.3-70b-versatile (Groq)  @ $0.59/1M tokens
+  → Best open-source quality
+
+Groq rate limit hit?
+  → OpenRouter DeepSeek-R1 (fallback)
+
+All LLM APIs down?
+  → Ollama local (CPU, Llama 3.2 3B)
+```
+
+Configure in `agent.llmPreferences`:
+```json
+{
+  "sttEngine": "sarvam",
+  "ttsEngine": "edge",
+  "complexityThreshold": 15,
+  "fallbackChain": ["groq_70b", "groq_8b", "openrouter", "ollama"]
+}
+```
+
+---
+
+### Stripe Billing Setup (one-time)
+
+1. Create Stripe account at stripe.com
+2. Dashboard → Billing → Meters → Create meter named `voice_minutes`
+3. Copy meter ID → `.env` as `STRIPE_VOICE_MINUTES_METER_ID`
+4. Dashboard → API keys → copy secret key → `.env` as `STRIPE_SECRET_KEY`
+5. Dashboard → Webhooks → add endpoint `https://your-domain/api/billing/webhook` → copy secret → `.env` as `STRIPE_WEBHOOK_SECRET`
+6. Use test keys (`sk_test_...`) during development — zero cost, real API
+
+For managed customers switching plans → call `POST /api/billing/plan` with `stripePaymentMethodId` from Stripe Elements on the frontend.
+
+---
+
+### Owner Account (Never Billed)
+
+Add your own tenant ID to `.env`:
+```
+OWNER_TENANT_IDS=your-tenant-uuid-here
+```
+
+This bypasses all Stripe billing for that account. Your own platform usage is free. Find your tenant ID in the admin dashboard → Tenants table.
+
+---
+
+## Sales Playbook
+
+### Target: Real Estate (India) — First Vertical
+
+**Why real estate first:**
+- High inbound call volume (property inquiries)
+- Agents away from desk frequently → missed calls = lost leads
+- Average property value = high deal value → ₹3.5/min is trivial vs lost leads
+- Decision maker = agency owner (non-technical) → loves "just works" MCP plan
+- 50,000+ registered brokers in India via RERA
+
+**Sales script for first cold call:**
+> "Hi, I'm calling about VoiceFlow. Your real estate agency gets dozens of property inquiry calls a day. Half of them go to voicemail. What if an AI picked up every call, answered questions about listings, and collected the buyer's details — 24/7, in Hindi or English? It costs ₹3.5 per minute — less than a ₹10 STD call. First 30 days are completely free. Can I show you a 5-minute demo?"
+
+**Demo flow:**
+1. Open VoiceFlow → new agent → "Real Estate Agent"
+2. Upload sample listing PDF + FAQ doc
+3. Call the demo Exophone → agent answers in Hindi, answers questions about a flat
+4. Show call log + analytics in dashboard
+5. "You can deploy this for your agency in 20 minutes."
+
+**Pricing anchor:**
+- Open with MCP ₹3.5/min (30-day pilot free) → they're hooked on the product
+- At 2,000+ min/month threshold, pitch Pro ₹2/min (BYOK) for cost-conscious buyers
+- Most non-technical buyers stay on MCP; technical founders/agencies move to Pro
+
+---
+
+### "Call Grader" Lead Magnet
+
+Zero-cost tool to generate warm inbound leads:
+
+1. Landing page: "Grade your sales calls for free — no signup"
+2. User uploads a 2-minute call recording (or pastes a transcript)
+3. VoiceFlow runs Groq Whisper (free) → AI gives a score card:
+   - Objection handling (1–10)
+   - Tone & empathy (1–10)
+   - Next step clarity (1–10)
+   - Missed opportunities (list)
+4. Free PDF report emailed → **captures name + phone + company**
+5. Follow-up: "Want an AI that scores every call automatically and never misses a lead?"
+
+**Cost per lead:** ₹0 (CPU Whisper + Groq free tier). Competitor equivalent: ₹500/report via Gong.io.
+
+---
+
+### Agency White-Label Path
+
+Growth hack: sell to one agency, get 100 end-clients overnight.
+
+| Party | Rate | Revenue |
+|---|---|---|
+| VoiceFlow → Agency | ₹1.5/min | Our margin |
+| Agency → End-client | ₹8–12/min | Agency margin |
+| End-client cost | ₹8–12/min | vs human receptionist ₹80/hr |
+
+**Agency pitch:**
+> "We give you a white-label voice AI platform. You sell it as your own product at ₹10/min. We charge you ₹1.5/min. You make ₹8.5/min on every call your clients' agents make."
+
+**Activation:** Agency signs a reseller agreement → gets a sub-tenant with whitelabel branding → provisions their clients as nested tenants.
+
+---
 
 ---
 

@@ -279,8 +279,76 @@ async def configure_voice(request: Request, auth: AuthContext = Depends(get_auth
 # ── Channel setup ────────────────────────────────────────────────────────────
 
 @router.post("/channels")
-async def setup_channels():
-    return {"success": True}
+async def setup_channels(
+    request: Request,
+    auth: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Record the tenant's plan mode choice during onboarding.
+
+    Body:
+      planType: "mcp" | "pro"
+        mcp = Managed Cloud Plan (₹3.5/min all-inclusive, VoiceFlow holds all API keys)
+        pro = BYOK + Platform Fee  (₹2/min orchestration, customer brings own keys)
+      telephonyProvider: "exotel" | "twilio" | "managed"
+      llmProvider: "groq" | "openai" | "managed"
+
+    Free tier caps: 2 agents, 20 test calls. Card required for the 21st call.
+    Pilot: MCP tenants get 30 days + 100 minutes free on first Indian DID purchase.
+    """
+    body = await request.json()
+    plan_type = (body.get("planType") or "free").lower()
+    telephony_provider = body.get("telephonyProvider") or ""
+    llm_provider = body.get("llmProvider") or ""
+
+    # Accept old naming for backward compat
+    if plan_type == "managed":
+        plan_type = "mcp"
+    if plan_type == "byok":
+        plan_type = "pro"
+
+    result = await db.execute(select(Tenant).where(Tenant.id == auth.tenant_id))
+    tenant = result.scalar_one_or_none()
+    if tenant:
+        settings_dict = dict(tenant.settings or {})
+
+        if plan_type == "mcp":
+            tenant.planType = "mcp"
+            tenant.planTier = "payg"
+            # Show "VoiceFlow Managed" badge in dashboard — no API key fields needed
+            settings_dict["telephonyMode"] = "managed"
+            settings_dict["llmMode"] = "managed"
+            settings_dict["planLabel"] = "VoiceFlow MCP"
+            settings_dict["planNote"] = "₹3.5/min · No API keys needed · First 30 days free"
+        elif plan_type == "pro":
+            tenant.planType = "pro"
+            tenant.planTier = "free"  # start at free sub-tier, upgrade later
+            settings_dict["telephonyMode"] = telephony_provider or "byok"
+            settings_dict["llmMode"] = llm_provider or "byok"
+            settings_dict["planLabel"] = "VoiceFlow Pro"
+            settings_dict["planNote"] = "₹2/min orchestration · You pay your own providers"
+        else:
+            # Free tier default
+            tenant.planType = "free"
+            tenant.planTier = "free"
+            settings_dict["telephonyMode"] = telephony_provider or "byok"
+            settings_dict["llmMode"] = llm_provider or "byok"
+            settings_dict["planLabel"] = "Free"
+            settings_dict["planNote"] = "2 agents · 20 test calls · Card required for more"
+
+        tenant.settings = settings_dict
+        await db.commit()
+
+    return {
+        "success": True,
+        "planType": plan_type,
+        "warning": (
+            "MCP plan costs ₹3.5/min. Bring your own Groq + Exotel keys and switch to Pro "
+            "to reduce to ₹2/min with ~100% platform margin."
+            if plan_type == "mcp" else None
+        ),
+    }
 
 
 # ── Agent configuration ──────────────────────────────────────────────────────
