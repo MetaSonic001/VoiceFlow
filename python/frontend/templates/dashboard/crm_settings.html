@@ -10,11 +10,11 @@
     </a>
     <div>
       <h1 class="text-2xl font-bold bg-gradient-to-r from-gray-900 via-gray-700 to-gray-900 dark:from-white dark:via-gray-200 dark:to-white bg-clip-text text-transparent">CRM Integrations</h1>
-      <p class="text-gray-500 dark:text-gray-400 text-sm mt-0.5">Connect HubSpot or Salesforce to auto-enrich contacts with CRM data.</p>
+      <p class="text-gray-500 dark:text-gray-400 text-sm mt-0.5">Connect HubSpot or Salesforce to auto-enrich contacts with CRM data. Bring your own credentials — stored encrypted.</p>
     </div>
   </div>
 
-  <!-- OAuth Connect Cards -->
+  <!-- BYOK Credential Cards -->
   <div class="grid md:grid-cols-2 gap-6">
 
     <!-- HubSpot -->
@@ -32,15 +32,33 @@
           <span x-show="!connected.hubspot" class="vf-badge-neutral text-xs px-2 py-1">Not connected</span>
         </div>
       </div>
-      <p class="text-sm text-gray-600 dark:text-gray-400">When connected, caller phone numbers are automatically looked up in HubSpot and the contact record is enriched with company, deal stage, and lifecycle stage.</p>
-      <div class="flex gap-2">
-        <template x-if="!connected.hubspot">
-          <button @click="connectHubspot()" class="vf-btn px-4 py-2 bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-lg text-sm font-medium">Connect HubSpot</button>
-        </template>
-        <template x-if="connected.hubspot">
-          <button @click="disconnect('hubspot')" class="vf-btn px-4 py-2 border border-red-200 text-red-600 rounded-lg text-sm hover:bg-red-50 dark:hover:bg-red-900/20">Disconnect</button>
-        </template>
-      </div>
+
+      <p class="text-sm text-gray-600 dark:text-gray-400">Enter a <strong>Private App token</strong> from HubSpot. Go to HubSpot → Settings → Integrations → Private Apps → Create a private app with <code>crm.objects.contacts.read</code> scope.</p>
+
+      <!-- Connected state -->
+      <template x-if="connected.hubspot">
+        <div class="space-y-3">
+          <div class="flex items-center gap-2 p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
+            <svg class="w-4 h-4 text-green-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+            <code class="text-xs text-green-700 dark:text-green-300 font-mono" x-text="maskedKeys.hubspot || 'pat-••••••••••••'"></code>
+          </div>
+          <div class="flex gap-2">
+            <button @click="showHsForm = !showHsForm" class="vf-btn px-3 py-1.5 text-xs border border-slate-300 dark:border-slate-600 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700">Update token</button>
+            <button @click="disconnectProvider('hubspot')" :disabled="savingHs" class="vf-btn px-3 py-1.5 text-xs border border-red-200 text-red-600 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50">Disconnect</button>
+          </div>
+        </div>
+      </template>
+
+      <!-- Not connected or updating -->
+      <template x-if="!connected.hubspot || showHsForm">
+        <div class="space-y-3">
+          <input x-model="hsToken" type="password" class="vf-input font-mono text-sm" placeholder="pat-na1-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" autocomplete="off">
+          <button @click="saveHubspot()" :disabled="savingHs || !hsToken" class="vf-btn px-4 py-2 bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-lg text-sm font-medium disabled:opacity-50 w-full" x-text="savingHs ? 'Validating…' : 'Save & Connect'"></button>
+          <template x-if="hsError">
+            <p class="text-xs text-red-500" x-text="hsError"></p>
+          </template>
+        </div>
+      </template>
     </div>
 
     <!-- Salesforce -->
@@ -58,15 +76,37 @@
           <span x-show="!connected.salesforce" class="vf-badge-neutral text-xs px-2 py-1">Not connected</span>
         </div>
       </div>
-      <p class="text-sm text-gray-600 dark:text-gray-400">When connected, phone numbers are matched to Salesforce leads and opportunities. Extracted variables from calls are pushed back as activity notes.</p>
-      <div class="flex gap-2">
-        <template x-if="!connected.salesforce">
-          <button @click="connectSalesforce()" class="vf-btn px-4 py-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg text-sm font-medium">Connect Salesforce</button>
-        </template>
-        <template x-if="connected.salesforce">
-          <button @click="disconnect('salesforce')" class="vf-btn px-4 py-2 border border-red-200 text-red-600 rounded-lg text-sm hover:bg-red-50 dark:hover:bg-red-900/20">Disconnect</button>
-        </template>
-      </div>
+
+      <p class="text-sm text-gray-600 dark:text-gray-400">Enter a <strong>Connected App access token</strong> and your org's instance URL. In Salesforce use Setup → App Manager → Connected App → OAuth 2.0 client credentials flow.</p>
+
+      <!-- Connected state -->
+      <template x-if="connected.salesforce">
+        <div class="space-y-3">
+          <div class="flex items-center gap-2 p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
+            <svg class="w-4 h-4 text-green-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+            <span class="text-xs text-green-700 dark:text-green-300">
+              <code class="font-mono" x-text="maskedKeys.salesforce || '••••••••'"></code>
+              <span class="ml-2 text-green-600/70" x-text="sfInstanceUrl"></span>
+            </span>
+          </div>
+          <div class="flex gap-2">
+            <button @click="showSfForm = !showSfForm" class="vf-btn px-3 py-1.5 text-xs border border-slate-300 dark:border-slate-600 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700">Update token</button>
+            <button @click="disconnectProvider('salesforce')" :disabled="savingSf" class="vf-btn px-3 py-1.5 text-xs border border-red-200 text-red-600 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50">Disconnect</button>
+          </div>
+        </div>
+      </template>
+
+      <!-- Not connected or updating -->
+      <template x-if="!connected.salesforce || showSfForm">
+        <div class="space-y-3">
+          <input x-model="sfToken" type="password" class="vf-input font-mono text-sm" placeholder="Access token" autocomplete="off">
+          <input x-model="sfInstanceUrl" type="url" class="vf-input text-sm" placeholder="https://yourorg.my.salesforce.com">
+          <button @click="saveSalesforce()" :disabled="savingSf || !sfToken || !sfInstanceUrl" class="vf-btn px-4 py-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-lg text-sm font-medium disabled:opacity-50 w-full" x-text="savingSf ? 'Validating…' : 'Save & Connect'"></button>
+          <template x-if="sfError">
+            <p class="text-xs text-red-500" x-text="sfError"></p>
+          </template>
+        </div>
+      </template>
     </div>
   </div>
 
@@ -134,8 +174,24 @@
 function crmSettingsApp() {
   return {
     connected: { hubspot: false, salesforce: false },
+    maskedKeys: { hubspot: null, salesforce: null },
     fieldMap: [],
     savingMapping: false,
+
+    // HubSpot form state
+    hsToken: '',
+    savingHs: false,
+    hsError: '',
+    showHsForm: false,
+
+    // Salesforce form state
+    sfToken: '',
+    sfInstanceUrl: '',
+    savingSf: false,
+    sfError: '',
+    showSfForm: false,
+
+    // Lookup state
     lookupPhone: '',
     lookupLoading: false,
     lookupResult: null,
@@ -147,37 +203,59 @@ function crmSettingsApp() {
         this.fieldMap = d.fieldMap || [];
         this.connected.hubspot = !!d.hubspotConnected;
         this.connected.salesforce = !!d.salesforceConnected;
+        this.maskedKeys.hubspot = d.hubspotMasked || null;
+        this.maskedKeys.salesforce = d.salesforceMasked || null;
+        this.sfInstanceUrl = d.salesforceInstanceUrl || '';
       } catch { this.fieldMap = []; }
     },
 
-    connectHubspot() {
-      // Build HubSpot OAuth URL — client ID must be configured server-side
-      // Redirect returns to /api/crm/hubspot/callback/
-      const params = new URLSearchParams({
-        client_id: 'HUBSPOT_CLIENT_ID_PLACEHOLDER',
-        redirect_uri: location.origin + '/api/crm/hubspot/callback/',
-        scope: 'contacts crm.objects.contacts.read crm.objects.deals.read',
-        response_type: 'code',
-      });
-      window.location.href = 'https://app.hubspot.com/oauth/authorize?' + params.toString();
-    },
-
-    connectSalesforce() {
-      const params = new URLSearchParams({
-        response_type: 'code',
-        client_id: 'SALESFORCE_CLIENT_ID_PLACEHOLDER',
-        redirect_uri: location.origin + '/api/crm/salesforce/callback/',
-        scope: 'api refresh_token openid',
-      });
-      window.location.href = 'https://login.salesforce.com/services/oauth2/authorize?' + params.toString();
-    },
-
-    async disconnect(provider) {
+    async saveHubspot() {
+      this.savingHs = true; this.hsError = '';
       try {
-        await apiFetch('/api/crm/field-mapping/', { method: 'POST', json: { disconnect: provider } });
+        const d = await apiFetch('/api/crm/connect/hubspot/', {
+          method: 'POST',
+          json: { apiKey: this.hsToken },
+        });
+        this.connected.hubspot = true;
+        this.maskedKeys.hubspot = d.maskedKey;
+        this.hsToken = '';
+        this.showHsForm = false;
+        window.vfToast && window.vfToast('HubSpot connected', 'success');
+      } catch(e) {
+        this.hsError = e.message || 'Failed to connect HubSpot. Check the token and try again.';
+      }
+      this.savingHs = false;
+    },
+
+    async saveSalesforce() {
+      this.savingSf = true; this.sfError = '';
+      try {
+        const d = await apiFetch('/api/crm/connect/salesforce/', {
+          method: 'POST',
+          json: { accessToken: this.sfToken, instanceUrl: this.sfInstanceUrl },
+        });
+        this.connected.salesforce = true;
+        this.maskedKeys.salesforce = d.maskedKey;
+        this.sfToken = '';
+        this.showSfForm = false;
+        window.vfToast && window.vfToast('Salesforce connected', 'success');
+      } catch(e) {
+        this.sfError = e.message || 'Failed to connect Salesforce. Check the token and instance URL.';
+      }
+      this.savingSf = false;
+    },
+
+    async disconnectProvider(provider) {
+      const url = provider === 'hubspot' ? '/api/crm/connect/hubspot/' : '/api/crm/connect/salesforce/';
+      try {
+        await apiFetch(url, { method: 'DELETE' });
         this.connected[provider] = false;
+        this.maskedKeys[provider] = null;
+        if (provider === 'salesforce') this.sfInstanceUrl = '';
         window.vfToast && window.vfToast(`${provider} disconnected`, 'success');
-      } catch {}
+      } catch(e) {
+        window.vfToast && window.vfToast('Disconnect failed', 'error');
+      }
     },
 
     async saveMapping() {
@@ -202,3 +280,4 @@ function crmSettingsApp() {
 }
 </script>
 {% endblock %}
+

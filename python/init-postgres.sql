@@ -16,3 +16,9 @@ GRANT ALL ON SCHEMA public TO vf_app;
 -- Ensure the admin user has all privileges
 GRANT ALL PRIVILEGES ON DATABASE voiceflow_prod TO vf_admin;
 GRANT ALL ON SCHEMA public TO vf_admin;
+
+-- Dedicated database for Langfuse so its migrations never touch voiceflow_prod
+SELECT 'CREATE DATABASE langfuse_db OWNER vf_admin'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'langfuse_db')\gexec
+GRANT ALL PRIVILEGES ON DATABASE langfuse_db TO vf_admin;
+GRANT ALL PRIVILEGES ON DATABASE langfuse_db TO vf_app;

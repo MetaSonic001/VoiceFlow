@@ -54,6 +54,8 @@ help: ## Show this help
 	@Write-Host '    make migrate           Run Django makemigrations + migrate'
 	@Write-Host '    make makemigrations    Run Django makemigrations only'
 	@Write-Host '    make db-check          Verify Postgres creds (auto-fix stale volume)'
+	@Write-Host '    make ensure-langfuse-db  Create langfuse_db if missing (safe on existing installs)'
+	@Write-Host '    make langfuse          Start Langfuse observability (optional, port 3001)'
 	@Write-Host '    make superuser         Create Django admin superuser'
 	@Write-Host '    make seed              Seed default agent templates'
 	@Write-Host ''
@@ -79,7 +81,7 @@ help: ## Show this help
 # ─── FIRST-TIME INIT ─────────────────────────────────────────────
 
 .PHONY: init
-init: venv install env docker wait db-check migrate create-tables seed ## One-time full setup
+init: venv install env docker wait db-check ensure-langfuse-db migrate create-tables seed ## One-time full setup
 	@Write-Host ''
 	@Write-Host '  ═══════════════════════════════════════════════════' -ForegroundColor Cyan
 	@Write-Host '  Setup complete!' -ForegroundColor Green
@@ -113,12 +115,27 @@ all: docker wait backend-bg frontend-bg ## Start everything
 	@Write-Host '  Redis      : localhost:8020'
 	@Write-Host '  Kokoro TTS : localhost:8880'
 	@Write-Host '  Piper TTS  : localhost:8890'
+	@Write-Host ''
+	@Write-Host '  Optional:  make langfuse  →  http://localhost:3001' -ForegroundColor DarkGray
 	@Write-Host '  ═══════════════════════════════════════════════════' -ForegroundColor Cyan
 
 .PHONY: docker
 docker: ## Start Docker services (Postgres, MinIO, ChromaDB, Redis, TTS)
 	docker compose up -d --remove-orphans postgres minio chroma redis kokoro-tts piper-tts
 	@Write-Host 'Docker services started.' -ForegroundColor Green
+
+.PHONY: langfuse
+langfuse: ## Start Langfuse observability (optional, port 3001)
+	docker compose up -d langfuse
+	@Write-Host 'Langfuse started: http://localhost:3001' -ForegroundColor Green
+
+.PHONY: ensure-langfuse-db
+ensure-langfuse-db: ## Idempotently create langfuse_db in Postgres (safe to run on existing volumes)
+	@Write-Host 'Ensuring langfuse_db exists...' -ForegroundColor Yellow
+	@docker compose exec -T postgres psql -U vf_admin -c 'CREATE DATABASE langfuse_db OWNER vf_admin;' 2>$$null; $$true
+	@docker compose exec -T postgres psql -U vf_admin -d langfuse_db -c 'GRANT ALL ON SCHEMA public TO vf_admin;' 2>$$null; $$true
+	@docker compose exec -T postgres psql -U vf_admin -d langfuse_db -c 'GRANT ALL PRIVILEGES ON DATABASE langfuse_db TO vf_app;' 2>$$null; $$true
+	@Write-Host 'langfuse_db ready.' -ForegroundColor Green
 
 .PHONY: wait
 wait:
@@ -319,6 +336,9 @@ nuke: ## Stop everything + wipe ALL data (Postgres, Redis, ChromaDB, MinIO) + re
 	@$$attempt=0; while ($$attempt -lt 15) { try { docker compose exec -T postgres pg_isready -U vf_admin -d voiceflow_prod 2>$$null; if ($$LASTEXITCODE -eq 0) { break }; } catch {}; Start-Sleep -Seconds 2; $$attempt++ }
 	@Write-Host 'Running migrations...' -ForegroundColor Yellow
 	@& "$$((Get-Item ..).FullName)\.venv\Scripts\python.exe" frontend/manage.py migrate --no-input 2>$$null
+	@Write-Host 'Ensuring langfuse_db exists...' -ForegroundColor Yellow
+	@docker compose exec -T postgres psql -U vf_admin -c 'CREATE DATABASE langfuse_db OWNER vf_admin;' 2>$$null; $$true
+	@docker compose exec -T postgres psql -U vf_admin -d langfuse_db -c 'GRANT ALL ON SCHEMA public TO vf_admin;' 2>$$null; $$true
 	@Write-Host '' -ForegroundColor Green
 	@Write-Host '=== NUKE COMPLETE ===' -ForegroundColor Green
 	@Write-Host 'All data wiped. Docker services running fresh.' -ForegroundColor Green

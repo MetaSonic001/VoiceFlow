@@ -84,6 +84,8 @@ services:
   # Access at http://localhost:3001  — create an account on first visit
   # Set LANGFUSE_SECRET_KEY, LANGFUSE_PUBLIC_KEY, LANGFUSE_HOST=http://langfuse:3000
   # in backend/.env to enable trace streaming from rag_service.py
+  # Uses a dedicated langfuse_db database (created by init-postgres.sql) so
+  # Langfuse migrations never touch the voiceflow_prod schema.
   langfuse:
     image: langfuse/langfuse:latest
     container_name: voiceflow_langfuse
@@ -91,7 +93,7 @@ services:
     ports:
       - "3001:3000"
     environment:
-      - DATABASE_URL=postgresql://vf_admin:vf_secure_2025!@postgres:5432/voiceflow_prod
+      - DATABASE_URL=postgresql://vf_admin:vf_secure_2025!@postgres:5432/langfuse_db
       - NEXTAUTH_SECRET=langfuse-nextauth-secret-change-me-in-prod
       - NEXTAUTH_URL=http://localhost:3001
       - SALT=langfuse-salt-change-me-in-prod

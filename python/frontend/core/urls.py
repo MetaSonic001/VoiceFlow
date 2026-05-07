@@ -177,9 +177,9 @@ urlpatterns = [
     path("dashboard/crm-settings/", pages.crm_settings, name="crm_settings"),
     path("api/crm/field-mapping/", api_proxy.crm_field_mapping, name="api_crm_field_mapping"),
     path("api/crm/lookup/", api_proxy.crm_lookup, name="api_crm_lookup"),
-    # OAuth callbacks — proxy straight to backend which handles code exchange + redirects
-    path("api/crm/hubspot/callback/", api_proxy.crm_hubspot_callback, name="api_crm_hubspot_callback"),
-    path("api/crm/salesforce/callback/", api_proxy.crm_salesforce_callback, name="api_crm_salesforce_callback"),
+    # BYOK credential endpoints — users enter their own tokens, no OAuth flow
+    path("api/crm/connect/hubspot/", api_proxy.crm_connect_hubspot, name="api_crm_connect_hubspot"),
+    path("api/crm/connect/salesforce/", api_proxy.crm_connect_salesforce, name="api_crm_connect_salesforce"),
 
     # ── Coaching Cards ─────────────────────────────────────────────────
     path("api/coaching/from-recording/", api_proxy.coaching_from_recording, name="api_coaching_from_recording"),

@@ -1451,14 +1451,25 @@ def voice_clone_delete(request, clone_id):
 # ── Integrations proxy ────────────────────────────────────────────────────────
 
 @login_required
-@require_http_methods(["GET"])
+@require_http_methods(["GET", "PUT"])
 def integrations_get(request, agent_id):
+    import json as _json
+    if request.method == "PUT":
+        try:
+            body = _json.loads(request.body)
+        except Exception:
+            return JsonResponse({"error": "Invalid JSON"}, status=400)
+        try:
+            return JsonResponse(get_client(request).save_integrations(agent_id, body))
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=400)
     try:
         return JsonResponse(get_client(request).get_integrations(agent_id))
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)
 
 
+# kept for backward-compat — URL pattern routes PUT to integrations_get above
 @login_required
 @require_http_methods(["PUT"])
 def integrations_save(request, agent_id):
@@ -1842,44 +1853,34 @@ def crm_lookup(request):
     """Look up enriched contact data by phone number from the connected CRM."""
     try:
         phone = request.GET.get("phone", "")
-        return JsonResponse(get_client(request)._get(f"/crm/lookup", params={"phone": phone}))
+        return JsonResponse(get_client(request)._get("/crm/lookup", params={"phone": phone}))
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
 
-def crm_hubspot_callback(request):
-    """Proxy the HubSpot OAuth callback to the backend (no login required — OAuth flow)."""
-    import requests as _req
-    from django.http import HttpResponseRedirect
-    from django.conf import settings as _settings
-    qs = request.GET.urlencode()
+@login_required
+@require_http_methods(["POST", "DELETE"])
+def crm_connect_hubspot(request):
+    """BYOK: save (POST) or remove (DELETE) a HubSpot Private App token."""
     try:
-        # Let backend handle code exchange and return a redirect
-        r = _req.get(
-            f"{_settings.BACKEND_API_URL}/api/crm/hubspot/callback?" + qs,
-            allow_redirects=False, timeout=20,
-        )
-        if r.status_code in (301, 302, 303, 307, 308):
-            return HttpResponseRedirect(r.headers.get("Location", "/dashboard/crm-settings/"))
-        return HttpResponseRedirect("/dashboard/crm-settings/?hs_connected=1")
-    except Exception:
-        return HttpResponseRedirect("/dashboard/crm-settings/?error=proxy_error")
+        client = get_client(request)
+        if request.method == "DELETE":
+            return JsonResponse(client._delete("/crm/connect/hubspot"))
+        return JsonResponse(client._post("/crm/connect/hubspot", _json_body(request)))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
 
 
-def crm_salesforce_callback(request):
-    """Proxy the Salesforce OAuth callback to the backend."""
-    import requests as _req
-    from django.http import HttpResponseRedirect
-    from django.conf import settings as _settings
-    qs = request.GET.urlencode()
+@login_required
+@require_http_methods(["POST", "DELETE"])
+def crm_connect_salesforce(request):
+    """BYOK: save (POST) or remove (DELETE) Salesforce access token + instance URL."""
     try:
-        r = _req.get(
-            f"{_settings.BACKEND_API_URL}/api/crm/salesforce/callback?" + qs,
-            allow_redirects=False, timeout=20,
-        )
-        if r.status_code in (301, 302, 303, 307, 308):
-            return HttpResponseRedirect(r.headers.get("Location", "/dashboard/crm-settings/"))
-        return HttpResponseRedirect("/dashboard/crm-settings/?sf_connected=1")
-    except Exception:
-        return HttpResponseRedirect("/dashboard/crm-settings/?error=proxy_error")
+        client = get_client(request)
+        if request.method == "DELETE":
+            return JsonResponse(client._delete("/crm/connect/salesforce"))
+        return JsonResponse(client._post("/crm/connect/salesforce", _json_body(request)))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
 

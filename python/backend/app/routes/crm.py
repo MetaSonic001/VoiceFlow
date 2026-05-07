@@ -1,29 +1,32 @@
 """
-/api/crm routes — CRM OAuth integration & field mapping.
+/api/crm routes — CRM BYOK integration & field mapping.
 
 GET  /api/crm/field-mapping          — return current field mapping + connect status
 POST /api/crm/field-mapping          — save field mapping or disconnect a provider
 GET  /api/crm/lookup?phone=...       — enrich a phone number from the connected CRM
 
-OAuth callbacks are hosted here too but require the OAuth credentials to be set
-via environment variables (HUBSPOT_CLIENT_ID, HUBSPOT_CLIENT_SECRET, etc.).
-The callback exchanges the code for tokens and stores them encrypted in
-tenant.settings["crm"].
+BYOK credential endpoints (no OAuth flows — users enter their own tokens):
+POST /api/crm/connect/hubspot        — save HubSpot Private App token (pat-...)
+POST /api/crm/connect/salesforce     — save Salesforce access token + instance URL
+DELETE /api/crm/connect/hubspot      — remove HubSpot credentials
+DELETE /api/crm/connect/salesforce   — remove Salesforce credentials
+
+Credentials are validated against the respective API before saving, then stored
+AES-256 encrypted in tenant.settings["crm"] (same pattern as BYOK keys in settings.py).
 """
 from __future__ import annotations
 
 import logging
-import os
-from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.auth import AuthContext, get_auth
 from app.models import Tenant, Contact
+from app.services.credentials import encrypt, decrypt_safe, mask
 
 logger = logging.getLogger("voiceflow.crm")
 router = APIRouter()
@@ -44,10 +47,15 @@ async def get_field_mapping(
         return JSONResponse({"error": "Tenant not found"}, status_code=404)
 
     cfg = _crm_cfg(tenant)
+    hs_token = decrypt_safe(cfg.get("hubspotAccessToken", ""))
+    sf_token = decrypt_safe(cfg.get("salesforceAccessToken", ""))
     return {
         "fieldMap": cfg.get("fieldMap", []),
-        "hubspotConnected": bool(cfg.get("hubspotAccessToken")),
-        "salesforceConnected": bool(cfg.get("salesforceAccessToken")),
+        "hubspotConnected": bool(hs_token),
+        "hubspotMasked": mask(hs_token, prefix_len=6, suffix_len=4) if hs_token else None,
+        "salesforceConnected": bool(sf_token),
+        "salesforceMasked": mask(sf_token, prefix_len=6, suffix_len=4) if sf_token else None,
+        "salesforceInstanceUrl": cfg.get("salesforceInstanceUrl", ""),
     }
 
 
@@ -71,10 +79,8 @@ async def save_field_mapping(
     disconnect = body.get("disconnect")
     if disconnect == "hubspot":
         crm.pop("hubspotAccessToken", None)
-        crm.pop("hubspotRefreshToken", None)
     elif disconnect == "salesforce":
         crm.pop("salesforceAccessToken", None)
-        crm.pop("salesforceRefreshToken", None)
         crm.pop("salesforceInstanceUrl", None)
 
     settings["crm"] = crm
@@ -119,7 +125,7 @@ async def crm_lookup(
         })
 
     # 2. HubSpot enrichment
-    hs_token = cfg.get("hubspotAccessToken")
+    hs_token = decrypt_safe(cfg.get("hubspotAccessToken", ""))
     if hs_token:
         try:
             import httpx
@@ -149,7 +155,7 @@ async def crm_lookup(
             logger.warning("[crm_lookup] HubSpot error: %s", exc)
 
     # 3. Salesforce enrichment
-    sf_token = cfg.get("salesforceAccessToken")
+    sf_token = decrypt_safe(cfg.get("salesforceAccessToken", ""))
     sf_instance = cfg.get("salesforceInstanceUrl", "https://login.salesforce.com")
     if sf_token:
         try:
@@ -179,86 +185,170 @@ async def crm_lookup(
     return {"phone": phone, "context": context}
 
 
-# ── OAuth Callbacks ───────────────────────────────────────────────────────────
+# ── BYOK Credential Endpoints ─────────────────────────────────────────────────
 
-@router.get("/hubspot/callback")
-async def hubspot_oauth_callback(
-    code: Optional[str] = None,
-    error: Optional[str] = None,
+@router.post("/connect/hubspot")
+async def connect_hubspot(
+    body: dict,
+    auth: AuthContext = Depends(get_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    """Exchange HubSpot OAuth code for tokens and store in tenant settings."""
-    if error or not code:
-        return RedirectResponse("/dashboard/crm-settings/?error=hubspot_oauth_failed")
+    """
+    Save a HubSpot Private App token (BYOK).
 
-    client_id = os.getenv("HUBSPOT_CLIENT_ID", "")
-    client_secret = os.getenv("HUBSPOT_CLIENT_SECRET", "")
-    redirect_uri = os.getenv("HUBSPOT_REDIRECT_URI", "")
+    Expects: { "apiKey": "pat-na1-..." }
 
-    if not client_id or not client_secret:
-        return RedirectResponse("/dashboard/crm-settings/?error=hubspot_not_configured")
+    The token is validated by calling the HubSpot account info API before saving.
+    Stored AES-256 encrypted in tenant.settings["crm"]["hubspotAccessToken"].
+    """
+    api_key = (body.get("apiKey") or "").strip()
+    if not api_key:
+        return JSONResponse({"error": "apiKey is required."}, status_code=400)
 
+    # Validate the token against HubSpot
     try:
         import httpx
-        async with httpx.AsyncClient(timeout=15) as client:
-            r = await client.post(
-                "https://api.hubapi.com/oauth/v1/token",
-                data={
-                    "grant_type": "authorization_code",
-                    "client_id": client_id,
-                    "client_secret": client_secret,
-                    "redirect_uri": redirect_uri,
-                    "code": code,
-                },
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(
+                "https://api.hubapi.com/account-info/v3/details",
+                headers={"Authorization": f"Bearer {api_key}"},
             )
-            r.raise_for_status()
-            tokens = r.json()
-
-        # We do not have a tenant in the query param here — fetch by session/header is not trivial
-        # in an unauthenticated callback. Store tokens in a pending state keyed by their HubSpot
-        # portal ID (hub_id) and resolve on next authenticated request.
-        # For now, store in a Redis key and have the frontend poll.
-        logger.info("[crm] HubSpot OAuth tokens received, hub_id=%s", tokens.get("hub_id"))
-        return RedirectResponse(f"/dashboard/crm-settings/?hs_connected=1")
+        if r.status_code == 401:
+            return JSONResponse({"error": "Invalid HubSpot token — authentication failed."}, status_code=400)
+        if r.status_code not in (200, 204):
+            return JSONResponse({"error": f"HubSpot validation returned HTTP {r.status_code}."}, status_code=400)
+        hub_info = r.json() if r.status_code == 200 else {}
     except Exception as exc:
-        logger.warning("[crm] HubSpot callback error: %s", exc)
-        return RedirectResponse("/dashboard/crm-settings/?error=hubspot_exchange_failed")
+        logger.warning("[crm] HubSpot validation error: %s", exc)
+        return JSONResponse({"error": f"Could not reach HubSpot API: {exc}"}, status_code=502)
+
+    # Store encrypted
+    result = await db.execute(select(Tenant).where(Tenant.id == auth.tenant_id))
+    tenant = result.scalar_one_or_none()
+    if not tenant:
+        return JSONResponse({"error": "Tenant not found"}, status_code=404)
+
+    settings = dict(tenant.settings or {})
+    crm = dict(settings.get("crm", {}))
+    crm["hubspotAccessToken"] = encrypt(api_key)
+    settings["crm"] = crm
+    tenant.settings = settings
+    await db.commit()
+
+    logger.info("[crm] HubSpot BYOK token saved for tenant=%s hub=%s", auth.tenant_id, hub_info.get("portalId"))
+    return {
+        "ok": True,
+        "maskedKey": mask(api_key, prefix_len=6, suffix_len=4),
+        "hubId": hub_info.get("portalId"),
+    }
 
 
-@router.get("/salesforce/callback")
-async def salesforce_oauth_callback(
-    code: Optional[str] = None,
-    error: Optional[str] = None,
+@router.delete("/connect/hubspot")
+async def disconnect_hubspot(
+    auth: AuthContext = Depends(get_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    """Exchange Salesforce OAuth code for tokens."""
-    if error or not code:
-        return RedirectResponse("/dashboard/crm-settings/?error=salesforce_oauth_failed")
+    """Remove stored HubSpot credentials."""
+    result = await db.execute(select(Tenant).where(Tenant.id == auth.tenant_id))
+    tenant = result.scalar_one_or_none()
+    if not tenant:
+        return JSONResponse({"error": "Tenant not found"}, status_code=404)
 
-    client_id = os.getenv("SALESFORCE_CLIENT_ID", "")
-    client_secret = os.getenv("SALESFORCE_CLIENT_SECRET", "")
-    redirect_uri = os.getenv("SALESFORCE_REDIRECT_URI", "")
+    settings = dict(tenant.settings or {})
+    crm = dict(settings.get("crm", {}))
+    crm.pop("hubspotAccessToken", None)
+    settings["crm"] = crm
+    tenant.settings = settings
+    await db.commit()
+    return {"ok": True}
 
-    if not client_id or not client_secret:
-        return RedirectResponse("/dashboard/crm-settings/?error=salesforce_not_configured")
 
+@router.post("/connect/salesforce")
+async def connect_salesforce(
+    body: dict,
+    auth: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Save Salesforce Connected App credentials (BYOK).
+
+    Expects: { "accessToken": "...", "instanceUrl": "https://yourorg.salesforce.com" }
+
+    Obtain an access token from your Salesforce Connected App (Settings →
+    App Manager → View credentials, then use the OAuth 2.0 token endpoint with
+    client_credentials or username-password grant).
+
+    The token is validated by calling the Salesforce identity API before saving.
+    Stored AES-256 encrypted in tenant.settings["crm"]["salesforceAccessToken"].
+    """
+    access_token = (body.get("accessToken") or "").strip()
+    instance_url = (body.get("instanceUrl") or "").strip().rstrip("/")
+
+    if not access_token:
+        return JSONResponse({"error": "accessToken is required."}, status_code=400)
+    if not instance_url or not instance_url.startswith("https://"):
+        return JSONResponse({"error": "instanceUrl must be a valid https:// URL."}, status_code=400)
+
+    # Validate the token
     try:
         import httpx
-        async with httpx.AsyncClient(timeout=15) as client:
-            r = await client.post(
-                "https://login.salesforce.com/services/oauth2/token",
-                data={
-                    "grant_type": "authorization_code",
-                    "client_id": client_id,
-                    "client_secret": client_secret,
-                    "redirect_uri": redirect_uri,
-                    "code": code,
-                },
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(
+                f"{instance_url}/services/oauth2/userinfo",
+                headers={"Authorization": f"Bearer {access_token}"},
             )
-            r.raise_for_status()
-            tokens = r.json()
-            logger.info("[crm] Salesforce OAuth connected, instance=%s", tokens.get("instance_url"))
-        return RedirectResponse("/dashboard/crm-settings/?sf_connected=1")
+        if r.status_code == 401:
+            return JSONResponse({"error": "Invalid Salesforce token — authentication failed."}, status_code=400)
+        if r.status_code not in (200,):
+            return JSONResponse({"error": f"Salesforce validation returned HTTP {r.status_code}."}, status_code=400)
+        sf_info = r.json()
     except Exception as exc:
-        logger.warning("[crm] Salesforce callback error: %s", exc)
-        return RedirectResponse("/dashboard/crm-settings/?error=salesforce_exchange_failed")
+        logger.warning("[crm] Salesforce validation error: %s", exc)
+        return JSONResponse({"error": f"Could not reach Salesforce API: {exc}"}, status_code=502)
+
+    # Store encrypted
+    result = await db.execute(select(Tenant).where(Tenant.id == auth.tenant_id))
+    tenant = result.scalar_one_or_none()
+    if not tenant:
+        return JSONResponse({"error": "Tenant not found"}, status_code=404)
+
+    settings = dict(tenant.settings or {})
+    crm = dict(settings.get("crm", {}))
+    crm["salesforceAccessToken"] = encrypt(access_token)
+    crm["salesforceInstanceUrl"] = instance_url
+    settings["crm"] = crm
+    tenant.settings = settings
+    await db.commit()
+
+    logger.info("[crm] Salesforce BYOK token saved for tenant=%s org=%s", auth.tenant_id, sf_info.get("organization_id"))
+    return {
+        "ok": True,
+        "maskedKey": mask(access_token, prefix_len=6, suffix_len=4),
+        "organizationId": sf_info.get("organization_id"),
+        "instanceUrl": instance_url,
+    }
+
+
+@router.delete("/connect/salesforce")
+async def disconnect_salesforce(
+    auth: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove stored Salesforce credentials."""
+    result = await db.execute(select(Tenant).where(Tenant.id == auth.tenant_id))
+    tenant = result.scalar_one_or_none()
+    if not tenant:
+        return JSONResponse({"error": "Tenant not found"}, status_code=404)
+
+    settings = dict(tenant.settings or {})
+    crm = dict(settings.get("crm", {}))
+    crm.pop("salesforceAccessToken", None)
+    crm.pop("salesforceInstanceUrl", None)
+    settings["crm"] = crm
+    tenant.settings = settings
+    await db.commit()
+    return {"ok": True}
+
+
+
+
