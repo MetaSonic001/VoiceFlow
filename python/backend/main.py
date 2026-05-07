@@ -170,6 +170,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"[stt] STT init failed (non-fatal): {e}")
 
+    # Pre-warm RAG pipeline: ChromaDB connection + embedding model.
+    # Without this the first real customer call pays a 3-5s cold-start penalty.
+    try:
+        import asyncio as _asyncio
+        from app.services.rag_service import _get_chroma_client
+        # ChromaDB client uses a blocking HTTP call — run it off the event loop.
+        await _asyncio.get_event_loop().run_in_executor(None, _get_chroma_client)
+        logger.info("[rag] ChromaDB pre-warmed")
+    except Exception as e:
+        logger.warning(f"[rag] ChromaDB pre-warm failed (non-fatal): {e}")
+
     logger.info(f"Python backend ready on port {settings.PORT}")
 
     # Start retraining scheduler (Claim 7)

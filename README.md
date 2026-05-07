@@ -54,6 +54,10 @@ All Architecture & Feature Bible items are now fully implemented end-to-end:
 | MCP batch_campaign | ✅ Complete | `batch_campaign()` tool — creates campaign, uploads contacts CSV, starts campaign immediately or scheduled |
 | MCP get_real_time_call_status | ✅ Complete | `get_real_time_call_status()` tool — reads live call state + transcript from Redis via `/api/live-monitor/calls/` |
 | Billing & Platform Key System | ✅ Complete | `UsageLog` ORM model, `billing_service.py` (Stripe Billing Meters), `/api/billing/*` (usage/invoices/plan/estimate/pricing/**calculator**), `pricing_config.yaml`, `get_api_key()` platform-key fallback in `credentials.py`, onboarding MCP/Pro branch, owner-account bypass via `OWNER_TENANT_IDS`, pilot plan (`pilotPlanEndDate`) + free-tier cap (`totalCallCount`) on `Tenant` model |
+| Voice Pipeline Resilience | ✅ Complete | `voice_twilio_gather.py`: 6-second `asyncio.wait_for` timeout on RAG pipeline (filler phrase on dead air), JSON-leak detection in `_sanitize_for_twiml`, LLM refusal rephrasing, inner `_rag_with_tools()` coroutine isolates errors |
+| Cold-Start Pre-Warm | ✅ Complete | `main.py` lifespan now calls `_get_chroma_client()` in executor at startup — first real call doesn’t pay 3–5s ChromaDB cold-start penalty |
+| Exotel Service Layer | ✅ Complete | `exotel_service.py` — `ExotelService` class with `search_available_numbers(locality)`, `purchase_number(number)`, `assign_number_to_agent(number, agent_id, webhook_url)` |
+| Onboarding Cost Calculator | ✅ Complete | Step 8 added to 9-step wizard — calls/day × avg duration → live MCP vs Pro monthly estimate + competitor savings; `GET /api/billing/calculator/` Django proxy added |
 
 ## What's New (May 2026)
 
@@ -171,7 +175,7 @@ voiceflow new my-agent && cd my-agent && python agent.py
 ## What This Project Does
 
 1. **Sign up** → Django authentication (email/password)
-2. **Onboarding wizard** (7 steps) → configure company profile, agent persona, knowledge base, voice settings, deployment channels
+2. **Onboarding wizard** (9 steps) → configure company profile, agent persona, knowledge base, voice settings, deployment channels, **cost estimate**, testing sandbox
 3. **Documents are ingested** → scraped from URLs or uploaded as files → chunked, embedded, stored in a per-tenant vector store in ChromaDB
 4. **Agent is live** → receives questions via web chat, phone call (Twilio), or browser call (WebSocket) → hierarchical context injection (5 layers) → policy-scored retrieval from tenant-isolated store → dynamic 7-section prompt assembly → Groq LLM generation → TTS synthesis → voice or text response
 5. **Continuous improvement** → bad calls are flagged → nightly pipeline extracts Q&A pairs → admins review and edit ideal responses → approved examples are injected as few-shot learning in the system prompt
@@ -497,14 +501,16 @@ POST /auth/signup (FastAPI)
 Django frontend redirects to /onboarding or /dashboard
         │
         ▼
-7-Step Onboarding Wizard (Alpine.js)
-  Step 1: Company Profile    → POST /onboarding/company     → auto-scrapes website
-  Step 2: Agent Creation     → POST /onboarding/agent       → creates Agent row
-  Step 3: Knowledge Upload   → POST /onboarding/knowledge   → triggers ingestion
-  Step 4: Voice & Personality→ POST /onboarding/voice       → Edge + Kokoro voice preview
-  Step 5: Channel Setup      → POST /onboarding/channels    → MCP (₹3.5/min managed) / Pro (BYOK ₹2/min) / WebSocket
-  Step 6: Testing Sandbox    → UI tests chat/voice in real-time
-  Step 7: Go Live / Deploy   → POST /onboarding/deploy      → activates agent (demo mode returns mock number)
+9-Step Onboarding Wizard (Alpine.js)
+  Step 1: LLM Provider       → POST /api/settings/          → save Groq/OpenAI key
+  Step 2: Company Profile    → POST /onboarding/company     → auto-scrapes website
+  Step 3: Template           → template selection
+  Step 4: Agent Config       → POST /onboarding/agent       → creates Agent row
+  Step 5: Knowledge Upload   → POST /onboarding/knowledge   → triggers ingestion
+  Step 6: Voice              → POST /onboarding/voice       → Edge + Kokoro voice preview
+  Step 7: Channel Setup      → POST /onboarding/channels    → MCP (₹3.5/min managed) / Pro (BYOK ₹2/min) / WebSocket
+  Step 8: Cost Calculator    → GET /api/billing/calculator  → live ₹ estimate before deploy
+  Step 9: Test & Deploy      → POST /onboarding/deploy      → activates agent
 ```
 
 ### Document Ingestion Flow

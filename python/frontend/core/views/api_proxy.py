@@ -636,6 +636,26 @@ def billing_usage(request):
         return JsonResponse({"error": str(e)}, status=500)
 
 
+@require_http_methods(["GET"])
+def billing_calculator(request):
+    """Proxy the no-auth billing calculator to FastAPI. Auth not required (public pricing page)."""
+    from django.conf import settings as dj_settings
+    import httpx as _httpx
+    fastapi_url = getattr(dj_settings, "FASTAPI_URL", "http://localhost:8040")
+    params = {
+        "calls_per_day": request.GET.get("calls_per_day", "50"),
+        "avg_duration_seconds": request.GET.get("avg_duration_seconds", "120"),
+        "plan_type": request.GET.get("plan_type", "mcp"),
+        "days_per_month": request.GET.get("days_per_month", "26"),
+    }
+    try:
+        with _httpx.Client(timeout=10) as client:
+            resp = client.get(f"{fastapi_url}/api/billing/calculator", params=params)
+        return JsonResponse(resp.json(), status=resp.status_code)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
 @login_required
 @require_http_methods(["GET", "POST"])
 def pipelines_api(request):

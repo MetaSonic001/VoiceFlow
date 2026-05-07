@@ -7,9 +7,9 @@
     <div class="max-w-4xl mx-auto px-6 py-4">
       <div class="flex items-center justify-between mb-3">
         <a href="{% url 'dashboard' %}" class="text-sm text-gray-400 hover:text-gray-600">&larr; Skip to Dashboard</a>
-        <span class="text-sm text-gray-500" x-text="'Step ' + step + ' of 8'"></span>
+        <span class="text-sm text-gray-500" x-text="'Step ' + step + ' of 9'"></span>
       </div>
-      <div class="w-full bg-gray-200 rounded-full h-2"><div class="bg-blue-600 h-2 rounded-full transition-all duration-500" :style="'width:' + (step/8*100) + '%'"></div></div>
+      <div class="w-full bg-gray-200 rounded-full h-2"><div class="bg-blue-600 h-2 rounded-full transition-all duration-500" :style="'width:' + (step/9*100) + '%'"></div></div>
       <div class="flex justify-between mt-2">
         <template x-for="(label, i) in stepLabels" :key="i">
           <span class="text-[10px] text-gray-400 cursor-pointer" :class="step > i+1 ? 'text-blue-600' : step===i+1 ? 'text-gray-700 font-semibold' : ''" @click="if(i+1<step) step=i+1" x-text="label"></span>
@@ -197,8 +197,99 @@
         </div>
       </div>
 
-      <!-- Step 8: Test & Deploy (was Step 7) -->
-      <div x-show="step===8" x-transition>
+      <!-- Step 8: Cost Calculator (NEW) -->
+      <div x-show="step===8" x-transition
+           x-effect="if (step===8 && !calcLoading && !calcResult) fetchCalcEstimate()">
+        <h2 class="text-2xl font-bold mb-2">Estimate your monthly cost</h2>
+        <p class="text-gray-500 text-sm mb-6">No surprise bills — see what you'll pay before going live.</p>
+        <div class="grid sm:grid-cols-2 gap-4 mb-5">
+          <div>
+            <label class="block text-sm font-medium mb-1">Expected calls per day</label>
+            <input x-model.number="calcCallsPerDay"
+                   @input.debounce.600ms="fetchCalcEstimate()"
+                   type="number" min="1" max="10000"
+                   class="w-full border rounded-lg px-4 py-2.5" placeholder="50">
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-1">Average call length (minutes)</label>
+            <input x-model.number="calcAvgMins"
+                   @input.debounce.600ms="fetchCalcEstimate()"
+                   type="number" min="0.5" max="60" step="0.5"
+                   class="w-full border rounded-lg px-4 py-2.5" placeholder="2">
+          </div>
+        </div>
+        <!-- Plan toggle -->
+        <div class="flex gap-3 mb-5">
+          <button @click="calcPlan='mcp'; fetchCalcEstimate()"
+                  :class="calcPlan==='mcp' ? 'bg-blue-600 text-white shadow' : 'bg-gray-100 text-gray-600'"
+                  class="flex-1 py-2 rounded-lg text-sm font-medium transition">
+            MCP &mdash; No keys needed
+          </button>
+          <button @click="calcPlan='pro'; fetchCalcEstimate()"
+                  :class="calcPlan==='pro' ? 'bg-blue-600 text-white shadow' : 'bg-gray-100 text-gray-600'"
+                  class="flex-1 py-2 rounded-lg text-sm font-medium transition">
+            Pro &mdash; BYOK
+          </button>
+        </div>
+        <!-- Loading skeleton -->
+        <div x-show="calcLoading" class="animate-pulse space-y-3">
+          <div class="bg-gray-100 rounded-xl h-24"></div>
+          <div class="grid sm:grid-cols-2 gap-3"><div class="bg-gray-100 rounded-xl h-20"></div><div class="bg-gray-100 rounded-xl h-20"></div></div>
+        </div>
+        <!-- Results -->
+        <div x-show="calcResult && !calcLoading" class="space-y-3">
+          <div class="bg-blue-50 border border-blue-200 rounded-xl p-5">
+            <div class="flex justify-between items-start">
+              <div>
+                <div class="text-sm font-medium text-blue-700"
+                     x-text="calcPlan === 'mcp' ? 'VoiceFlow MCP (Managed Cloud)' : 'VoiceFlow Pro (BYOK)'"></div>
+                <div class="text-4xl font-bold text-blue-900 mt-1"
+                     x-text="'\u20b9' + Number(calcPlan === 'mcp'
+                       ? calcResult?.plans?.voiceflow_mcp?.monthly_inr
+                       : calcResult?.plans?.voiceflow_pro?.monthly_inr
+                     ).toLocaleString('en-IN')"></div>
+                <div class="text-xs text-blue-500 mt-1">per month</div>
+                <div x-show="calcPlan==='mcp'" class="mt-2 inline-flex items-center gap-1 px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-[11px] font-medium">
+                  &#10003; First 30 days free (pilot plan)
+                </div>
+                <div x-show="calcPlan==='pro'" class="mt-2 text-xs text-gray-400">
+                  + you pay your own providers (~\u20b91.85/min)
+                </div>
+              </div>
+              <div class="text-right text-xs text-gray-400 space-y-1">
+                <div x-text="(calcResult?.totals?.total_calls_month || 0).toLocaleString() + ' calls / month'"></div>
+                <div x-text="(calcResult?.totals?.total_minutes_month || 0).toLocaleString() + ' minutes'"></div>
+                <div x-text="'\u20b9' + (calcPlan==='mcp' ? calcResult?.plans?.voiceflow_mcp?.rate_per_min_inr : calcResult?.plans?.voiceflow_pro?.rate_per_min_inr) + '/min'"></div>
+              </div>
+            </div>
+          </div>
+          <!-- Competitor comparison -->
+          <div class="grid sm:grid-cols-2 gap-3">
+            <div class="bg-gray-50 border rounded-xl p-4 text-center">
+              <div class="text-xs text-gray-400 mb-1">vs Bolna (\u20b97/min)</div>
+              <div class="text-xl font-bold text-gray-700"
+                   x-text="'\u20b9' + Number(calcResult?.competitors?.bolna?.monthly_inr).toLocaleString('en-IN')"></div>
+              <div class="text-xs text-green-600 font-medium mt-1"
+                   x-text="'You save \u20b9' + Number(calcResult?.savings_vs_bolna_inr || 0).toLocaleString('en-IN')"></div>
+            </div>
+            <div class="bg-gray-50 border rounded-xl p-4 text-center">
+              <div class="text-xs text-gray-400 mb-1">vs Retell (~\u20b919/min)</div>
+              <div class="text-xl font-bold text-gray-700"
+                   x-text="'\u20b9' + Number(calcResult?.competitors?.retell?.monthly_inr).toLocaleString('en-IN')"></div>
+              <div class="text-xs text-green-600 font-medium mt-1"
+                   x-text="'You save \u20b9' + Number(calcResult?.savings_vs_retell_inr || 0).toLocaleString('en-IN')"></div>
+            </div>
+          </div>
+          <p class="text-[11px] text-gray-400">Estimates based on live platform rates. Actual bill depends on call volume. MCP pilot: first 30 days free.</p>
+        </div>
+        <!-- Error state -->
+        <div x-show="!calcResult && !calcLoading" class="p-4 bg-yellow-50 border border-yellow-200 rounded-xl text-sm text-yellow-700">
+          Could not load live rates. You can continue — rates are shown on the billing page after deployment.
+        </div>
+      </div>
+
+      <!-- Step 9: Test &amp; Deploy (was Step 8) -->
+      <div x-show="step===9" x-transition>
         <h2 class="text-2xl font-bold mb-2">Test your agent</h2>
         <p class="text-gray-500 text-sm mb-6">Try a quick conversation — type or talk.</p>
         <div class="bg-white border rounded-xl p-6 mb-4 relative">
@@ -251,7 +342,7 @@
       <div class="flex justify-between mt-8">
         <button x-show="step>1" @click="step--" class="px-6 py-2.5 border rounded-lg text-sm hover:bg-gray-50">Back</button>
         <div x-show="step<=1"></div>
-        <button x-show="step<8" @click="nextStep()" :disabled="saving" class="px-6 py-2.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50 ml-auto" x-text="saving ? 'Saving…' : 'Continue'"></button>
+        <button x-show="step<9" @click="nextStep()" :disabled="saving" class="px-6 py-2.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50 ml-auto" x-text="saving ? 'Saving\u2026' : 'Continue'"></button>
       </div>
     </div>
   </div>
@@ -261,7 +352,7 @@
 function onboardingApp() {
   return {
     step: 1,
-    stepLabels: ['LLM','Company','Template','Config','Knowledge','Voice','Channels','Test'],
+    stepLabels: ['LLM','Company','Template','Config','Knowledge','Voice','Channels','Cost','Test'],
     saving: false, deploying: false,
 
     // Step 1: LLM Provider
@@ -284,10 +375,30 @@ function onboardingApp() {
     selectedVoice: '',
     channels: {web:true, phone:false, whatsapp:false, api:false},
     twilioConfig: {accountSid:'', authToken:'', phoneNumber:''},
+    // Step 8: Cost Calculator
+    calcCallsPerDay: 50,
+    calcAvgMins: 2,
+    calcPlan: 'mcp',
+    calcResult: null,
+    calcLoading: false,
     testMessages: [], testInput: '',
     testVoiceMode: false, testRecording: false, testTyping: false,
     testMediaRecorder: null, testAudioChunks: [],
     createdAgentId: null,
+
+    async fetchCalcEstimate() {
+      this.calcLoading = true;
+      try {
+        const params = new URLSearchParams({
+          calls_per_day: this.calcCallsPerDay || 50,
+          avg_duration_seconds: Math.round((this.calcAvgMins || 2) * 60),
+          plan_type: this.calcPlan,
+        });
+        const r = await fetch('/api/billing/calculator/?' + params.toString());
+        this.calcResult = await r.json();
+      } catch { /* leave calcResult null — error state shown in template */ }
+      this.calcLoading = false;
+    },
 
     async validateApiKey() {
       if (!this.llmApiKey.trim()) return;

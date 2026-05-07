@@ -386,6 +386,13 @@ class BackendClient:
     def get_usage_stats(self):
         return self._get("/analytics/usage")
 
+    def billing_calculator(self, calls_per_day: float = 50, avg_duration_seconds: float = 120, plan_type: str = "mcp"):
+        return self._get("/api/billing/calculator", params={
+            "calls_per_day": calls_per_day,
+            "avg_duration_seconds": avg_duration_seconds,
+            "plan_type": plan_type,
+        })
+
     # ── Pipelines ──────────────────────────────────────────────────────
     def list_pipelines(self):
         return self._get("/admin/pipelines")

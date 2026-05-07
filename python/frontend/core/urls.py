@@ -115,6 +115,7 @@ urlpatterns = [
     path("api/system/metrics/", api_proxy.system_metrics, name="api_system_metrics"),
     path("api/users/", api_proxy.users_api, name="api_users"),
     path("api/billing/usage/", api_proxy.billing_usage, name="api_billing_usage"),
+    path("api/billing/calculator/", api_proxy.billing_calculator, name="api_billing_calculator"),
     path("api/pipelines/", api_proxy.pipelines_api, name="api_pipelines"),
     path("api/pipelines/trigger/", api_proxy.pipeline_trigger, name="api_pipeline_trigger"),
     path("api/reports/", api_proxy.reports_api, name="api_reports"),

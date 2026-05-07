@@ -31,11 +31,27 @@ _JSON_CODE_BLOCK_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 _XML_TAG_RE = re.compile(r"<[^>]+>")
 
 
+# Detect LLM refusal phrases so we can rephrase gracefully for the caller.
+_REFUSAL_RE = re.compile(
+    r"\bI(?:'m| am) (?:not able|unable) to\b|\bI cannot\b|\bI can't\b"
+    r"|\bcannot assist\b|\bnot something I can\b",
+    re.I,
+)
+
+
 def _sanitize_for_twiml(text: str) -> str:
-    """Remove XML/SSML tags and escape special chars to prevent TwiML injection."""
+    """Remove XML/SSML tags, escape special chars, and guard against TwiML injection."""
     text = _XML_TAG_RE.sub("", text)
     text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    return text.strip() or "I'm sorry, I couldn't generate a response."
+    text = text.strip()
+    # Leaked JSON (LLM returned a tool-call object instead of prose)
+    if text.startswith("{") and text.endswith("}"):
+        return "Could you please repeat that? I want to make sure I give you the right information."
+    # LLM refusal — rephrase as a graceful deflection rather than reading it aloud
+    if _REFUSAL_RE.search(text):
+        return ("That's a bit outside what I can help with on this call. "
+                "Let me connect you with someone who can assist. One moment.")
+    return text or "I'm sorry, I couldn't process that."
 
 logger = logging.getLogger("voiceflow.gather")
 router = APIRouter()
@@ -234,25 +250,22 @@ async def voice_gather(
 
     call_start = datetime.now(timezone.utc)
     answer = "I encountered an error processing your request."
-    try:
+
+    async def _rag_with_tools() -> str:
+        """Run the full RAG + optional tool-use pipeline. Exceptions propagate to caller."""
         rag_result = await process_query(
             db, agent.tenantId, agent_id, effective_query, f"call-{call_sid}",
             tools=tools_spec if tools_spec else None,
         )
-
-        # Handle mid-call tool call (function calling)
         if rag_result.get("tool_call"):
             tc = rag_result["tool_call"]
             tool_name = tc.get("tool_name", "")
             tool_args = tc.get("tool_arguments", {})
             logger.info("[voice_tools] mid-call tool=%s args=%s", tool_name, tool_args)
-
             tool_def = TOOL_REGISTRY.get(tool_name)
             tool_result: dict = {"error": f"Unknown tool: {tool_name}"}
             if tool_def:
                 tool_result = await voice_tool_executor.execute(tool_def, tool_args, agent_integrations)
-
-            # Follow-up Groq call with tool result injected
             import json as _json
             tool_result_str = _json.dumps(tool_result, default=str)
             follow_up = await process_query(
@@ -260,9 +273,19 @@ async def voice_gather(
                 f"[Tool '{tool_name}' returned]: {tool_result_str}\nNow answer the caller naturally based on this result.",
                 f"call-{call_sid}",
             )
-            answer = follow_up.get("response") or "Done."
-        else:
-            answer = rag_result.get("response") or "I'm not sure how to answer that."
+            return follow_up.get("response") or "Done."
+        return rag_result.get("response") or "I'm not sure how to answer that."
+
+    try:
+        # 6-second hard timeout — if LLM is slow the caller hears dead air.
+        # On timeout we return a filler phrase and re-Gather so the conversation continues.
+        answer = await asyncio.wait_for(_rag_with_tools(), timeout=6.0)
+    except asyncio.TimeoutError:
+        logger.warning(
+            "[gather] LLM timeout >6s for agent=%s call=%s — returning filler",
+            agent_id, call_sid,
+        )
+        answer = "I'm still looking that up — give me just one moment."
     except Exception:
         logger.exception("RAG pipeline failed during voice call")
 
