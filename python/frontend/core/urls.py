@@ -17,6 +17,9 @@ urlpatterns = [
 
     # Dashboard
     path("dashboard/", dashboard.index, name="dashboard"),
+    # IMPORTANT: static agent sub-paths must come BEFORE the generic <str:agent_id>/ catch-all
+    path("dashboard/agents/builder/", pages.agent_builder, name="agent_builder"),
+    path("dashboard/agents/create/", pages.agent_creator, name="agent_creator"),
     path("dashboard/agents/<str:agent_id>/", dashboard.agent_detail, name="agent_detail"),
     path("dashboard/agents/<str:agent_id>/chat/", chat.agent_chat, name="agent_chat"),
     path("dashboard/voice-agent/", chat.voice_agent, name="voice_agent"),
@@ -44,9 +47,6 @@ urlpatterns = [
     path("dashboard/ab-testing/", pages.ab_testing, name="ab_testing"),
     path("dashboard/whatsapp/", pages.whatsapp, name="whatsapp"),
     path("dashboard/dnd/", pages.dnd_registry, name="dnd_registry"),
-    path("dashboard/agents/builder/", pages.agent_builder, name="agent_builder"),
-    path("dashboard/agents/create/", pages.agent_creator, name="agent_creator"),
-
     # ── Architecture Bible pages ─────────────────────────────────────────
     path("dashboard/ivr/", pages.ivr, name="ivr"),
     path("dashboard/recordings/", pages.recordings, name="recordings"),
