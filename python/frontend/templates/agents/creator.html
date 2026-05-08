@@ -8,14 +8,55 @@
   <div class="flex items-center justify-between mb-8">
     <div>
       <h1 class="text-3xl font-bold vf-heading">Create Agent</h1>
-      <p class="text-slate-500 text-sm mt-1">Describe your agent in plain language — we handle the rest.</p>
+      <p class="text-slate-500 text-sm mt-1" x-text="mode === null ? 'Choose how you want to build your agent.' : mode === 'prompt' ? 'Describe your agent in plain language — we handle the rest.' : 'Design your agent as a visual workflow.'"></p>
     </div>
     <a href="/dashboard/agents/" class="text-sm text-slate-500 hover:text-teal-600 transition flex items-center gap-1">
       ← Back to Agents
     </a>
   </div>
 
-  <!-- ── Step progress bar ── -->
+  <!-- ══════════════════════════════════════════════════════════
+       METHOD SELECTION SCREEN (shown when mode === null)
+  ══════════════════════════════════════════════════════════ -->
+  <div x-show="mode === null" x-transition class="grid md:grid-cols-2 gap-6 mt-4">
+
+    <!-- Option A: Prompt to Agent -->
+    <button @click="mode = 'prompt'"
+            class="group vf-card p-8 text-left hover:border-teal-400 hover:shadow-lg transition-all duration-200 cursor-pointer border-2 border-transparent">
+      <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-teal-500 to-cyan-600 flex items-center justify-center text-2xl mb-5 shadow-lg shadow-teal-200 group-hover:scale-105 transition-transform">
+        ✨
+      </div>
+      <h2 class="text-xl font-bold text-slate-800 mb-2">Prompt to Agent</h2>
+      <p class="text-slate-500 text-sm leading-relaxed mb-4">
+        Describe your agent in plain English. Our AI generates the complete configuration — system prompt, knowledge structure, voice, personas, and test suite.
+      </p>
+      <div class="flex flex-wrap gap-2">
+        <span class="px-2 py-0.5 bg-teal-50 border border-teal-200 text-teal-700 text-xs rounded-full font-medium">AI-generated</span>
+        <span class="px-2 py-0.5 bg-teal-50 border border-teal-200 text-teal-700 text-xs rounded-full font-medium">5-step wizard</span>
+        <span class="px-2 py-0.5 bg-teal-50 border border-teal-200 text-teal-700 text-xs rounded-full font-medium">Recommended</span>
+      </div>
+    </button>
+
+    <!-- Option B: Visual Flow Builder -->
+    <button @click="window.location='/dashboard/agents/builder/'"
+            class="group vf-card p-8 text-left hover:border-violet-400 hover:shadow-lg transition-all duration-200 cursor-pointer border-2 border-transparent">
+      <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center text-2xl mb-5 shadow-lg shadow-violet-200 group-hover:scale-105 transition-transform">
+        🔀
+      </div>
+      <h2 class="text-xl font-bold text-slate-800 mb-2">Visual Flow Builder</h2>
+      <p class="text-slate-500 text-sm leading-relaxed mb-4">
+        Design your agent's conversation flow with drag-and-drop nodes — greeting, conditions, knowledge lookups, API calls, and transfers. Full control over every step.
+      </p>
+      <div class="flex flex-wrap gap-2">
+        <span class="px-2 py-0.5 bg-violet-50 border border-violet-200 text-violet-700 text-xs rounded-full font-medium">Drag & drop</span>
+        <span class="px-2 py-0.5 bg-violet-50 border border-violet-200 text-violet-700 text-xs rounded-full font-medium">Visual canvas</span>
+        <span class="px-2 py-0.5 bg-violet-50 border border-violet-200 text-violet-700 text-xs rounded-full font-medium">n8n-style</span>
+      </div>
+    </button>
+  </div>
+
+  <!-- ── Step progress bar (only shown in prompt mode) ── -->
+  <div x-show="mode === 'prompt'" x-transition>
   <div class="flex items-center gap-0 mb-10">
     <template x-for="(label, i) in steps" :key="i">
       <div class="flex items-center flex-1">
@@ -487,7 +528,7 @@
          class="px-8 py-3 bg-gradient-to-r from-teal-600 to-cyan-600 text-white font-semibold rounded-xl hover:shadow-lg transition">
         Open Agent Dashboard →
       </a>
-      <a :href="'/dashboard/agents/' + createdAgentId + '/builder/'"
+      <a :href="'/dashboard/agents/' + createdAgentId + '/workflow/'"
          class="px-6 py-3 border border-slate-200 text-slate-600 font-medium rounded-xl hover:bg-slate-50 transition">
         Open Flow Builder
       </a>
@@ -498,12 +539,14 @@
     </div>
   </div>
 
+  </div><!-- end x-show="mode==='prompt'" -->
 </div>
 
 <script>
 function agentCreator() {
   return {
     // ── State ──
+    mode: null,  // null = choose, 'prompt' = wizard, 'builder' = redirect
     step: 0,
     steps: ['Describe', 'Sections', 'Voice', 'Variables', 'Done'],
     prompt: '',

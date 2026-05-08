@@ -59,6 +59,23 @@ def agent_detail_api(request, agent_id):
 
 
 @login_required
+@require_http_methods(["GET", "POST"])
+def agent_flow_api(request, agent_id):
+    """Get or save the visual flow definition for an agent."""
+    client = get_client(request)
+    if request.method == "POST":
+        try:
+            result = client._post(f"agents/{agent_id}/flow", json=_json_body(request))
+            return JsonResponse(result)
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=400)
+    try:
+        return JsonResponse(client._get(f"agents/{agent_id}/flow"))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
 @require_http_methods(["POST"])
 def agent_activate(request, agent_id):
     try:

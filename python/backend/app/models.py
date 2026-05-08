@@ -168,6 +168,8 @@ class Agent(Base):
     # [{utterance, expected_intent, expected_keywords, must_not_contain, persona}]
     deployment_readiness_score: Mapped[Optional[int]] = mapped_column("deploymentReadinessScore", Integer, nullable=True)
     version_number: Mapped[int] = mapped_column("versionNumber", Integer, default=1)
+    # Visual flow builder — {nodes: [...], edges: [...]}
+    flow_definition: Mapped[Optional[Any]] = mapped_column("flowDefinition", JSON, nullable=True)
     # ─────────────────────────────────────────────────────────────────────────
     createdAt: Mapped[datetime] = mapped_column("createdAt", DateTime(timezone=True), server_default=func.now())
     updatedAt: Mapped[datetime] = mapped_column("updatedAt", DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

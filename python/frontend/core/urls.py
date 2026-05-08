@@ -20,6 +20,7 @@ urlpatterns = [
     # IMPORTANT: static agent sub-paths must come BEFORE the generic <str:agent_id>/ catch-all
     path("dashboard/agents/builder/", pages.agent_builder, name="agent_builder"),
     path("dashboard/agents/create/", pages.agent_creator, name="agent_creator"),
+    path("dashboard/agents/<str:agent_id>/workflow/", pages.agent_workflow, name="agent_workflow"),
     path("dashboard/agents/<str:agent_id>/", dashboard.agent_detail, name="agent_detail"),
     path("dashboard/agents/<str:agent_id>/chat/", chat.agent_chat, name="agent_chat"),
     path("dashboard/voice-agent/", chat.voice_agent, name="voice_agent"),
@@ -55,6 +56,7 @@ urlpatterns = [
 
     # API proxy endpoints (for HTMX / JS calls from the browser)
     path("api/agents/", api_proxy.agents_list, name="api_agents"),
+    path("api/agents/<str:agent_id>/flow/", api_proxy.agent_flow_api, name="api_agent_flow"),
     path("api/agents/<str:agent_id>/", api_proxy.agent_detail_api, name="api_agent_detail"),
     path("api/agents/<str:agent_id>/activate/", api_proxy.agent_activate, name="api_agent_activate"),
     path("api/agents/<str:agent_id>/pause/", api_proxy.agent_pause, name="api_agent_pause"),

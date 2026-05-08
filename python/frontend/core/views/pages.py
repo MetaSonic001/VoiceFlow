@@ -306,8 +306,14 @@ def agent_builder(request):
 
 @login_required
 def agent_creator(request):
-    """Prompt-to-Agent 5-step wizard."""
+    """Agent creation landing: choose Prompt-to-Agent or Visual Flow Builder."""
     return render(request, "agents/creator.html", {})
+
+
+@login_required
+def agent_workflow(request, agent_id):
+    """Full-screen workflow editor for an existing agent."""
+    return render(request, "agents/builder.html", {"agent_id": agent_id, "fullscreen": True})
 
 
 # ── New pages added in Architecture Bible ─────────────────────────────

@@ -1,340 +1,549 @@
 {% extends "base_dashboard.html" %}
 {% block title %}Flow Builder — VoiceFlow AI{% endblock %}
 {% block extra_head %}
-<!-- Mermaid.js for flow visualization -->
-<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.0/dist/mermaid.min.js"></script>
+<style>
+  /* ── Canvas ── */
+  #vf-canvas {
+    position: relative;
+    width: 100%;
+    min-height: 600px;
+    background-color: #f8fafc;
+    background-image: radial-gradient(circle, #cbd5e1 1px, transparent 1px);
+    background-size: 24px 24px;
+    overflow: hidden;
+    border-radius: 0.75rem;
+    border: 1px solid #e2e8f0;
+    cursor: default;
+    user-select: none;
+  }
+  #vf-canvas.canvas-panning { cursor: grabbing; }
+  #vf-svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+  .vf-node {
+    position: absolute; width: 160px; min-height: 56px;
+    border-radius: 10px; padding: 10px 14px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.08);
+    border: 2px solid transparent; cursor: grab; background: white;
+    transition: box-shadow .15s, border-color .15s; z-index: 10;
+  }
+  .vf-node:active { cursor: grabbing; box-shadow: 0 8px 24px rgba(0,0,0,.15); }
+  .vf-node.selected { border-color: #14b8a6; box-shadow: 0 0 0 3px rgba(20,184,166,.2); z-index: 20; }
+  .vf-node-start    { background: linear-gradient(135deg,#0f766e,#0891b2); color:white; }
+  .vf-node-greeting { background:#eff6ff; border-color:#93c5fd; }
+  .vf-node-knowledge{ background:#f5f3ff; border-color:#c4b5fd; }
+  .vf-node-condition{ background:#fffbeb; border-color:#fcd34d; }
+  .vf-node-api_call { background:#fff7ed; border-color:#fdba74; }
+  .vf-node-human_transfer { background:#fff1f2; border-color:#fca5a5; }
+  .vf-node-end      { background:#f1f5f9; border-color:#94a3b8; }
+  .vf-port-out {
+    position: absolute; right: -9px; top: 50%; transform: translateY(-50%);
+    width: 16px; height: 16px; border-radius: 50%;
+    background: white; border: 2px solid #14b8a6; cursor: crosshair; z-index: 30;
+    transition: transform .1s, background .1s;
+  }
+  .vf-port-out:hover { background: #14b8a6; transform: translateY(-50%) scale(1.3); }
+  .vf-port-in {
+    position: absolute; left: -9px; top: 50%; transform: translateY(-50%);
+    width: 16px; height: 16px; border-radius: 50%;
+    background: white; border: 2px solid #64748b; z-index: 30;
+  }
+  .vf-connector { stroke:#14b8a6; stroke-width:2; fill:none; marker-end:url(#arrowhead); }
+  .vf-connector-draft { stroke:#94a3b8; stroke-width:1.5; stroke-dasharray:5; fill:none; }
+  .vf-palette-btn {
+    display:flex; align-items:center; gap:8px; padding:8px 12px;
+    border-radius:8px; border:1px solid #e2e8f0; background:white; cursor:pointer;
+    font-size:12px; font-weight:500; color:#374151;
+    transition: border-color .15s, background .15s, color .15s; user-select:none;
+  }
+  .vf-palette-btn:hover { border-color:#14b8a6; background:#f0fdfa; color:#0f766e; }
+</style>
 {% endblock %}
 
 {% block content %}
 <div x-data="flowBuilder()" x-init="init()">
 
-  <!-- Header -->
-  <div class="flex items-center justify-between mb-6">
-    <div>
-      <h1 class="text-3xl font-bold vf-heading">Visual Flow Builder</h1>
-      <p class="text-slate-500 text-sm mt-1">
-        Design your agent's conversation flow visually.
-        <span class="font-medium text-teal-600" x-text="agentName ? 'Agent: ' + agentName : ''"></span>
-      </p>
+  <!-- ── Header ── -->
+  <div class="flex items-center justify-between mb-4">
+    <div class="flex items-center gap-3">
+      {% if agent_id %}
+      <a href="{% url 'agent_detail' agent_id %}" class="text-gray-400 hover:text-gray-600 transition">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+        </svg>
+      </a>
+      {% else %}
+      <a href="/dashboard/agents/" class="text-gray-400 hover:text-gray-600 transition">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+        </svg>
+      </a>
+      {% endif %}
+      <div>
+        <h1 class="text-2xl font-bold vf-heading" x-text="agentId ? (agentName || 'Flow Builder') : 'New Agent Flow'"></h1>
+        <p class="text-slate-500 text-xs mt-0.5" x-text="agentId ? 'Editing workflow — drag nodes, connect ports, save when done.' : 'New agent — design the flow, enter a name, then save.'"></p>
+      </div>
     </div>
-    <div class="flex gap-3">
-      <button @click="addNode('greeting')"
-              class="px-3 py-2 text-xs border border-slate-200 rounded-lg hover:bg-slate-50 transition">
-        + Greeting
+    <div class="flex gap-2 items-center">
+      <button x-show="agentId && nodes.length === 0" @click="generateFromAgent()"
+              class="px-3 py-1.5 text-xs border border-violet-300 text-violet-700 rounded-lg hover:bg-violet-50 transition">
+        🪄 Auto-generate
       </button>
-      <button @click="addNode('knowledge')"
-              class="px-3 py-2 text-xs border border-slate-200 rounded-lg hover:bg-slate-50 transition">
-        + Knowledge
+      <button @click="showMermaid = !showMermaid"
+              :class="showMermaid ? 'bg-slate-100' : ''"
+              class="px-3 py-1.5 text-xs border border-slate-200 rounded-lg hover:bg-slate-50 transition">
+        🗺 Flow Map
       </button>
-      <button @click="addNode('condition')"
-              class="px-3 py-2 text-xs border border-slate-200 rounded-lg hover:bg-slate-50 transition">
-        + Condition
-      </button>
-      <button @click="addNode('api_call')"
-              class="px-3 py-2 text-xs border border-slate-200 rounded-lg hover:bg-slate-50 transition">
-        + API Call
-      </button>
-      <button @click="addNode('human_transfer')"
-              class="px-3 py-2 text-xs border border-slate-200 rounded-lg hover:bg-slate-50 transition">
-        + Transfer
-      </button>
-      <button @click="saveFlow()"
-              class="px-5 py-2 bg-gradient-to-r from-teal-600 to-cyan-600 text-white text-sm font-medium rounded-lg hover:shadow-lg transition-all">
-        💾 Save Flow
+      <button @click="saveFlow()" :disabled="saving"
+              class="px-5 py-2 bg-gradient-to-r from-teal-600 to-cyan-600 text-white text-sm font-medium rounded-lg hover:shadow-lg transition-all disabled:opacity-50">
+        <span x-text="saving ? 'Saving…' : '💾 Save Flow'"></span>
       </button>
     </div>
   </div>
 
-  <!-- Main layout: palette | canvas | inspector -->
-  <div class="grid grid-cols-1 xl:grid-cols-[200px_1fr_260px] gap-4">
+  <!-- Save feedback -->
+  <div x-show="saveMsg" x-transition
+       :class="saveOk ? 'bg-teal-50 border-teal-300 text-teal-700' : 'bg-red-50 border-red-300 text-red-700'"
+       class="mb-3 px-4 py-2 border rounded-lg text-sm flex items-center gap-2">
+    <span x-text="saveOk ? '✓' : '✕'"></span><span x-text="saveMsg"></span>
+  </div>
 
-    <!-- Node Palette -->
-    <div class="vf-card p-4 flex flex-col gap-2">
-      <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Nodes</p>
+  <!-- Mermaid map -->
+  <div x-show="showMermaid" x-transition class="vf-card p-4 mb-4">
+    <div class="flex items-center justify-between mb-2">
+      <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Flow Map</p>
+      <button @click="renderMermaid()" class="text-xs text-teal-600 hover:underline">Refresh</button>
+    </div>
+    <div id="vf-mermaid" class="overflow-x-auto text-center min-h-[120px]">
+      <p class="text-slate-400 text-xs py-6">Click Refresh to render the flow diagram.</p>
+    </div>
+  </div>
+
+  <!-- ── Main layout ── -->
+  <div class="flex gap-4">
+
+    <!-- Palette -->
+    <div class="vf-card p-4 flex flex-col gap-2" style="width:176px;flex-shrink:0;">
+      <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Add Nodes</p>
       <template x-for="type in nodeTypes" :key="type.id">
-        <button
-          draggable="true"
-          @dragstart="dragType=$event.dataTransfer.setData('nodeType', type.id) || type.id; dragType=type.id"
-          @click="addNode(type.id)"
-          class="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium border border-slate-200 hover:border-teal-300 hover:bg-teal-50 transition cursor-grab active:cursor-grabbing"
-        >
+        <button class="vf-palette-btn" @click="addNodeCentered(type.id)">
           <span x-text="type.icon" class="text-base"></span>
-          <span x-text="type.label" class="text-slate-700"></span>
+          <span x-text="type.label"></span>
         </button>
       </template>
+      <hr class="border-slate-100 my-1">
+      <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">View</p>
+      <button class="vf-palette-btn" @click="zoom = Math.min(zoom+0.15, 2)">🔍 Zoom In</button>
+      <button class="vf-palette-btn" @click="zoom = Math.max(zoom-0.15, 0.3)">🔎 Zoom Out</button>
+      <button class="vf-palette-btn" @click="fitView()">⊞ Fit All</button>
+      <button class="vf-palette-btn" @click="resetView()">↺ Reset</button>
     </div>
 
-    <!-- Canvas + Preview -->
-    <div class="flex flex-col gap-4">
+    <!-- Canvas -->
+    <div class="flex-1 flex flex-col">
+      <div id="vf-canvas" :style="`height:${canvasH}px`"
+           @mousedown="canvasMouseDown($event)"
+           @mousemove="canvasMouseMove($event)"
+           @mouseup="canvasMouseUp($event)"
+           @mouseleave="canvasMouseUp($event)"
+           @wheel.prevent="canvasWheel($event)">
 
-      <!-- Mermaid preview -->
-      <div class="vf-card p-4">
-        <div class="flex items-center justify-between mb-3">
-          <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Flow Preview</p>
-          <button @click="renderDiagram()" class="text-xs text-teal-600 hover:underline">Refresh</button>
-        </div>
-        <div id="mermaid-diagram" class="overflow-x-auto text-center min-h-[160px]">
-          <p class="text-slate-400 text-xs py-8">Add nodes to see the flow diagram.</p>
-        </div>
-      </div>
+        <!-- World (pan+zoom) -->
+        <div id="vf-world"
+             :style="`transform:translate(${panX}px,${panY}px) scale(${zoom});transform-origin:0 0;position:absolute;top:0;left:0;width:${worldW}px;height:${worldH}px;`">
 
-      <!-- Node list -->
-      <div class="vf-card p-4">
-        <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Flow Nodes</p>
-        <template x-if="nodes.length === 0">
-          <p class="text-slate-400 text-xs text-center py-4">No nodes yet. Add nodes from the palette.</p>
-        </template>
-        <div class="space-y-2">
-          <template x-for="(node, idx) in nodes" :key="node.id">
-            <div
-              class="flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition"
-              :class="selected && selected.id===node.id ? 'border-teal-400 bg-teal-50' : 'border-slate-200 hover:border-slate-300'"
-              @click="selected=node"
-            >
-              <span x-text="nodeTypeMap[node.type]?.icon || '⬜'" class="text-lg"></span>
-              <div class="flex-1 min-w-0">
-                <p class="text-sm font-medium text-slate-800 truncate" x-text="node.label || node.id"></p>
-                <p class="text-xs text-slate-500 truncate" x-text="node.type"></p>
+          <!-- SVG connectors -->
+          <svg id="vf-svg" :style="`width:${worldW}px;height:${worldH}px;`">
+            <defs>
+              <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+                <polygon points="0 0,8 3,0 6" fill="#14b8a6"/>
+              </marker>
+            </defs>
+            <template x-for="edge in edges" :key="edge.from+'-'+edge.to">
+              <path :d="edgePath(edge)" class="vf-connector"/>
+            </template>
+            <path x-show="draftEdge" :d="draftPath()" class="vf-connector-draft"/>
+          </svg>
+
+          <!-- Nodes -->
+          <template x-for="node in nodes" :key="node.id">
+            <div :id="'node-'+node.id"
+                 :style="`left:${node.x}px;top:${node.y}px`"
+                 :class="'vf-node vf-node-'+node.type+(selected&&selected.id===node.id?' selected':'')"
+                 @mousedown.stop="nodeMouseDown($event,node)"
+                 @click.stop="selected=node">
+              <div x-show="node.type!=='start'" class="vf-port-in" @mouseup.stop="portMouseUp(node)"></div>
+              <div class="flex items-center gap-2">
+                <span x-text="typeMap[node.type]?.icon||'⬜'" class="text-base leading-none"></span>
+                <span class="text-xs font-semibold truncate" x-text="node.label||node.id"></span>
               </div>
-              <div class="flex gap-1">
-                <!-- Move up -->
-                <button @click.stop="moveNode(idx, -1)" :disabled="idx===0"
-                        class="p-1 rounded hover:bg-slate-100 disabled:opacity-30 text-xs">↑</button>
-                <!-- Move down -->
-                <button @click.stop="moveNode(idx, 1)" :disabled="idx===nodes.length-1"
-                        class="p-1 rounded hover:bg-slate-100 disabled:opacity-30 text-xs">↓</button>
-                <!-- Delete -->
-                <button @click.stop="removeNode(node.id)"
-                        class="p-1 rounded hover:bg-red-50 text-red-400 text-xs">✕</button>
-              </div>
+              <div x-show="node.text" class="text-[10px] mt-0.5 opacity-60 truncate" x-text="node.text"></div>
+              <div x-show="node.type!=='end'" class="vf-port-out" @mousedown.stop="portMouseDown($event,node)"></div>
+              <button x-show="selected&&selected.id===node.id&&node.type!=='start'"
+                      @click.stop="removeNode(node.id)"
+                      style="position:absolute;top:-8px;right:-8px;width:18px;height:18px;border-radius:50%;background:#ef4444;color:white;font-size:10px;display:flex;align-items:center;justify-content:center;border:none;cursor:pointer;z-index:40;">✕</button>
             </div>
           </template>
         </div>
+
+        <!-- Empty state -->
+        <div x-show="nodes.length===0&&!loading" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;">
+          <div style="font-size:3rem;margin-bottom:.75rem;">🔀</div>
+          <p class="text-sm text-slate-400 font-medium">Click any node type in the palette to start</p>
+          <p x-show="agentId" class="text-xs text-slate-400 mt-1">or click "Auto-generate" above to scaffold from your agent</p>
+        </div>
+        <div x-show="loading" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.7);pointer-events:none;">
+          <div class="text-3xl text-teal-600 animate-spin">⟳</div>
+        </div>
+      </div>
+
+      <!-- Canvas controls -->
+      <div class="flex items-center gap-3 mt-1.5 text-xs text-slate-400">
+        <span>Zoom: <strong x-text="Math.round(zoom*100)+'%'"></strong></span>
+        <span>|</span>
+        <button @click="canvasH=Math.max(canvasH-100,300)" class="hover:text-slate-600">− height</button>
+        <button @click="canvasH+=100" class="hover:text-slate-600">+ height</button>
+        <span>|</span>
+        <span x-text="nodes.length+' nodes, '+edges.length+' connections'"></span>
       </div>
     </div>
 
-    <!-- Inspector Panel -->
-    <div class="vf-card p-4">
-      <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Inspector</p>
+    <!-- Inspector -->
+    <div class="vf-card p-4 flex flex-col gap-3" style="width:260px;flex-shrink:0;">
+      <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Inspector</p>
+
       <template x-if="!selected">
-        <p class="text-slate-400 text-xs text-center py-4">Select a node to edit its properties.</p>
+        <p class="text-slate-400 text-xs text-center py-8">Click a node to edit its properties.</p>
       </template>
+
       <template x-if="selected">
         <div class="space-y-3">
           <div>
-            <label class="block text-xs font-medium text-slate-600 mb-1">Node ID</label>
-            <input x-model="selected.id" readonly
-                   class="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg bg-slate-50 text-slate-500">
-          </div>
-          <div>
             <label class="block text-xs font-medium text-slate-600 mb-1">Label</label>
-            <input x-model="selected.label" @input="renderDiagram()"
-                   class="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400 outline-none">
+            <input x-model="selected.label" class="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400 outline-none">
           </div>
           <div>
             <label class="block text-xs font-medium text-slate-600 mb-1">Type</label>
-            <select x-model="selected.type" @change="renderDiagram()"
-                    class="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400 outline-none">
+            <select x-model="selected.type" class="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400 outline-none">
               <template x-for="t in nodeTypes" :key="t.id">
                 <option :value="t.id" x-text="t.label"></option>
               </template>
             </select>
           </div>
-          <!-- Type-specific fields -->
-          <template x-if="selected.type==='greeting' || selected.type==='end'">
+
+          <template x-if="['greeting','end','knowledge'].includes(selected.type)">
             <div>
-              <label class="block text-xs font-medium text-slate-600 mb-1">Text</label>
-              <textarea x-model="selected.text" rows="3"
-                        class="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400 outline-none resize-none"></textarea>
+              <label class="block text-xs font-medium text-slate-600 mb-1">Message / Prompt</label>
+              <textarea x-model="selected.text" rows="3" class="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400 outline-none resize-none"></textarea>
             </div>
           </template>
           <template x-if="selected.type==='condition'">
-            <div>
-              <label class="block text-xs font-medium text-slate-600 mb-1">Match Field</label>
-              <input x-model="selected.field" placeholder="e.g. intent"
-                     class="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400 outline-none">
+            <div class="space-y-2">
+              <div>
+                <label class="block text-xs font-medium text-slate-600 mb-1">Condition</label>
+                <input x-model="selected.field" placeholder="e.g. intent === 'book'" class="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400 outline-none">
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-slate-600 mb-1">Yes → Node</label>
+                <select x-model="selected.yesId" @change="rebuildEdges()" class="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400 outline-none">
+                  <option value="">— none —</option>
+                  <template x-for="n in nodes.filter(n=>n.id!==selected.id)" :key="n.id"><option :value="n.id" x-text="n.label||n.id"></option></template>
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-slate-600 mb-1">No → Node</label>
+                <select x-model="selected.noId" @change="rebuildEdges()" class="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400 outline-none">
+                  <option value="">— none —</option>
+                  <template x-for="n in nodes.filter(n=>n.id!==selected.id)" :key="n.id"><option :value="n.id" x-text="n.label||n.id"></option></template>
+                </select>
+              </div>
             </div>
           </template>
           <template x-if="selected.type==='api_call'">
-            <div>
-              <label class="block text-xs font-medium text-slate-600 mb-1">Tool Name</label>
-              <input x-model="selected.tool" placeholder="e.g. book_appointment"
-                     class="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400 outline-none">
-            </div>
+            <div><label class="block text-xs font-medium text-slate-600 mb-1">Tool Name</label>
+            <input x-model="selected.tool" placeholder="e.g. book_appointment" class="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400 outline-none"></div>
           </template>
           <template x-if="selected.type==='human_transfer'">
-            <div>
-              <label class="block text-xs font-medium text-slate-600 mb-1">Transfer Number</label>
-              <input x-model="selected.number" placeholder="+91…"
-                     class="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400 outline-none">
-            </div>
+            <div><label class="block text-xs font-medium text-slate-600 mb-1">Transfer Number</label>
+            <input x-model="selected.number" placeholder="+91…" class="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400 outline-none"></div>
           </template>
-          <!-- Edge (next node) -->
-          <div>
-            <label class="block text-xs font-medium text-slate-600 mb-1">Next Node</label>
-            <select x-model="selected.nextId" @change="rebuildEdges(); renderDiagram()"
-                    class="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400 outline-none">
+
+          <template x-if="selected.type!=='condition'&&selected.type!=='end'">
+            <div><label class="block text-xs font-medium text-slate-600 mb-1">Next Node</label>
+            <select x-model="selected.nextId" @change="rebuildEdges()" class="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400 outline-none">
               <option value="">— none —</option>
-              <template x-for="n in nodes.filter(n=>n.id!==selected.id)" :key="n.id">
-                <option :value="n.id" x-text="n.label || n.id"></option>
-              </template>
-            </select>
+              <template x-for="n in nodes.filter(n=>n.id!==selected.id)" :key="n.id"><option :value="n.id" x-text="n.label||n.id"></option></template>
+            </select></div>
+          </template>
+
+          <div class="flex gap-2">
+            <div class="flex-1"><label class="block text-xs font-medium text-slate-600 mb-1">X</label>
+            <input type="number" x-model.number="selected.x" class="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400 outline-none"></div>
+            <div class="flex-1"><label class="block text-xs font-medium text-slate-600 mb-1">Y</label>
+            <input type="number" x-model.number="selected.y" class="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400 outline-none"></div>
           </div>
         </div>
       </template>
 
-      <!-- JSON export -->
-      <div class="mt-6 pt-4 border-t border-slate-100">
-        <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Flow JSON</p>
-        <textarea :value="JSON.stringify({nodes, edges}, null, 2)"
-                  readonly rows="8"
-                  class="w-full px-3 py-2 text-[10px] font-mono border border-slate-200 rounded-lg bg-slate-50 resize-none">
-        </textarea>
+      <!-- New agent name -->
+      <template x-if="!agentId">
+        <div class="mt-2 pt-3 border-t border-slate-100">
+          <label class="block text-xs font-medium text-slate-600 mb-1">Agent Name <span class="text-red-500">*</span></label>
+          <input x-model="newAgentName" placeholder="My Voice Agent"
+                 class="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400 outline-none">
+          <p class="text-[10px] text-slate-400 mt-1">Required to save the flow as a new agent.</p>
+        </div>
+      </template>
+
+      <div class="mt-auto pt-3 border-t border-slate-100">
+        <details>
+          <summary class="text-xs font-semibold text-slate-500 uppercase tracking-wide cursor-pointer select-none">Flow JSON</summary>
+          <textarea :value="JSON.stringify({nodes,edges},null,2)" readonly rows="7" class="w-full mt-2 px-2 py-1.5 text-[10px] font-mono border border-slate-200 rounded-lg bg-slate-50 resize-none"></textarea>
+        </details>
       </div>
     </div>
-
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.0/dist/mermaid.min.js"></script>
 <script>
-mermaid.initialize({ startOnLoad: false, theme: 'default', flowchart: { useMaxWidth: true } });
+mermaid.initialize({ startOnLoad:false, theme:'default', flowchart:{ useMaxWidth:true } });
 
 function flowBuilder() {
   const NODE_TYPES = [
-    { id: 'start',          label: 'Start',          icon: '▶' },
-    { id: 'greeting',       label: 'Greeting',        icon: '👋' },
-    { id: 'knowledge',      label: 'Knowledge',       icon: '🔍' },
-    { id: 'condition',      label: 'Condition',       icon: '🔀' },
-    { id: 'api_call',       label: 'API Call',        icon: '⚡' },
-    { id: 'human_transfer', label: 'Human Transfer',  icon: '🧑' },
-    { id: 'end',            label: 'End',             icon: '⏹' },
+    { id:'start',          label:'Start',          icon:'▶' },
+    { id:'greeting',       label:'Greeting',        icon:'👋' },
+    { id:'knowledge',      label:'Knowledge',       icon:'🔍' },
+    { id:'condition',      label:'Condition',       icon:'🔀' },
+    { id:'api_call',       label:'API Call',        icon:'⚡' },
+    { id:'human_transfer', label:'Human Transfer',  icon:'🧑' },
+    { id:'end',            label:'End',             icon:'⏹' },
   ];
-  const MAP = Object.fromEntries(NODE_TYPES.map(t => [t.id, t]));
-  let _counter = 0;
+  const TYPE_MAP = Object.fromEntries(NODE_TYPES.map(t=>[t.id,t]));
+  const NW=160, NH=60;
+  let _c=0, _dragNode=null, _dragPort=null, _panning=false, _panStart=null;
 
   return {
     nodeTypes: NODE_TYPES,
-    nodeTypeMap: MAP,
-    nodes: [{ id: 'start', type: 'start', label: 'Start', nextId: '' }],
-    edges: [],
-    selected: null,
-    agentName: '',
-    agentId: new URLSearchParams(window.location.search).get('agent_id') || '',
-    dragType: null,
+    typeMap: TYPE_MAP,
+    nodes: [], edges: [], selected: null,
+    agentId: '{{ agent_id }}',
+    agentName: '', newAgentName: '',
+    loading: false, saving: false, saveMsg: '', saveOk: true,
+    zoom: 1, panX: 0, panY: 0, canvasH: 620, worldW: 4000, worldH: 2000,
+    showMermaid: false,
+    draftEdge: null,
 
     async init() {
-      // Bootstrap with start node
-      if (this.agentId) {
-        try {
-          const r = await fetch(`/api/agents/${this.agentId}/`, { headers: {'X-Requested-With':'XMLHttpRequest'} });
-          if (r.ok) {
-            const d = await r.json();
-            this.agentName = d.name || '';
-            // Load existing flow if stored
-            const flow = d.flowDefinition || d.configuration?.flowDefinition;
-            if (flow && flow.nodes) {
-              this.nodes = flow.nodes.map(n => ({ ...n, nextId: '' }));
-              this.edges = flow.edges || [];
-              // Rebuild nextId from edges
-              for (const e of this.edges) {
-                const src = this.nodes.find(n => n.id === e.from);
-                if (src && !src.nextId) src.nextId = e.to;
-              }
-            }
+      if (this.agentId) { await this.loadFlow(); }
+      else { this._addNode('start','Start',80,260); }
+    },
+
+    async loadFlow() {
+      this.loading = true;
+      try {
+        const r = await fetch(`/api/agents/${this.agentId}/flow/`,{headers:{'X-Requested-With':'XMLHttpRequest'}});
+        if(r.ok){
+          const d = await r.json();
+          this.agentName = d.agentName||'';
+          const flow = d.flowDefinition||{};
+          if(flow.nodes&&flow.nodes.length){
+            this.nodes = flow.nodes.map(n=>({nextId:'',yesId:'',noId:'',text:'',tool:'',field:'',number:'',...n, x:n.x??80, y:n.y??80}));
+            this.edges = flow.edges||[];
+          } else {
+            await this.generateFromAgent();
           }
-        } catch {}
+        }
+      } catch(e){ console.warn('loadFlow',e); }
+      this.loading = false;
+      this.$nextTick(()=>this.fitView());
+    },
+
+    async generateFromAgent() {
+      if(!this.agentId) return;
+      this.loading = true;
+      try {
+        const r = await fetch(`/api/agents/${this.agentId}/`,{headers:{'X-Requested-With':'XMLHttpRequest'}});
+        if(!r.ok) return;
+        const ag = await r.json();
+        this.agentName = ag.name||'';
+        const cb = ag.contextBreakdown||[];
+        const nodes=[], edges=[];
+        const start = this._mkNode('start','Start',80,260);  nodes.push(start);
+        const greet = this._mkNode('greeting','Greeting',300,260); greet.text=ag.welcomeMessage||''; nodes.push(greet);
+        edges.push({from:'start_1',to:greet.id});
+        let prev=greet.id, col=2;
+        for(const s of cb.slice(0,4)){
+          const kn=this._mkNode('knowledge',s.title||'Knowledge',80+col*220, 260-(col%2?100:0));
+          kn.text=(s.body||'').slice(0,80); nodes.push(kn);
+          edges.push({from:prev,to:kn.id}); prev=kn.id; col++;
+        }
+        const end=this._mkNode('end','End',80+col*220,260); nodes.push(end);
+        edges.push({from:prev,to:end.id});
+        this.nodes=nodes; this.edges=edges;
+      } catch(e){ console.warn('generateFromAgent',e); }
+      this.loading=false;
+      this.$nextTick(()=>this.fitView());
+    },
+
+    _mkNode(type,label,x,y){ _c++; return {id:type+'_'+_c,type,label,text:'',nextId:'',yesId:'',noId:'',tool:'',field:'',number:'',x,y}; },
+    _addNode(type,label,x,y){ const n=this._mkNode(type,label,x,y); this.nodes.push(n); this.selected=n; return n; },
+
+    addNodeCentered(type){
+      const el=document.getElementById('vf-canvas');
+      const cw=el?el.clientWidth:800;
+      const cx=(cw/2-this.panX)/this.zoom-NW/2;
+      const cy=(this.canvasH/2-this.panY)/this.zoom-NH/2;
+      this._addNode(type,TYPE_MAP[type]?.label+' '+(_c+1),Math.max(20,cx),Math.max(20,cy));
+    },
+
+    removeNode(id){
+      this.nodes=this.nodes.filter(n=>n.id!==id);
+      this.edges=this.edges.filter(e=>e.from!==id&&e.to!==id);
+      this.nodes.forEach(n=>{if(n.nextId===id)n.nextId='';if(n.yesId===id)n.yesId='';if(n.noId===id)n.noId='';});
+      if(this.selected?.id===id) this.selected=null;
+    },
+
+    rebuildEdges(){
+      const edges=[];
+      for(const n of this.nodes){
+        if(n.nextId) edges.push({from:n.id,to:n.nextId});
+        if(n.yesId)  edges.push({from:n.id,to:n.yesId,label:'yes'});
+        if(n.noId)   edges.push({from:n.id,to:n.noId, label:'no'});
       }
-      this.$nextTick(() => this.renderDiagram());
+      this.edges=edges;
     },
 
-    addNode(type) {
-      _counter++;
-      const id = type + '_' + _counter;
-      this.nodes.push({ id, type, label: MAP[type]?.label + ' ' + _counter, nextId: '' });
-      this.rebuildEdges();
-      this.$nextTick(() => this.renderDiagram());
+    edgePath(edge){
+      const from=this.nodes.find(n=>n.id===edge.from);
+      const to  =this.nodes.find(n=>n.id===edge.to);
+      if(!from||!to) return '';
+      const sx=from.x+NW, sy=from.y+NH/2, tx=to.x, ty=to.y+NH/2;
+      const dx=Math.abs(tx-sx)*.5+40;
+      return `M${sx} ${sy}C${sx+dx} ${sy},${tx-dx} ${ty},${tx} ${ty}`;
+    },
+    draftPath(){
+      if(!this.draftEdge)return '';
+      const from=this.draftEdge.fromNode;
+      const sx=from.x+NW,sy=from.y+NH/2,tx=this.draftEdge.mx,ty=this.draftEdge.my;
+      const dx=Math.abs(tx-sx)*.5+20;
+      return `M${sx} ${sy}C${sx+dx} ${sy},${tx-dx} ${ty},${tx} ${ty}`;
     },
 
-    removeNode(id) {
-      this.nodes = this.nodes.filter(n => n.id !== id);
-      // Clean up edges referencing this node
-      this.nodes.forEach(n => { if (n.nextId === id) n.nextId = ''; });
-      if (this.selected?.id === id) this.selected = null;
-      this.rebuildEdges();
-      this.$nextTick(() => this.renderDiagram());
+    nodeMouseDown(evt,node){ if(evt.button!==0)return; this.selected=node; _dragNode={node,sx:evt.clientX,sy:evt.clientY,ox:node.x,oy:node.y}; },
+    portMouseDown(evt,node){
+      if(evt.button!==0)return; evt.stopPropagation(); _dragPort={fromNode:node};
+      const r=document.getElementById('vf-canvas').getBoundingClientRect();
+      this.draftEdge={fromNode:node,mx:(evt.clientX-r.left-this.panX)/this.zoom,my:(evt.clientY-r.top-this.panY)/this.zoom};
+    },
+    portMouseUp(toNode){
+      if(!_dragPort)return;
+      const from=_dragPort.fromNode;
+      if(from.id!==toNode.id){
+        this.edges=this.edges.filter(e=>!(e.from===from.id&&!e.label));
+        this.edges.push({from:from.id,to:toNode.id});
+        from.nextId=toNode.id;
+      }
+      _dragPort=null; this.draftEdge=null;
     },
 
-    moveNode(idx, dir) {
-      const newIdx = idx + dir;
-      if (newIdx < 0 || newIdx >= this.nodes.length) return;
-      [this.nodes[idx], this.nodes[newIdx]] = [this.nodes[newIdx], this.nodes[idx]];
-      this.renderDiagram();
+    canvasMouseDown(evt){
+      if(evt.button===1||(evt.button===0&&!_dragNode&&!_dragPort)){
+        _panning=true; _panStart={x:evt.clientX,y:evt.clientY,px:this.panX,py:this.panY};
+        document.getElementById('vf-canvas').classList.add('canvas-panning');
+      }
+    },
+    canvasMouseMove(evt){
+      if(_dragNode){
+        const dx=(evt.clientX-_dragNode.sx)/this.zoom, dy=(evt.clientY-_dragNode.sy)/this.zoom;
+        _dragNode.node.x=Math.max(0,_dragNode.ox+dx); _dragNode.node.y=Math.max(0,_dragNode.oy+dy);
+      } else if(this.draftEdge){
+        const r=document.getElementById('vf-canvas').getBoundingClientRect();
+        this.draftEdge={...this.draftEdge,mx:(evt.clientX-r.left-this.panX)/this.zoom,my:(evt.clientY-r.top-this.panY)/this.zoom};
+      } else if(_panning){
+        this.panX=_panStart.px+(evt.clientX-_panStart.x);
+        this.panY=_panStart.py+(evt.clientY-_panStart.y);
+      }
+    },
+    canvasMouseUp(){
+      _dragNode=null;
+      if(!this.draftEdge||!_dragPort){_dragPort=null;this.draftEdge=null;}
+      if(_panning){_panning=false;document.getElementById('vf-canvas').classList.remove('canvas-panning');}
+    },
+    canvasWheel(evt){
+      const f=evt.deltaY<0?1.1:.9, nz=Math.min(2,Math.max(.3,this.zoom*f));
+      const r=document.getElementById('vf-canvas').getBoundingClientRect();
+      const mx=evt.clientX-r.left, my=evt.clientY-r.top;
+      this.panX=mx-(mx-this.panX)*(nz/this.zoom);
+      this.panY=my-(my-this.panY)*(nz/this.zoom);
+      this.zoom=nz;
     },
 
-    rebuildEdges() {
-      this.edges = [];
-      for (const n of this.nodes) {
-        if (n.nextId) {
-          this.edges.push({ from: n.id, to: n.nextId });
+    fitView(){
+      if(!this.nodes.length)return;
+      const xs=this.nodes.map(n=>n.x),ys=this.nodes.map(n=>n.y);
+      const mnx=Math.min(...xs),mxx=Math.max(...xs)+NW,mny=Math.min(...ys),mxy=Math.max(...ys)+NH;
+      const el=document.getElementById('vf-canvas');
+      if(!el)return;
+      const cw=el.clientWidth-48, ch=this.canvasH-48;
+      const sx=cw/(mxx-mnx||1), sy=ch/(mxy-mny||1);
+      this.zoom=Math.min(sx,sy,1.5);
+      this.panX=24-mnx*this.zoom; this.panY=24-mny*this.zoom;
+    },
+    resetView(){ this.zoom=1; this.panX=0; this.panY=0; },
+
+    async renderMermaid(){
+      const el=document.getElementById('vf-mermaid'); if(!el||!this.nodes.length)return;
+      const s=v=>v.replace(/[^a-zA-Z0-9_]/g,'_');
+      let d='flowchart LR\n';
+      for(const n of this.nodes){
+        const lbl=(n.label||n.id).replace(/["<>]/g,'-');
+        const id=s(n.id);
+        d+=n.type==='start'||n.type==='end'?`  ${id}(["${lbl}"])\n`:n.type==='condition'?`  ${id}{"${lbl}"}\n`:`  ${id}["${lbl}"]\n`;
+      }
+      for(const e of this.edges){
+        const lbl=e.label?`|${e.label}|`:'';
+        d+=`  ${s(e.from)} -->${lbl} ${s(e.to)}\n`;
+      }
+      try{const{svg}=await mermaid.render('mm_'+Date.now(),d);el.innerHTML=svg;}
+      catch(err){el.innerHTML=`<pre class="text-xs text-red-500">${err.message}</pre>`;}
+    },
+
+    async saveFlow(){
+      this.saving=true; this.saveMsg='';
+      if(!this.agentId){
+        const name=this.newAgentName.trim();
+        if(!name){
+          this.saveMsg='Enter an agent name first.'; this.saveOk=false; this.saving=false;
+          setTimeout(()=>this.saveMsg='',3500); return;
+        }
+        try{
+          const r=await fetch('/api/agents/',{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':getCookie('csrftoken')},body:JSON.stringify({name})});
+          if(!r.ok)throw new Error((await r.json()).error||'Create failed');
+          const ag=await r.json(); this.agentId=ag.id; this.agentName=ag.name;
+        }catch(e){
+          this.saveMsg='Failed to create agent: '+e.message; this.saveOk=false; this.saving=false;
+          setTimeout(()=>this.saveMsg='',4000); return;
         }
       }
-    },
-
-    async renderDiagram() {
-      const el = document.getElementById('mermaid-diagram');
-      if (!el) return;
-      if (this.nodes.length <= 1 && !this.edges.length) {
-        el.innerHTML = '<p class="text-slate-400 text-xs py-8">Add nodes to see the flow diagram.</p>';
-        return;
-      }
-      let def = 'flowchart TD\n';
-      const shapeFor = type => {
-        if (type === 'start') return n => `${n}([${n}])`;
-        if (type === 'end') return n => `${n}([${n}])`;
-        if (type === 'condition') return n => `${n}{${n}}`;
-        if (type === 'api_call') return n => `${n}[(${n})]`;
-        return n => `${n}[${n}]`;
-      };
-      for (const n of this.nodes) {
-        const label = (n.label || n.id).replace(/[<>"']/g, '_');
-        const shape = shapeFor(n.type);
-        def += `  ${shape(n.id.replace(/-/g,'_'))}\n`;
-        def = def.replace(n.id.replace(/-/g,'_'), `${n.id.replace(/-/g,'_')}["${label}"]`);
-      }
-      for (const e of this.edges) {
-        def += `  ${e.from.replace(/-/g,'_')} --> ${e.to.replace(/-/g,'_')}\n`;
-      }
-      try {
-        const { svg } = await mermaid.render('mermaid-svg-' + Date.now(), def);
-        el.innerHTML = svg;
-      } catch (err) {
-        el.innerHTML = `<pre class="text-xs text-red-500 text-left overflow-auto">${err.message}</pre>`;
-      }
-    },
-
-    async saveFlow() {
-      this.rebuildEdges();
-      const flow = { nodes: this.nodes, edges: this.edges };
-      if (!this.agentId) {
-        window.vfToast && window.vfToast('No agent selected. Open this page with ?agent_id=…', 'error');
-        return;
-      }
-      try {
-        const r = await fetch(`/api/agents/${this.agentId}/flow`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-          body: JSON.stringify({ flow }),
+      try{
+        const r=await fetch(`/api/agents/${this.agentId}/flow/`,{
+          method:'POST',
+          headers:{'Content-Type':'application/json','X-CSRFToken':getCookie('csrftoken')},
+          body:JSON.stringify({flow:{nodes:this.nodes,edges:this.edges}}),
         });
-        if (r.ok) {
-          window.vfToast && window.vfToast('Flow saved!', 'success');
-        } else {
-          window.vfToast && window.vfToast('Save failed', 'error');
-        }
-      } catch (e) {
-        window.vfToast && window.vfToast('Error: ' + e.message, 'error');
-      }
+        if(r.ok){this.saveMsg='Flow saved!';this.saveOk=true;}
+        else{const d=await r.json().catch(()=>({}));throw new Error(d.error||'Error '+r.status);}
+      }catch(e){this.saveMsg='Save failed: '+e.message;this.saveOk=false;}
+      this.saving=false;
+      if(this.showMermaid)this.renderMermaid();
+      setTimeout(()=>this.saveMsg='',4000);
     },
   };
 }
+
+function getCookie(name){
+  const v=document.cookie.match('(^|;)\\s*'+name+'\\s*=\\s*([^;]+)');
+  return v?v.pop():'';
+}
 </script>
 {% endblock %}
+

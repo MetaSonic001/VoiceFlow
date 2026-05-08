@@ -57,6 +57,7 @@ def _agent_to_dict(agent: Agent, doc_count: int = 0) -> dict:
         "simulationSuite": agent.simulation_suite,
         "deploymentReadinessScore": agent.deployment_readiness_score,
         "versionNumber": agent.version_number,
+        "flowDefinition": agent.flow_definition,
         "createdAt": agent.createdAt.isoformat() if agent.createdAt else None,
         "updatedAt": agent.updatedAt.isoformat() if agent.updatedAt else None,
         "_count": {"documents": doc_count},
@@ -346,7 +347,53 @@ async def activate_agent(agent_id: str, auth: AuthContext = Depends(get_auth), d
     return {"success": True}
 
 
-@router.post("/generate-from-prompt")
+@router.get("/{agent_id}/flow")
+async def get_agent_flow(
+    agent_id: str,
+    auth: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the visual flow definition for an agent."""
+    result = await db.execute(
+        select(Agent).where(Agent.id == agent_id, Agent.tenantId == auth.tenant_id)
+    )
+    agent = result.scalar_one_or_none()
+    if not agent:
+        return JSONResponse({"error": "Agent not found"}, status_code=404)
+    return {
+        "agentId": agent_id,
+        "agentName": agent.name,
+        "flowDefinition": agent.flow_definition or {"nodes": [], "edges": []},
+    }
+
+
+@router.post("/{agent_id}/flow")
+async def save_agent_flow(
+    agent_id: str,
+    request: Request,
+    auth: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Persist the visual flow definition for an agent."""
+    result = await db.execute(
+        select(Agent).where(Agent.id == agent_id, Agent.tenantId == auth.tenant_id)
+    )
+    agent = result.scalar_one_or_none()
+    if not agent:
+        return JSONResponse({"error": "Agent not found"}, status_code=404)
+    body = await request.json()
+    flow = body.get("flow") or body
+    # Validate basic structure
+    if not isinstance(flow, dict):
+        return JSONResponse({"error": "flow must be an object"}, status_code=400)
+    flow.setdefault("nodes", [])
+    flow.setdefault("edges", [])
+    agent.flow_definition = flow
+    await db.commit()
+    return {"ok": True, "agentId": agent_id}
+
+
+
 async def generate_agent_from_prompt(
     request: Request,
     auth: AuthContext = Depends(get_auth),
