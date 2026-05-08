@@ -73,7 +73,7 @@ def render_gather_twiml(tree: IVRTree, node_id: str = "root", base_url: str = ""
     resp = VoiceResponse()
     message = node.get("message", "Please press a key.")
     timeout = int(node.get("timeout_seconds", 5))
-    action_url = f"{base_url}/voice/ivr/{tree.id}/gather?node={node.get('id', 'root')}"
+    action_url = f"{base_url}/api/ivr/voice/{tree.id}/gather?node={node.get('id', 'root')}"
 
     gather = Gather(
         num_digits=1,
@@ -149,6 +149,6 @@ async def resolve_dtmf(
     vr = VoiceResponse()
     label = child.get("label", "the appropriate team")
     vr.say(f"Connecting you to {label}.")
-    # Redirect to the agent's inbound handler
-    vr.redirect(f"{base_url}/voice/inbound?agentId={agent_id}")
+    # Redirect to the agent's inbound handler — path param, not query param
+    vr.redirect(f"{base_url}/api/voice/inbound/{agent_id}")
     return str(vr), agent_id

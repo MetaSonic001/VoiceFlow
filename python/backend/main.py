@@ -160,6 +160,30 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"[db] Table creation failed (non-fatal): {e}")
 
+    # ── Add missing columns to existing tables (idempotent via IF NOT EXISTS) ─
+    # This mirrors what Alembic migration 0002 does, but runs automatically so
+    # the server starts correctly without requiring a manual `alembic upgrade head`.
+    _column_migrations = [
+        # tenants — billing / plan fields (added after initial schema)
+        'ALTER TABLE tenants ADD COLUMN IF NOT EXISTS "planType" TEXT NOT NULL DEFAULT \'free\'',
+        'ALTER TABLE tenants ADD COLUMN IF NOT EXISTS "planTier" TEXT NOT NULL DEFAULT \'free\'',
+        'ALTER TABLE tenants ADD COLUMN IF NOT EXISTS "stripeCustomerId" TEXT',
+        'ALTER TABLE tenants ADD COLUMN IF NOT EXISTS "stripeSubscriptionId" TEXT',
+        'ALTER TABLE tenants ADD COLUMN IF NOT EXISTS "managedMinutesBalance" INTEGER NOT NULL DEFAULT 0',
+        'ALTER TABLE tenants ADD COLUMN IF NOT EXISTS "pilotPlanEndDate" TIMESTAMPTZ',
+        'ALTER TABLE tenants ADD COLUMN IF NOT EXISTS "totalCallCount" INTEGER NOT NULL DEFAULT 0',
+        # agents — flow definition JSON
+        'ALTER TABLE agents ADD COLUMN IF NOT EXISTS "flowDefinition" JSONB',
+    ]
+    try:
+        from app.database import engine
+        async with engine.begin() as conn:
+            for stmt in _column_migrations:
+                await conn.execute(text(stmt))
+        logger.info("[db] Column migrations applied")
+    except Exception as e:
+        logger.warning(f"[db] Column migration failed (non-fatal): {e}")
+
     await seed_defaults()
 
     # Initialise STT service (downloads Vosk model on first run, loads faster-whisper)
