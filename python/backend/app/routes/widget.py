@@ -365,6 +365,7 @@ async def end_session(agent_id: str, session_id: str, db: AsyncSession = Depends
                 startedAt=datetime.now(timezone.utc),
                 endedAt=datetime.now(timezone.utc),
                 transcript=json.dumps(history),
+                analysis={"conversation_session_id": session_id},
             )
             db.add(log)
             await db.commit()

@@ -494,7 +494,11 @@ function voiceLibraryApp() {
     },
 
     async deleteClone(id) {
-      if (!confirm('Delete this voice clone?')) return;
+      if (!(await vfConfirm({
+        title: 'Delete voice clone?',
+        message: 'Permanently delete this cloned voice? Agents using it may need a new voice.',
+        confirmText: 'Delete',
+      }))) return;
       try {
         await apiFetch(`/api/voices/clones/${id}/`, {method:'DELETE'});
         this.clones = this.clones.filter(c => c.id !== id);

@@ -2,8 +2,9 @@
 Environment / settings loaded once from .env or env vars.
 Used by FastAPI backend routes and services.
 """
-from typing import Optional
+from typing import Any, Optional
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -47,6 +48,10 @@ class Settings(BaseSettings):
     # Base URL for this API when handlers call themselves via HTTP (onboarding → ingestion).
     FASTAPI_URL: str = "http://127.0.0.1:8040"
     FRONTEND_URL: str = "http://localhost:8050"
+    # Comma-separated extra CORS origins (e.g. a separate ngrok URL for the UI).
+    CORS_EXTRA_ORIGINS: str = ""
+    # Allow https://*.ngrok-free.app, *.ngrok.io, *.ngrok.app (tunnel previews).
+    CORS_ALLOW_NGROK: bool = True
 
     # Server
     PORT: int = 8040
@@ -101,6 +106,25 @@ class Settings(BaseSettings):
 
     # Credential encryption key (64-char hex)
     CREDENTIALS_ENCRYPTION_KEY: Optional[str] = None
+
+    # Data lifecycle — soft policy defaults for operators (enforce via scheduled jobs / DB TTL).
+    # Call logs and audit rows are not auto-deleted unless you implement retention workers.
+    CALL_LOG_RETENTION_DAYS_DEFAULT: int = 365
+    AUDIT_LOG_RETENTION_DAYS_DEFAULT: int = 730
+
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def _database_url_ipv4_loopback(cls, v: Any) -> Any:
+        if isinstance(v, str) and "@localhost:" in v:
+            return v.replace("@localhost:", "@127.0.0.1:")
+        return v
+
+    @field_validator("REDIS_HOST", "CHROMA_HOST", mode="before")
+    @classmethod
+    def _service_host_ipv4_loopback(cls, v: Any) -> Any:
+        if isinstance(v, str) and v.strip().lower() in ("localhost", "::1"):
+            return "127.0.0.1"
+        return v
 
     model_config = {
         "env_file": ["../.env", ".env"],

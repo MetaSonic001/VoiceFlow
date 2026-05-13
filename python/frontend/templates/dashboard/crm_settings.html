@@ -246,6 +246,12 @@ function crmSettingsApp() {
     },
 
     async disconnectProvider(provider) {
+      const label = provider === 'hubspot' ? 'HubSpot' : 'Salesforce';
+      if (!(await vfConfirm({
+        title: 'Disconnect ' + label + '?',
+        message: 'Stop syncing with ' + label + '? You can reconnect later.',
+        confirmText: 'Disconnect',
+      }))) return;
       const url = provider === 'hubspot' ? '/api/crm/connect/hubspot/' : '/api/crm/connect/salesforce/';
       try {
         await apiFetch(url, { method: 'DELETE' });

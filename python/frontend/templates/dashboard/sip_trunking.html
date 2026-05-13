@@ -232,7 +232,11 @@ function sipApp() {
       this.testing = { ...this.testing, [trunkId]: false };
     },
     async deleteTrunk(trunkId) {
-      if (!confirm('Delete this SIP trunk?')) return;
+      if (!(await vfConfirm({
+        title: 'Delete SIP trunk?',
+        message: 'Remove this SIP trunk configuration?',
+        confirmText: 'Delete',
+      }))) return;
       try {
         await fetch(`/api/sip-trunking/trunks/${trunkId}/`, { method: 'DELETE', headers: { 'X-CSRFToken': getCookie('csrftoken') } });
         this.trunks = this.trunks.filter(t => t.id !== trunkId);

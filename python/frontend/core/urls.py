@@ -110,6 +110,7 @@ urlpatterns = [
     path("api/analytics/top-intents/", api_proxy.analytics_top_intents, name="api_analytics_intents"),
     path("api/analytics/failure-modes/", api_proxy.analytics_failure_modes, name="api_analytics_failures"),
     path("api/analytics/cost-estimate/", api_proxy.analytics_cost_estimate, name="api_analytics_cost"),
+    path("api/analytics/bi-summary/", api_proxy.analytics_bi_summary, name="api_analytics_bi_summary"),
     path("api/analytics/sentiment-trend/", api_proxy.analytics_sentiment_trend, name="api_analytics_sentiment"),
     path("api/analytics/handle-time-histogram/", api_proxy.analytics_handle_time, name="api_analytics_histogram"),
     path("api/analytics/campaign-roi/", api_proxy.analytics_campaign_roi, name="api_analytics_campaign_roi"),

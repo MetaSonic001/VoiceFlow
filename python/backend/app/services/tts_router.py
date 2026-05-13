@@ -15,6 +15,11 @@ from app.config import settings
 
 logger = logging.getLogger("voiceflow.tts_router")
 _SENTENCE_END_RE = re.compile(r"[.!?](?:\s|$)")
+# Clause / phrase boundaries — flush earlier for lower time-to-first-byte on voice calls
+_CLAUSE_FLUSH_RE = re.compile(r"[,;:—\-](?:\s|$)")
+# Target ~1–2 short phrases before forcing a TTS round-trip (was 64 tokens = too laggy for voice)
+_STREAM_TOKEN_SOFT_CAP = 28
+_STREAM_TOKEN_MIN_BEFORE_CLAUSE = 10
 
 # ── Phrase cache (pre-recorded audio inserts, Bolna-style cost reduction) ─────
 # Common filler phrases are synthesised once, stored on disk, and reused.
@@ -117,7 +122,7 @@ class TTSRouter:
         engine: str,
         voice_id: str,
     ) -> AsyncGenerator[bytes, None]:
-        """Buffer token stream by sentence or 64-token window and yield audio chunks."""
+        """Buffer LLM token stream; flush often for low latency (voice + chat streaming)."""
         buffer: list[str] = []
         token_count = 0
 
@@ -131,9 +136,17 @@ class TTSRouter:
             if not current:
                 continue
 
-            # Flush on sentence boundaries or every ~64 whitespace-split tokens to
-            # balance audio latency (~1-2 s) against synthesis request overhead.
-            if token_count >= 64 or _SENTENCE_END_RE.search(current):
+            # Flush on: sentence end, clause/comma (after a few tokens), or soft cap —
+            # keeps first audible chunk sub-second when the LLM is streaming quickly.
+            flush = False
+            if _SENTENCE_END_RE.search(current):
+                flush = True
+            elif token_count >= _STREAM_TOKEN_SOFT_CAP:
+                flush = True
+            elif token_count >= _STREAM_TOKEN_MIN_BEFORE_CLAUSE and _CLAUSE_FLUSH_RE.search(current):
+                flush = True
+
+            if flush:
                 yield await self.synthesize(current, engine=engine, voice_id=voice_id)
                 buffer.clear()
                 token_count = 0

@@ -5,7 +5,7 @@ import csv
 import io
 import math
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
@@ -25,6 +25,37 @@ def _fmt_dur(sec: int) -> str:
 
 def _days_from_range(time_range: str) -> int:
     return {"24h": 1, "7d": 7, "30d": 30, "90d": 90}.get(time_range, 7)
+
+
+def _infer_conversion(analysis: Optional[dict], extracted: Optional[Any]) -> bool:
+    """Business conversion signal — extend analysis JSON over time."""
+    if isinstance(analysis, dict):
+        co = str(analysis.get("callOutcome") or analysis.get("call_outcome") or "").lower()
+        if co in ("booked", "converted", "sale", "appointment", "appointment_booked", "qualified_sale"):
+            return True
+        if analysis.get("goalAchieved") is True:
+            return True
+    if isinstance(extracted, dict):
+        stage = str(extracted.get("conversionStage") or extracted.get("stage") or "").lower()
+        if stage in ("won", "booked", "converted", "closed"):
+            return True
+    return False
+
+
+def _infer_qualified_lead(analysis: Optional[dict], extracted: Optional[Any]) -> bool:
+    """Qualification / lead readiness heuristic."""
+    if isinstance(analysis, dict):
+        if analysis.get("qualified") is True or analysis.get("leadQualified") is True:
+            return True
+    if isinstance(extracted, dict):
+        if extracted.get("qualified") is True:
+            return True
+        filled = sum(
+            1 for v in extracted.values() if v is not None and str(v).strip()
+        )
+        if filled >= 3:
+            return True
+    return False
 
 
 @router.get("/overview")
@@ -123,20 +154,32 @@ async def calls(
     for row in rows:
         log = row[0]
         agent_name = row[1] or "Unknown"
+        analysis = log.analysis if isinstance(log.analysis, dict) else {}
+        extracted = log.extractedVariables if isinstance(log.extractedVariables, dict) else {}
         logs.append({
             "id": log.id,
             "type": "phone" if log.callerPhone else "chat",
             "customerInfo": log.callerPhone or "Web Chat",
             "agentName": agent_name,
             "agentId": log.agentId,
+            "callSid": log.callSid,
             "startTime": log.startedAt.isoformat() if log.startedAt else None,
             "duration": log.durationSeconds or 0,
             "status": "completed" if log.endedAt else "in-progress",
             "resolution": "resolved" if log.rating == 1 else ("escalated" if log.rating == -1 else "resolved"),
-            "summary": "",
-            "sentiment": "positive" if log.rating == 1 else ("negative" if log.rating == -1 else "neutral"),
+            "summary": (analysis.get("summary") or "")[:500],
+            "goalAchieved": analysis.get("goalAchieved"),
+            "conversionInferred": _infer_conversion(analysis if analysis else None, extracted or None),
+            "qualifiedInferred": _infer_qualified_lead(analysis if analysis else None, extracted or None),
+            "sentiment": analysis.get("sentiment") or (
+                "positive" if log.rating == 1 else ("negative" if log.rating == -1 else "neutral")
+            ),
             "tags": [],
             "transcript": log.transcript,
+            "recordingUrl": log.recordingUrl,
+            "hasRecording": bool(log.recordingUrl),
+            "hasAnalysis": bool(log.analysis),
+            "extractedVariables": log.extractedVariables,
         })
 
     return {
@@ -180,6 +223,131 @@ async def realtime(auth: AuthContext = Depends(get_auth), db: AsyncSession = Dep
         "online_agents": agents_count,
         "today_total": today_total,
         "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.get("/bi-summary")
+async def bi_summary(
+    timeRange: str = "7d",
+    agentId: Optional[str] = None,
+    auth: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Unified business-intelligence snapshot: duration split, conversion & qualification rates,
+    recording coverage, and per-agent leaderboard (volume-weighted).
+    """
+    days = _days_from_range(timeRange)
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    where = [CallLog.tenantId == auth.tenant_id, CallLog.startedAt >= since]
+    if agentId and agentId != "all":
+        where.append(CallLog.agentId == agentId)
+
+    result = await db.execute(
+        select(
+            CallLog.callerPhone,
+            CallLog.durationSeconds,
+            CallLog.analysis,
+            CallLog.extractedVariables,
+            CallLog.recordingUrl,
+            CallLog.agentId,
+        ).where(*where)
+    )
+    rows = result.all()
+
+    phone_durs: list[int] = []
+    chat_durs: list[int] = []
+    conv_count = 0
+    qual_count = 0
+    analyzed = 0
+    with_rec = 0
+    phone_n = 0
+    chat_n = 0
+
+    per_agent: dict[str, dict[str, Any]] = {}
+
+    for caller_phone, dur, analysis, extracted, rec_url, aid in rows:
+        if caller_phone:
+            phone_n += 1
+            if dur is not None:
+                phone_durs.append(int(dur))
+        else:
+            chat_n += 1
+            if dur is not None:
+                chat_durs.append(int(dur))
+
+        ad = analysis if isinstance(analysis, dict) else {}
+        ex = extracted if isinstance(extracted, dict) else {}
+        if ad:
+            analyzed += 1
+        if rec_url:
+            with_rec += 1
+        if _infer_conversion(ad if ad else None, ex if ex else None):
+            conv_count += 1
+        if _infer_qualified_lead(ad if ad else None, ex if ex else None):
+            qual_count += 1
+
+        bucket = per_agent.setdefault(
+            aid,
+            {"calls": 0, "conv": 0, "dur_sum": 0, "dur_n": 0},
+        )
+        bucket["calls"] += 1
+        if _infer_conversion(ad if ad else None, ex if ex else None):
+            bucket["conv"] += 1
+        if dur is not None:
+            bucket["dur_sum"] += int(dur)
+            bucket["dur_n"] += 1
+
+    total = len(rows)
+
+    names_map: dict[str, str] = {}
+    if per_agent:
+        agent_ids = list(per_agent.keys())
+        ar = await db.execute(select(Agent.id, Agent.name).where(Agent.id.in_(agent_ids)))
+        names_map = {r[0]: r[1] for r in ar.all()}
+
+    leaderboard = []
+    for aid, b in sorted(per_agent.items(), key=lambda x: x[1]["calls"], reverse=True)[:12]:
+        cr = round(b["conv"] / b["calls"] * 100, 1) if b["calls"] else None
+        avgd = round(b["dur_sum"] / b["dur_n"], 1) if b["dur_n"] else None
+        leaderboard.append({
+            "agentId": aid,
+            "agentName": names_map.get(aid, str(aid)[:8]),
+            "interactions": b["calls"],
+            "conversionRatePercent": cr,
+            "avgDurationSeconds": avgd,
+        })
+
+    return {
+        "timeRange": timeRange,
+        "windowStart": since.isoformat(),
+        "totals": {
+            "interactions": total,
+            "phoneSessions": phone_n,
+            "chatSessions": chat_n,
+            "withPostCallAnalysis": analyzed,
+            "withRecording": with_rec,
+            "recordingCoveragePercent": round(with_rec / total * 100, 1) if total else None,
+            "avgDurationSecondsPhone": round(sum(phone_durs) / len(phone_durs), 1) if phone_durs else None,
+            "avgDurationSecondsChat": round(sum(chat_durs) / len(chat_durs), 1) if chat_durs else None,
+        },
+        "conversion": {
+            "count": conv_count,
+            "ratePercent": round(conv_count / total * 100, 1) if total else None,
+            "definition": "goalAchieved, callOutcome booked/converted/sale, or CRM stage won/booked",
+        },
+        "qualification": {
+            "count": qual_count,
+            "ratePercent": round(qual_count / total * 100, 1) if total else None,
+            "definition": "qualified flags in analysis/extractedVariables or 3+ captured fields",
+        },
+        "agentLeaderboard": leaderboard,
+        "deepLinks": {
+            "conversations": "/dashboard/calls/",
+            "liveMonitor": "/dashboard/live-monitor/",
+            "campaigns": "/dashboard/campaigns/",
+            "recordings": "/dashboard/recordings/",
+        },
     }
 
 
@@ -674,19 +842,20 @@ async def export_csv(
 
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=[
-        "id", "agentId", "callerPhone", "type", "status",
+        "id", "agentId", "callerPhone", "channel",
         "durationSeconds", "startedAt", "rating",
         "sentiment", "goalAchieved", "intent", "summary",
+        "recordingUrl", "conversionInferred", "qualifiedInferred",
     ])
     writer.writeheader()
     for log in logs:
-        analysis = log.analysis or {}
+        analysis = log.analysis if isinstance(log.analysis, dict) else {}
+        ex = log.extractedVariables if isinstance(log.extractedVariables, dict) else {}
         writer.writerow({
             "id": log.id,
             "agentId": log.agentId,
             "callerPhone": log.callerPhone or "",
-            "type": log.type or "voice",
-            "status": log.status or "completed",
+            "channel": "phone" if log.callerPhone else "chat",
             "durationSeconds": log.durationSeconds or 0,
             "startedAt": log.startedAt.isoformat() if log.startedAt else "",
             "rating": log.rating or 0,
@@ -694,6 +863,9 @@ async def export_csv(
             "goalAchieved": analysis.get("goalAchieved", False),
             "intent": analysis.get("intent", ""),
             "summary": (analysis.get("summary") or "")[:200],
+            "recordingUrl": log.recordingUrl or "",
+            "conversionInferred": _infer_conversion(analysis, ex),
+            "qualifiedInferred": _infer_qualified_lead(analysis, ex),
         })
 
     output.seek(0)

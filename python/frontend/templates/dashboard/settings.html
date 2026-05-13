@@ -386,6 +386,11 @@ function settingsApp() {
       } catch(e) { showToast('Save failed: ' + (e.message||e), 'error'); }
     },
     async deleteKey(provider, url) {
+      if (!(await vfConfirm({
+        title: 'Remove API key?',
+        message: 'Remove the stored ' + provider + ' key? You can add it again later.',
+        confirmText: 'Remove',
+      }))) return;
       try {
         await apiFetch(url, { method:'DELETE' });
         if (!this.keys[provider]) this.keys[provider] = {};
@@ -406,6 +411,11 @@ function settingsApp() {
       } catch(e) { showToast('Save failed', 'error'); }
     },
     async deleteTwilio() {
+      if (!(await vfConfirm({
+        title: 'Remove Twilio?',
+        message: 'Remove Twilio credentials from this workspace?',
+        confirmText: 'Remove',
+      }))) return;
       try {
         await apiFetch('/api/settings/twilio/', { method:'DELETE' });
         if (!this.keys.twilio) this.keys.twilio = {};
@@ -427,6 +437,11 @@ function settingsApp() {
       } catch(e) { showToast('Save failed', 'error'); }
     },
     async deleteExotel() {
+      if (!(await vfConfirm({
+        title: 'Remove Exotel?',
+        message: 'Remove Exotel credentials from this workspace?',
+        confirmText: 'Remove',
+      }))) return;
       try {
         await apiFetch('/api/settings/exotel/', { method:'DELETE' });
         if (!this.keys.exotel) this.keys.exotel = {};
@@ -449,6 +464,11 @@ function settingsApp() {
       } catch(e) { showToast('Save failed', 'error'); }
     },
     async deleteSip() {
+      if (!(await vfConfirm({
+        title: 'Remove SIP credentials?',
+        message: 'Remove SIP trunk credentials from this workspace?',
+        confirmText: 'Remove',
+      }))) return;
       try {
         await apiFetch('/api/settings/sip/', { method:'DELETE' });
         if (!this.keys.sip) this.keys.sip = {};

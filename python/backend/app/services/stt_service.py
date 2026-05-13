@@ -421,6 +421,27 @@ class STTService:
 
         return await loop.run_in_executor(None, _run)
 
+    async def finalize_vosk_recognizer(self, recognizer: Any) -> str:
+        """
+        Drain a streaming Vosk KaldiRecognizer after a speech segment.
+        Returns the final text for that segment (may be empty).
+        Call before creating a new recognizer for the next utterance.
+        """
+        if recognizer is None or not _VOSK_AVAILABLE:
+            return ""
+
+        def _fin() -> str:
+            import json
+
+            try:
+                data = json.loads(recognizer.FinalResult())
+                return (data.get("text") or "").strip()
+            except Exception:
+                return ""
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _fin)
+
     async def _transcribe_sarvam(
         self, pcm_bytes: bytes, sample_rate: int, api_key: str, language: Optional[str] = None
     ) -> tuple[str, Optional[str]]:

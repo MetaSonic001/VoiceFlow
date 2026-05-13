@@ -964,7 +964,12 @@ function agentDetailApp() {
       this.savingVersion = false;
     },
     async restoreVersion(versionId) {
-      if (!confirm('Restore this version? Current changes will be overwritten.')) return;
+      if (!(await vfConfirm({
+        title: 'Restore version?',
+        message: 'Restore this version? Current unsaved changes will be overwritten.',
+        confirmText: 'Restore',
+        danger: false,
+      }))) return;
       try {
         const r = await apiFetch(`/api/agents/{{ agent.id|default:"" }}/versions/${versionId}/restore/`, {method:'POST'});
         if (r && r.agent) { this.agent = r.agent; }
@@ -1076,7 +1081,11 @@ function agentDetailApp() {
     },
 
     async detachKb(att) {
-      if (!confirm('Remove this document from the knowledge base?')) return;
+      if (!(await vfConfirm({
+        title: 'Remove document?',
+        message: 'Remove this document from the knowledge base?',
+        confirmText: 'Remove',
+      }))) return;
       try {
         await apiFetch('/api/kb/attachments/' + att.id + '/', {method:'DELETE'});
         this.kbAttachments = this.kbAttachments.filter(a => a.id !== att.id);

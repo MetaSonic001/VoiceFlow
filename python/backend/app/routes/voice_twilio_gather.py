@@ -556,7 +556,7 @@ Transcript:
                         else:
                             analysis = {"summary": content, "sentiment": "unknown"}
 
-                    log.analysis = analysis
+                    log.analysis = {**(log.analysis or {}), **analysis}
                     await db.commit()
                     logger.info("Post-call analysis completed for call %s", call_log_id)
 

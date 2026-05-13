@@ -407,7 +407,11 @@ function contactsApp() {
       } catch { this.notify('Failed to add note', 'error'); }
     },
     async deleteContact(id) {
-      if (!confirm('Delete this contact?')) return;
+      if (!(await vfConfirm({
+        title: 'Delete contact?',
+        message: 'Permanently delete this contact?',
+        confirmText: 'Delete',
+      }))) return;
       try {
         await fetch(`/api/contacts/${id}/`, { method: 'DELETE', headers: { 'X-CSRFToken': csrfToken() } });
         this.contacts = this.contacts.filter(c => c.id !== id);
@@ -462,7 +466,11 @@ function voiceprintsApp() {
     },
 
     async deleteVp(id) {
-      if (!confirm('Delete this voiceprint permanently?')) return;
+      if (!(await vfConfirm({
+        title: 'Delete voiceprint?',
+        message: 'Permanently delete this voiceprint?',
+        confirmText: 'Delete',
+      }))) return;
       try {
         const r = await fetch(`/api/speaker-verification/${id}/`, {
           method: 'DELETE', headers: { 'X-CSRFToken': csrfToken() }

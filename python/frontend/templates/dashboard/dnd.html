@@ -182,7 +182,11 @@ function dndApp() {
       } catch(e) { window.vfToast('Failed to add number', 'error'); }
     },
     async removeNumber(id) {
-      if (!confirm('Remove this number from DND?')) return;
+      if (!(await vfConfirm({
+        title: 'Remove from DND?',
+        message: 'Allow calls to this number again?',
+        confirmText: 'Remove',
+      }))) return;
       try {
         await apiFetch(`/api/dnd/${id}/`, { method: 'DELETE' });
         this.numbers = this.numbers.filter(n => n.id !== id);

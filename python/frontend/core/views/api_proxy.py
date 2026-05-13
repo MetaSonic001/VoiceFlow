@@ -566,6 +566,21 @@ def analytics_cost_estimate(request):
 
 
 @login_required
+def analytics_bi_summary(request):
+    """Unified BI: conversions, qualification, duration split, recording coverage, leaderboard."""
+    try:
+        return JsonResponse(get_client(request)._get(
+            "/analytics/bi-summary",
+            params={
+                "timeRange": request.GET.get("timeRange", "7d"),
+                "agentId": request.GET.get("agentId", ""),
+            },
+        ))
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
 def analytics_sentiment_trend(request):
     try:
         return JsonResponse(get_client(request)._get(

@@ -109,7 +109,11 @@ function knowledgeApp() {
   }
 }
 async function deleteDoc(docId) {
-  if (!confirm('Delete this document?')) return;
+  if (!(await vfConfirm({
+    title: 'Delete document?',
+    message: 'Permanently remove this document from the knowledge base?',
+    confirmText: 'Delete',
+  }))) return;
   try {
     await apiFetch('/api/documents/' + docId + '/', {method:'DELETE'});
     showToast('Document deleted');

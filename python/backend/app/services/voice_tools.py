@@ -190,6 +190,9 @@ class VoiceToolExecutor:
         if tool.name == "web_search":
             return await self._execute_web_search(arguments)
 
+        if tool.name == "transfer_call":
+            return await self._execute_transfer_call(arguments, agent_integrations)
+
         if tool.name in ("check_calcom_availability", "book_calcom_appointment"):
             return await self._execute_calcom(tool.name, arguments, agent_integrations or {})
 
@@ -390,6 +393,60 @@ class VoiceToolExecutor:
             logger.warning("[voice_tools] GCal error: %s", exc)
             return {"error": str(exc)}
         return {"error": "unknown action"}
+
+    async def _execute_transfer_call(
+        self, arguments: dict, agent_integrations: dict | None
+    ) -> dict:
+        """Warm transfer via Twilio REST — requires active voice session context."""
+        from sqlalchemy import select
+
+        from app.database import AsyncSessionLocal
+        from app.models import Agent, Tenant
+        from app.services.human_escalation_service import (
+            maybe_transfer_twilio_call,
+            voice_escalation_ctx,
+        )
+
+        ctx = voice_escalation_ctx.get()
+        transfer_to = (arguments.get("transfer_to") or "").strip()
+        if not transfer_to:
+            return {"error": "transfer_to is required"}
+        if not ctx or not ctx.get("call_sid"):
+            return {
+                "error": (
+                    "transfer_call only works during an active telephony session "
+                    "(Twilio Media Streams or Exotel)."
+                ),
+            }
+
+        async with AsyncSessionLocal() as db:
+            r1 = await db.execute(select(Tenant).where(Tenant.id == ctx["tenant_id"]))
+            r2 = await db.execute(select(Agent).where(Agent.id == ctx["agent_id"]))
+            tenant = r1.scalar_one_or_none()
+            agent = r2.scalar_one_or_none()
+
+        agent_name = (agent.name if agent else None) or "Assistant"
+        caller_phone = str(ctx.get("caller_phone") or "")
+        prov = (ctx.get("provider") or "twilio").lower()
+
+        ok = await maybe_transfer_twilio_call(
+            call_sid=ctx["call_sid"],
+            transfer_to=transfer_to,
+            tenant=tenant,
+            caller_phone=caller_phone,
+            transcript_snippet=f"Tool transfer_call requested destination {transfer_to}",
+            agent_name=agent_name,
+            provider=prov,
+        )
+        if ok:
+            return {"status": "transfer_initiated", "transfer_to": transfer_to}
+        if prov != "twilio":
+            return {
+                "status": "pending",
+                "transfer_to": transfer_to,
+                "note": "Exotel PSTN bridge should consume humanEscalation webhooks for handoff.",
+            }
+        return {"error": "Could not start transfer — check Twilio credentials and number format (E.164)."}
 
     async def _execute_web_search(self, arguments: dict) -> dict:
         """

@@ -69,7 +69,11 @@ function usersApp(){
       } catch(e) { showToast('Failed: '+e.message,'error'); }
     },
     async deleteUser(u) {
-      if (!confirm('Delete '+u.name+'?')) return;
+      if (!(await vfConfirm({
+        title: 'Delete user?',
+        message: 'Permanently delete ' + u.name + '? They will lose access to this workspace.',
+        confirmText: 'Delete user',
+      }))) return;
       try {
         await apiFetch('/api/users/' + u.id + '/', {method:'DELETE'});
         this.users = this.users.filter(x=>x.id!==u.id);

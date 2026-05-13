@@ -248,7 +248,11 @@ function recordingsApp() {
       } catch { this.notify('Download failed', 'error'); }
     },
     async deleteRec(id) {
-      if (!confirm('Delete this recording permanently?')) return;
+      if (!(await vfConfirm({
+        title: 'Delete recording?',
+        message: 'Permanently delete this recording? This cannot be undone.',
+        confirmText: 'Delete',
+      }))) return;
       try {
         await fetch(`/api/recordings/${id}/`, { method: 'DELETE', headers: { 'X-CSRFToken': csrfToken() } });
         this.recordings = this.recordings.filter(r => r.id !== id);

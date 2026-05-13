@@ -273,7 +273,11 @@ function liveMonitorApp() {
     },
 
     async endCall(callSid) {
-      if (!confirm('Force-end this call?')) return;
+      if (!(await vfConfirm({
+        title: 'End call?',
+        message: 'Force-end this active call immediately?',
+        confirmText: 'End call',
+      }))) return;
       try {
         const r = await fetch(`/api/live-monitor/calls/${callSid}/end`, {
           method: 'POST', credentials: 'include',

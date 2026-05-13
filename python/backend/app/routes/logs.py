@@ -4,13 +4,13 @@
 import math
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
-from sqlalchemy import select, func
+from sqlalchemy import select, func, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 
 from app.database import get_db
 from app.auth import AuthContext, get_auth
-from app.models import CallLog, Agent
+from app.models import CallLog, Agent, AuditLog
 
 router = APIRouter()
 
@@ -65,7 +65,59 @@ async def list_logs(
     return {"logs": logs, "total": total, "page": page, "limit": limit, "pages": math.ceil(total / limit) if limit else 0}
 
 
-@router.patch("/{log_id}/rating")
+@router.get("/{log_id}/audit-trail")
+async def get_call_audit_trail(
+    log_id: str,
+    auth: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_db),
+    limit: int = 200,
+):
+    """
+    Operational audit events for a call: rows keyed to the CallLog id or to the
+    conversation session id stored on the log (analysis.conversation_session_id).
+    """
+    result = await db.execute(
+        select(CallLog).where(CallLog.id == log_id, CallLog.tenantId == auth.tenant_id)
+    )
+    log = result.scalar_one_or_none()
+    if not log:
+        return JSONResponse({"error": "Log not found"}, status_code=404)
+
+    analysis = log.analysis if isinstance(log.analysis, dict) else {}
+    session_id = analysis.get("conversation_session_id") or analysis.get("session_id")
+
+    clauses = [
+        and_(AuditLog.resource == "call", AuditLog.resourceId == log_id),
+    ]
+    if session_id:
+        clauses.append(
+            and_(AuditLog.resource == "conversation_session", AuditLog.resourceId == session_id)
+        )
+
+    q = (
+        select(AuditLog)
+        .where(AuditLog.tenantId == auth.tenant_id, or_(*clauses))
+        .order_by(AuditLog.createdAt.asc())
+        .limit(min(limit, 500))
+    )
+    rows = (await db.execute(q)).scalars().all()
+
+    return {
+        "callLogId": log_id,
+        "conversationSessionId": session_id,
+        "events": [
+            {
+                "id": e.id,
+                "action": e.action,
+                "resource": e.resource,
+                "resourceId": e.resourceId,
+                "details": e.details,
+                "userId": e.userId,
+                "createdAt": e.createdAt.isoformat() if e.createdAt else None,
+            }
+            for e in rows
+        ],
+    }
 async def rate_log(log_id: str, body: dict, auth: AuthContext = Depends(get_auth), db: AsyncSession = Depends(get_db)):
     rating = body.get("rating")
     if rating not in (1, -1):

@@ -26,8 +26,10 @@ from app.config import settings
 from app.database import AsyncSessionLocal, get_db
 from app.models import Agent, CallLog, Tenant, Contact
 from app.services.credentials import decrypt_safe
+from app.services.semantic_vad import get_min_silence_ms
 from app.services.stt_service import stt_service
 from app.services.tts_router import TTSRouter
+from app.services.voice_turn_merge import clear_turn_merge, integrate_user_text
 
 logger = logging.getLogger("voiceflow.twilio_stream")
 router = APIRouter()
@@ -35,9 +37,12 @@ _tts = TTSRouter()
 
 # ── VAD / interruption constants ─────────────────────────────────────────────
 
-_SILENCE_FRAMES_THRESHOLD = 24      # ~480 ms at 8kHz, 20ms frames
-_INTERRUPT_RMS_THRESHOLD = 300.0    # energy threshold to detect user speaking over agent
+_SILENCE_FRAMES_THRESHOLD = 24      # default ~480 ms — overridden per-agent via turnDetectionSensitivity
+_INTERRUPT_RMS_THRESHOLD = 260.0    # slightly lower = faster barge-in on telephony audio
+_SILENCE_RMS_PCM = 50.0             # match streaming_orchestrator: below this = silence frame
 _FRAME_BYTES = 160                  # 20ms of 8kHz μ-law = 160 bytes
+
+_SENSITIVITY_FRAMES = {"high": 12, "medium": 24, "low": 40}  # 20ms frames → ~240ms / 480ms / 800ms
 
 
 # ── Redis helper ─────────────────────────────────────────────────────────────
@@ -349,6 +354,13 @@ async def media_stream_ws(websocket: WebSocket, agent_id: str):
         if agent.configuration:
             voice_id = agent.configuration.voiceId or voice_id
 
+        prefs = agent.llmPreferences or {}
+        turn_sensitivity = prefs.get("turnDetectionSensitivity", "medium")
+        base_silence_frames = _SENSITIVITY_FRAMES.get(turn_sensitivity, _SILENCE_FRAMES_THRESHOLD)
+        te = prefs.get("ttsEngine")
+        if isinstance(te, str) and te.strip():
+            tts_engine = te.strip()
+
     groq_key = await _groq_key_for_tenant(tenant_id)
 
     redis = _redis_client()
@@ -356,6 +368,9 @@ async def media_stream_ws(websocket: WebSocket, agent_id: str):
     stream_sid: str = ""
     call_sid: str = ""
     caller_phone: str = ""
+
+    # Adaptive pause detection: last flushed user text tunes silence for the *next* utterance
+    vad_context: dict[str, str] = {"last_user": ""}
 
     # Session-level buffers and state
     pcm_buffer = bytearray()
@@ -433,7 +448,7 @@ async def media_stream_ws(websocket: WebSocket, agent_id: str):
                 pcm_chunk = _mulaw_to_pcm16k(mulaw_chunk)
                 rms = _pcm_rms(pcm_chunk)
 
-                # Interruption detection while agent is speaking
+                # Interruption detection while agent is speaking (barge-in)
                 if agent_speaking_event.is_set() and rms > _INTERRUPT_RMS_THRESHOLD:
                     logger.debug("[twilio_stream] interruption detected rms=%.1f", rms)
                     agent_speaking_event.clear()
@@ -441,21 +456,26 @@ async def media_stream_ws(websocket: WebSocket, agent_id: str):
                         await _send_clear(websocket, stream_sid)
                     pcm_buffer.clear()
                     silence_frames = 0
+                    clear_turn_merge(call_sid)
                     continue
 
                 pcm_buffer.extend(pcm_chunk)
 
-                if rms < 50.0:
+                vad_tail_ms = get_min_silence_ms(vad_context["last_user"])
+                vad_frames = max(12, vad_tail_ms // 20)
+                effective_silence_frames = max(base_silence_frames, vad_frames)
+
+                if rms < _SILENCE_RMS_PCM:
                     silence_frames += 1
                 else:
                     silence_frames = 0
 
-                if silence_frames >= _SILENCE_FRAMES_THRESHOLD and len(pcm_buffer) > 0:
+                if silence_frames >= effective_silence_frames and len(pcm_buffer) > 0:
                     utterance = bytes(pcm_buffer)
                     pcm_buffer.clear()
                     silence_frames = 0
 
-                    # Background pipeline: STT → RAG → TTS → send
+                    # Background pipeline: STT → (merge incomplete turns) → RAG → TTS → send
                     _track_task(
                         _handle_utterance(
                             websocket=websocket,
@@ -464,11 +484,13 @@ async def media_stream_ws(websocket: WebSocket, agent_id: str):
                             tenant_id=tenant_id,
                             stream_sid=stream_sid,
                             call_sid=call_sid,
+                            caller_phone=caller_phone,
                             voice_id=voice_id,
                             tts_engine=tts_engine,
                             groq_key=groq_key,
                             full_transcript=full_transcript,
                             agent_speaking_event=agent_speaking_event,
+                            vad_context=vad_context,
                         )
                     )
 
@@ -499,8 +521,16 @@ async def media_stream_ws(websocket: WebSocket, agent_id: str):
 
                     async def _dtmf_token_gen():
                         async with AsyncSessionLocal() as db:
+                            vc = {
+                                "call_sid": call_sid,
+                                "caller_phone": caller_phone,
+                                "provider": "twilio",
+                                "tenant_id": tenant_id,
+                                "agent_id": agent_id,
+                            }
                             async for token in process_query_streaming(
-                                db, tenant_id, agent_id, dtmf_text, dtmf_session_id
+                                db, tenant_id, agent_id, dtmf_text, dtmf_session_id,
+                                voice_escalation_context=vc,
                             ):
                                 if isinstance(token, str):
                                     dtmf_response_parts.append(token)
@@ -547,6 +577,8 @@ async def media_stream_ws(websocket: WebSocket, agent_id: str):
         if pending_tasks:
             await asyncio.gather(*pending_tasks, return_exceptions=True)
 
+        clear_turn_merge(call_sid)
+
         # Persist call log
         await _save_call_log(
             tenant_id=tenant_id,
@@ -580,23 +612,61 @@ async def _handle_utterance(
     tenant_id: str,
     stream_sid: str,
     call_sid: str,
+    caller_phone: str,
     voice_id: str,
     tts_engine: str,
     groq_key: str | None,
     full_transcript: list[dict],
     agent_speaking_event: asyncio.Event,
+    vad_context: dict[str, str],
 ) -> None:
-    """STT → streaming RAG → streaming TTS → Twilio (sub-500ms first-byte)."""
-    # 1. STT
+    """STT → merge incomplete turns → streaming RAG → Twilio."""
     transcript = await stt_service.transcribe_bytes(
         utterance,
         sample_rate=16000,
         engine="faster-whisper",
         groq_api_key=groq_key,
+        call_sid=call_sid or None,
     )
     if not transcript:
         return
 
+    merge_key = call_sid or f"agent-{agent_id}"
+
+    async def _flush(merged: str) -> None:
+        vad_context["last_user"] = merged[:280]
+        await _twilio_run_agent_turn(
+            websocket=websocket,
+            transcript=merged,
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            stream_sid=stream_sid,
+            call_sid=call_sid,
+            caller_phone=caller_phone,
+            voice_id=voice_id,
+            tts_engine=tts_engine,
+            full_transcript=full_transcript,
+            agent_speaking_event=agent_speaking_event,
+        )
+
+    await integrate_user_text(merge_key, transcript, on_complete=_flush)
+
+
+async def _twilio_run_agent_turn(
+    *,
+    websocket: WebSocket,
+    transcript: str,
+    agent_id: str,
+    tenant_id: str,
+    stream_sid: str,
+    call_sid: str,
+    caller_phone: str,
+    voice_id: str,
+    tts_engine: str,
+    full_transcript: list[dict],
+    agent_speaking_event: asyncio.Event,
+) -> None:
+    """Append transcript, run streaming RAG → TTS → Twilio (sub-500ms first-byte)."""
     full_transcript.append({"role": "user", "content": transcript})
     logger.info("[twilio_stream] transcript call=%s: %s", call_sid, transcript)
 
@@ -618,16 +688,31 @@ async def _handle_utterance(
             pass
 
     # 2. Streaming RAG → streaming TTS → Twilio chunks
+    from app.services.human_escalation_service import voice_escalation_ctx
     from app.services.rag_service import process_query_streaming
 
     session_id = f"twilio-{call_sid}"
     full_response_parts: list[str] = []
 
+    voice_ctx = {
+        "call_sid": call_sid,
+        "caller_phone": caller_phone,
+        "provider": "twilio",
+        "tenant_id": tenant_id,
+        "agent_id": agent_id,
+    }
+    _ctx_tok = voice_escalation_ctx.set(voice_ctx)
+
     async def _token_generator():
         """Yield LLM tokens from the streaming RAG pipeline."""
         async with AsyncSessionLocal() as db:
             async for token in process_query_streaming(
-                db, tenant_id, agent_id, transcript, session_id
+                db,
+                tenant_id,
+                agent_id,
+                transcript,
+                session_id,
+                voice_escalation_context=voice_ctx,
             ):
                 if isinstance(token, str):
                     full_response_parts.append(token)
@@ -661,6 +746,7 @@ async def _handle_utterance(
         logger.exception("[twilio_stream] streaming pipeline failed call=%s", call_sid)
     finally:
         agent_speaking_event.clear()
+        voice_escalation_ctx.reset(_ctx_tok)
 
     # Save full response to transcript
     full_response = "".join(full_response_parts)
@@ -737,6 +823,7 @@ async def _save_call_log(
                 endedAt=ended_at,
                 durationSeconds=duration,
                 transcript=json.dumps(transcript),
+                analysis={"conversation_session_id": f"twilio-{call_sid}"},
             )
             db.add(log)
 

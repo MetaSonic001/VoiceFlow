@@ -585,7 +585,11 @@ function ivrApp() {
     },
 
     async deleteTree(id) {
-      if (!confirm('Delete this IVR tree? This cannot be undone.')) return;
+      if (!(await vfConfirm({
+        title: 'Delete IVR tree?',
+        message: 'Delete this IVR tree? This cannot be undone.',
+        confirmText: 'Delete',
+      }))) return;
       try {
         await fetch(`/api/ivr/${id}/`, { method: 'DELETE', headers: { 'X-CSRFToken': csrfToken() } });
         this.trees = this.trees.filter(t => t.id !== id);

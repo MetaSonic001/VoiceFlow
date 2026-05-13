@@ -265,6 +265,7 @@ async def voice_websocket(websocket: WebSocket, agent_id: str):
                                     {"role": "assistant", "content": response_text},
                                 ]
                             ),
+                            analysis={"conversation_session_id": session_id},
                         )
                         db.add(log)
                         await db.commit()

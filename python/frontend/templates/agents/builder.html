@@ -17,7 +17,8 @@
     user-select: none;
   }
   #vf-canvas.canvas-panning { cursor: grabbing; }
-  #vf-svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+  /* SVG after nodes in DOM so edges paint on top; still ignore hits so ports/nodes receive events */
+  #vf-svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; z-index: 15; }
   .vf-node {
     position: absolute; width: 160px; min-height: 56px;
     border-radius: 10px; padding: 10px 14px;
@@ -37,14 +38,16 @@
   .vf-port-out {
     position: absolute; right: -9px; top: 50%; transform: translateY(-50%);
     width: 16px; height: 16px; border-radius: 50%;
-    background: white; border: 2px solid #14b8a6; cursor: crosshair; z-index: 30;
+    background: white; border: 2px solid #14b8a6; cursor: crosshair; z-index: 40;
+    pointer-events: auto;
     transition: transform .1s, background .1s;
   }
   .vf-port-out:hover { background: #14b8a6; transform: translateY(-50%) scale(1.3); }
   .vf-port-in {
     position: absolute; left: -9px; top: 50%; transform: translateY(-50%);
     width: 16px; height: 16px; border-radius: 50%;
-    background: white; border: 2px solid #64748b; z-index: 30;
+    background: white; border: 2px solid #64748b; z-index: 40;
+    pointer-events: auto;
   }
   .vf-connector { stroke:#14b8a6; stroke-width:2; fill:none; marker-end:url(#arrowhead); }
   .vf-connector-draft { stroke:#94a3b8; stroke-width:1.5; stroke-dasharray:5; fill:none; }
@@ -79,7 +82,7 @@
       {% endif %}
       <div>
         <h1 class="text-2xl font-bold vf-heading" x-text="agentId ? (agentName || 'Flow Builder') : 'New Agent Flow'"></h1>
-        <p class="text-slate-500 text-xs mt-0.5" x-text="agentId ? 'Editing workflow — drag nodes, connect ports, save when done.' : 'New agent — design the flow, enter a name, then save.'"></p>
+        <p class="text-slate-500 text-xs mt-0.5" x-text="agentId ? 'Drag the green output handle to another node’s grey input to connect (like n8n). Or use Next Node in the inspector.' : 'New agent — design the flow, enter a name, then save.'"></p>
       </div>
     </div>
     <div class="flex gap-2 items-center">
@@ -150,20 +153,7 @@
         <div id="vf-world"
              :style="`transform:translate(${panX}px,${panY}px) scale(${zoom});transform-origin:0 0;position:absolute;top:0;left:0;width:${worldW}px;height:${worldH}px;`">
 
-          <!-- SVG connectors -->
-          <svg id="vf-svg" :style="`width:${worldW}px;height:${worldH}px;`">
-            <defs>
-              <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-                <polygon points="0 0,8 3,0 6" fill="#14b8a6"/>
-              </marker>
-            </defs>
-            <template x-for="edge in edges" :key="edge.from+'-'+edge.to">
-              <path :d="edgePath(edge)" class="vf-connector"/>
-            </template>
-            <path x-show="draftEdge" :d="draftPath()" class="vf-connector-draft"/>
-          </svg>
-
-          <!-- Nodes -->
+          <!-- Nodes (SVG is below so connection lines render on top, n8n-style) -->
           <template x-for="node in nodes" :key="node.id">
             <div :id="'node-'+node.id"
                  :style="`left:${node.x}px;top:${node.y}px`"
@@ -182,6 +172,18 @@
                       style="position:absolute;top:-8px;right:-8px;width:18px;height:18px;border-radius:50%;background:#ef4444;color:white;font-size:10px;display:flex;align-items:center;justify-content:center;border:none;cursor:pointer;z-index:40;">✕</button>
             </div>
           </template>
+
+          <svg id="vf-svg" :style="`width:${worldW}px;height:${worldH}px;`">
+            <defs>
+              <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+                <polygon points="0 0,8 3,0 6" fill="#14b8a6"/>
+              </marker>
+            </defs>
+            <template x-for="edge in edges" :key="edge.from+'-'+edge.to+(edge.if||'')+(edge.label||'')">
+              <path :d="edgePath(edge)" class="vf-connector"/>
+            </template>
+            <path x-show="draftEdge" :d="draftPath()" class="vf-connector-draft"/>
+          </svg>
         </div>
 
         <!-- Empty state -->
@@ -311,6 +313,8 @@ function flowBuilder() {
   const NODE_TYPES = [
     { id:'start',          label:'Start',          icon:'▶' },
     { id:'greeting',       label:'Greeting',        icon:'👋' },
+    { id:'instruction',    label:'Instruction',     icon:'📋' },
+    { id:'collect',        label:'Collect slot',    icon:'📝' },
     { id:'knowledge',      label:'Knowledge',       icon:'🔍' },
     { id:'condition',      label:'Condition',       icon:'🔀' },
     { id:'api_call',       label:'API Call',        icon:'⚡' },
@@ -348,6 +352,8 @@ function flowBuilder() {
           if(flow.nodes&&flow.nodes.length){
             this.nodes = flow.nodes.map(n=>({nextId:'',yesId:'',noId:'',text:'',tool:'',field:'',number:'',...n, x:n.x??80, y:n.y??80}));
             this.edges = flow.edges||[];
+            if(this.edges.length){ this.applyEdgesToNodeLinks(); }
+            else { this.rebuildEdges(); }
           } else {
             await this.generateFromAgent();
           }
@@ -369,7 +375,7 @@ function flowBuilder() {
         const nodes=[], edges=[];
         const start = this._mkNode('start','Start',80,260);  nodes.push(start);
         const greet = this._mkNode('greeting','Greeting',300,260); greet.text=ag.welcomeMessage||''; nodes.push(greet);
-        edges.push({from:'start_1',to:greet.id});
+        edges.push({from:start.id,to:greet.id});
         let prev=greet.id, col=2;
         for(const s of cb.slice(0,4)){
           const kn=this._mkNode('knowledge',s.title||'Knowledge',80+col*220, 260-(col%2?100:0));
@@ -406,10 +412,35 @@ function flowBuilder() {
       const edges=[];
       for(const n of this.nodes){
         if(n.nextId) edges.push({from:n.id,to:n.nextId});
-        if(n.yesId)  edges.push({from:n.id,to:n.yesId,label:'yes'});
-        if(n.noId)   edges.push({from:n.id,to:n.noId, label:'no'});
+        if(n.yesId)  edges.push({from:n.id,to:n.yesId,if:'yes',label:'yes'});
+        if(n.noId)   edges.push({from:n.id,to:n.noId,if:'no',label:'no'});
       }
       this.edges=edges;
+    },
+
+    /** Keep inspector nextId / yesId / noId in sync when flow is loaded from JSON edges. */
+    applyEdgesToNodeLinks(){
+      for(const n of this.nodes){
+        n.nextId='';
+        n.yesId='';
+        n.noId='';
+      }
+      for(const e of this.edges){
+        const from=this.nodes.find(n=>n.id===e.from);
+        if(!from) continue;
+        const iff=e.if!=null&&e.if!==''?String(e.if):'';
+        const lab=e.label!=null&&e.label!==''?String(e.label):'';
+        if(from.type==='condition'){
+          if(lab==='yes'||iff==='yes') from.yesId=e.to;
+          else if(lab==='no'||iff==='no') from.noId=e.to;
+          else {
+            if(!from.yesId) from.yesId=e.to;
+            else if(!from.noId) from.noId=e.to;
+          }
+        } else {
+          if(!iff&&!lab) from.nextId=e.to;
+        }
+      }
     },
 
     edgePath(edge){
@@ -437,12 +468,17 @@ function flowBuilder() {
     portMouseUp(toNode){
       if(!_dragPort)return;
       const from=_dragPort.fromNode;
-      if(from.id!==toNode.id){
-        this.edges=this.edges.filter(e=>!(e.from===from.id&&!e.label));
-        this.edges.push({from:from.id,to:toNode.id});
+      _dragPort=null; this.draftEdge=null;
+      if(from.id===toNode.id) return;
+      if(from.type==='condition'){
+        if(from.yesId===toNode.id||from.noId===toNode.id) return;
+        if(!from.yesId) from.yesId=toNode.id;
+        else if(!from.noId) from.noId=toNode.id;
+        else from.noId=toNode.id;
+      } else {
         from.nextId=toNode.id;
       }
-      _dragPort=null; this.draftEdge=null;
+      this.rebuildEdges();
     },
 
     canvasMouseDown(evt){
@@ -465,7 +501,7 @@ function flowBuilder() {
     },
     canvasMouseUp(){
       _dragNode=null;
-      if(!this.draftEdge||!_dragPort){_dragPort=null;this.draftEdge=null;}
+      if(this.draftEdge||_dragPort){ _dragPort=null; this.draftEdge=null; }
       if(_panning){_panning=false;document.getElementById('vf-canvas').classList.remove('canvas-panning');}
     },
     canvasWheel(evt){

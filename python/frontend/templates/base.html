@@ -208,6 +208,84 @@
   <!-- Toast container -->
   <div id="toast-container" class="fixed top-4 right-4 z-[100] space-y-2"></div>
 
+  <!-- Global confirm dialog (delete / destructive actions) — use await vfConfirm({ ... }) -->
+  <div id="vf-confirm-modal" class="hidden fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/55 backdrop-blur-sm"
+       aria-hidden="true" role="alertdialog" aria-labelledby="vf-confirm-title" aria-describedby="vf-confirm-message">
+    <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-md w-full p-6 border border-slate-200 dark:border-slate-600 scale-in">
+      <h3 id="vf-confirm-title" class="text-lg font-semibold text-slate-900 dark:text-white mb-2">Are you sure?</h3>
+      <p id="vf-confirm-message" class="text-sm text-slate-600 dark:text-slate-300 mb-6 whitespace-pre-wrap"></p>
+      <div class="flex gap-3 justify-end">
+        <button type="button" id="vf-confirm-cancel"
+          class="px-4 py-2 text-sm font-medium rounded-lg border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 transition focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 dark:focus:ring-offset-slate-800">Cancel</button>
+        <button type="button" id="vf-confirm-ok"
+          class="px-4 py-2 text-sm font-medium rounded-lg text-white bg-red-600 hover:bg-red-700 transition focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      function vfConfirm(options) {
+        const opts = typeof options === 'string' ? { message: options } : (options || {});
+        const title = opts.title != null ? opts.title : 'Are you sure?';
+        const message = opts.message != null ? String(opts.message) : '';
+        const confirmText = opts.confirmText || 'Delete';
+        const cancelText = opts.cancelText || 'Cancel';
+        const danger = opts.danger !== false;
+
+        return new Promise(function (resolve) {
+          const modal = document.getElementById('vf-confirm-modal');
+          const titleEl = document.getElementById('vf-confirm-title');
+          const msgEl = document.getElementById('vf-confirm-message');
+          const btnOk = document.getElementById('vf-confirm-ok');
+          const btnCancel = document.getElementById('vf-confirm-cancel');
+          if (!modal || !titleEl || !msgEl || !btnOk || !btnCancel) {
+            resolve(window.confirm(message || title));
+            return;
+          }
+
+          titleEl.textContent = title;
+          msgEl.textContent = message;
+          btnOk.textContent = confirmText;
+          btnCancel.textContent = cancelText;
+          btnOk.className = danger
+            ? 'px-4 py-2 text-sm font-medium rounded-lg text-white bg-red-600 hover:bg-red-700 transition focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800'
+            : 'px-4 py-2 text-sm font-medium rounded-lg text-white bg-teal-600 hover:bg-teal-700 transition focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-offset-2 dark:focus:ring-offset-slate-800';
+
+          let finished = false;
+          function done(val) {
+            if (finished) return;
+            finished = true;
+            modal.classList.add('hidden');
+            modal.setAttribute('aria-hidden', 'true');
+            document.removeEventListener('keydown', onKey);
+            btnOk.removeEventListener('click', onOk);
+            btnCancel.removeEventListener('click', onCancel);
+            modal.removeEventListener('click', onBackdrop);
+            resolve(val);
+          }
+          function onKey(e) {
+            if (e.key === 'Escape') done(false);
+          }
+          function onOk() { done(true); }
+          function onCancel() { done(false); }
+          function onBackdrop(e) {
+            if (e.target === modal) done(false);
+          }
+
+          modal.classList.remove('hidden');
+          modal.setAttribute('aria-hidden', 'false');
+          document.addEventListener('keydown', onKey);
+          btnOk.addEventListener('click', onOk);
+          btnCancel.addEventListener('click', onCancel);
+          modal.addEventListener('click', onBackdrop);
+          setTimeout(function () { btnCancel.focus(); }, 30);
+        });
+      }
+      window.vfConfirm = vfConfirm;
+    })();
+  </script>
+
   {% block body %}{% endblock %}
 
   <script>

@@ -65,6 +65,11 @@ class FlowEngine:
             src = edge.get("from", "")
             dst = edge.get("to", "")
             condition = edge.get("if")  # None means unconditional
+            # Builder UI historically stored yes/no on `label` only
+            if condition is None:
+                lab = edge.get("label")
+                if lab in ("yes", "no"):
+                    condition = lab
             edges.setdefault(src, []).append((dst, condition))
 
         # Find start node

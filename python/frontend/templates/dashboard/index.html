@@ -328,7 +328,11 @@ function dashboardApp() {
       }
     },
     async deleteAgent(agent) {
-      if (!confirm('Delete ' + agent.name + '?')) return;
+      if (!(await vfConfirm({
+        title: 'Delete agent?',
+        message: 'Permanently delete “' + agent.name + '”? This removes the agent and related data from your workspace.',
+        confirmText: 'Delete agent',
+      }))) return;
       try {
         await apiFetch(`/api/agents/${agent.id}/`, {method:'DELETE'});
         this.agents = this.agents.filter(a => a.id !== agent.id);

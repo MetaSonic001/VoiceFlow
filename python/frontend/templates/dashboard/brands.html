@@ -146,7 +146,11 @@ function brandsApp() {
     },
 
     async deleteBrand(id) {
-      if (!confirm('Delete this brand?')) return;
+      if (!(await vfConfirm({
+        title: 'Delete brand?',
+        message: 'Permanently delete this brand? Agents linked only to this brand may be affected.',
+        confirmText: 'Delete',
+      }))) return;
       try {
         await apiFetch('/api/brands/' + id + '/', { method: 'DELETE' });
         this.brands = this.brands.filter(b => b.id !== id);

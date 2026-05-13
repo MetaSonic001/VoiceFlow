@@ -163,6 +163,12 @@ async def delete_conversation_history(
         await r.delete(key)
     except Exception:
         pass
+    try:
+        from app.services.workflow_runtime import clear_state
+
+        await clear_state(tenant_id, agent_id, session_id)
+    except Exception:
+        pass
 
 
 # ── 2. Context Injection (5-Layer) ───────────────────────────────────────────
@@ -209,6 +215,9 @@ async def assemble_context(
         "conversationHistory": [],
         "tokenLimit": 4096,
         "model": "llama-3.1-8b-instant",
+        "voiceRealtime": False,
+        "flowDefinition": None,
+        "workflowEnabled": False,
     }
 
     # Layer 2 + 4: Tenant and Agent fetched in parallel (independent queries)
@@ -234,6 +243,10 @@ async def assemble_context(
 
         # Resolve model from agent preferences
         prefs = agent.llmPreferences or {}
+        ctx["flowDefinition"] = agent.flow_definition
+        from app.services.workflow_runtime import workflow_should_run
+
+        ctx["workflowEnabled"] = workflow_should_run(prefs, ctx["flowDefinition"])
         model = prefs.get("model", "llama-3.1-8b-instant")
         if model not in GROQ_MODELS_ALLOWLIST:
             model = "llama-3.1-8b-instant"
@@ -318,6 +331,8 @@ async def assemble_context(
     ctx["conversationHistory"] = await get_conversation_history(
         tenant_id, agent_id, session_id
     )
+
+    ctx["voiceRealtime"] = session_id.startswith(("twilio-", "live-", "exotel-"))
 
     # Layer 6: Contact variables (outbound campaigns)
     if contact_variables and isinstance(contact_variables, dict):
@@ -833,6 +848,16 @@ def build_system_prompt(ctx: dict) -> str:
     if agent_parts:
         sections.append(f"[AGENT]\n" + "\n".join(agent_parts))
 
+    if ctx.get("voiceRealtime"):
+        sections.append(
+            "[REALTIME VOICE]\n"
+            "You are on a live spoken call (phone or browser voice). "
+            "Keep answers concise and easy to hear; use short sentences. "
+            "If the user interrupts, corrects themselves, or changes their mind, follow their latest intent only—do not insist on an earlier interpretation. "
+            "Do not ask them to wait unnecessarily. "
+            "If their wording sounds truncated or incomplete, respond to what you understood and invite a brief clarification."
+        )
+
     # Section 5: Few-Shot Examples (from retraining)
     if ctx.get("fewShotExamples"):
         examples_text = []
@@ -888,6 +913,21 @@ def build_system_prompt(ctx: dict) -> str:
             cv_parts.append(f"Their {readable_key} is {value}.")
         if cv_parts:
             sections.append("[CONTACT CONTEXT]\n" + " ".join(cv_parts))
+
+    wf_dir = (ctx.get("workflowDirective") or "").strip()
+    if wf_dir:
+        sections.append(
+            "[WORKFLOW STEP — follow this turn]\n"
+            + wf_dir
+            + "\nExecute this step faithfully before chasing unrelated topics; keep replies concise."
+        )
+    wf_slots = ctx.get("workflowSlots")
+    if wf_slots and isinstance(wf_slots, dict) and wf_slots:
+        sections.append(
+            "[WORKFLOW FACTS COLLECTED]\n"
+            + json.dumps(wf_slots, ensure_ascii=False)
+            + "\nUse these facts; do not re-ask unless clarification is needed."
+        )
 
     return "\n\n---\n\n".join(sections)
 
@@ -1104,10 +1144,7 @@ async def process_query(
     if retrieved_docs:
         retrieved_docs = await _rerank_with_cross_encoder(query, retrieved_docs)
 
-    # 6. Build system prompt
-    system_prompt = build_system_prompt(ctx)
-
-    # 7. Resolve Groq key
+    # 6. Resolve Groq key (workflow steps only run when we can actually call the LLM)
     result = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
     tenant = result.scalar_one_or_none()
     groq_key = _resolve_groq_key(tenant)
@@ -1118,7 +1155,25 @@ async def process_query(
             "sources": [],
         }
 
-    # 8. Generate response — traced
+    from app.services.workflow_runtime import after_llm_turn, before_llm_turn
+
+    wf_result = await before_llm_turn(
+        tenant_id=tenant_id,
+        agent_id=agent_id,
+        session_id=session_id,
+        flow_definition=ctx.get("flowDefinition"),
+        user_message=query,
+        workflow_enabled=bool(ctx.get("workflowEnabled")),
+    )
+    wf_response_node_id = wf_result.response_node_id
+    if wf_result.directive:
+        ctx["workflowDirective"] = wf_result.directive
+    if wf_result.slots:
+        ctx["workflowSlots"] = wf_result.slots
+
+    system_prompt = build_system_prompt(ctx)
+
+    # 7. Generate response — traced
     async with trace_span(
         "llm",
         tenant_id=tenant_id,
@@ -1155,11 +1210,37 @@ async def process_query(
 
     response_text = response_result if isinstance(response_result, str) else response_result.get("content", "")
 
-    # 9. Save conversation turn
+    # 8. Save conversation turn
     history = ctx["conversationHistory"]
     history.append({"role": "user", "content": query})
     history.append({"role": "assistant", "content": response_text})
     await save_conversation_history(tenant_id, agent_id, session_id, history)
+
+    try:
+        from app.services.audit_service import record_session_audit_event
+
+        await record_session_audit_event(
+            tenant_id,
+            session_id,
+            agent_id,
+            "call_audit.transcript.turn",
+            details={
+                "user_chars": len(query),
+                "assistant_chars": len(response_text),
+                "history_turns": len(history),
+            },
+        )
+    except Exception:
+        logger.debug("[rag] transcript audit skipped", exc_info=True)
+
+    await after_llm_turn(
+        tenant_id=tenant_id,
+        agent_id=agent_id,
+        session_id=session_id,
+        flow_definition=ctx.get("flowDefinition"),
+        workflow_enabled=bool(ctx.get("workflowEnabled")),
+        response_node_id=wf_response_node_id,
+    )
 
     # Return sources for transparency
     sources = []
@@ -1407,6 +1488,7 @@ async def process_query_streaming(
     query: str,
     session_id: str = "default",
     contact_variables: Optional[dict] = None,
+    voice_escalation_context: Optional[dict] = None,
 ):
     """
     Streaming RAG pipeline.
@@ -1435,9 +1517,6 @@ async def process_query_streaming(
     if retrieved_docs and ctx.get("mergedPolicies"):
         retrieved_docs = apply_policy_scoring(retrieved_docs, ctx["mergedPolicies"])
 
-    # 3. Build system prompt
-    system_prompt = build_system_prompt(ctx)
-
     # Resolve provider, key, model
     result_t = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
     tenant = result_t.scalar_one_or_none()
@@ -1452,7 +1531,25 @@ async def process_query_streaming(
         yield "No AI API key configured. Please add an API key in Settings."
         return
 
-    # 4. Build messages
+    from app.services.workflow_runtime import after_llm_turn, before_llm_turn
+
+    wf_result = await before_llm_turn(
+        tenant_id=tenant_id,
+        agent_id=agent_id,
+        session_id=session_id,
+        flow_definition=ctx.get("flowDefinition"),
+        user_message=query,
+        workflow_enabled=bool(ctx.get("workflowEnabled")),
+    )
+    wf_response_node_id = wf_result.response_node_id
+    if wf_result.directive:
+        ctx["workflowDirective"] = wf_result.directive
+    if wf_result.slots:
+        ctx["workflowSlots"] = wf_result.slots
+
+    system_prompt = build_system_prompt(ctx)
+
+    # 3. Build messages
     context_text = "\n\n".join(c["content"] for c in retrieved_docs if c.get("content"))
     messages: list[dict] = [{"role": "system", "content": system_prompt}]
     if context_text:
@@ -1507,7 +1604,8 @@ async def process_query_streaming(
 
                 tool_obj = TOOL_REGISTRY.get(tool_name)
                 if tool_obj:
-                    tool_result = await executor.execute(tool_obj, tool_args)
+                    agent_integrations = (agent.integrations or {}) if agent else {}
+                    tool_result = await executor.execute(tool_obj, tool_args, agent_integrations)
                 else:
                     tool_result = {"error": f"Unknown tool: {tool_name}"}
 
@@ -1532,3 +1630,44 @@ async def process_query_streaming(
     history.append({"role": "user", "content": query})
     history.append({"role": "assistant", "content": full_response})
     await save_conversation_history(tenant_id, agent_id, session_id, history)
+
+    try:
+        from app.services.audit_service import record_session_audit_event
+
+        await record_session_audit_event(
+            tenant_id,
+            session_id,
+            agent_id,
+            "call_audit.transcript.turn",
+            details={
+                "user_chars": len(query),
+                "assistant_chars": len(full_response),
+                "history_turns": len(history),
+            },
+        )
+    except Exception:
+        logger.debug("[rag_streaming] transcript audit skipped", exc_info=True)
+
+    await after_llm_turn(
+        tenant_id=tenant_id,
+        agent_id=agent_id,
+        session_id=session_id,
+        flow_definition=ctx.get("flowDefinition"),
+        workflow_enabled=bool(ctx.get("workflowEnabled")),
+        response_node_id=wf_response_node_id,
+    )
+
+    if voice_escalation_context:
+        from app.services.human_escalation_service import post_voice_turn_escalation
+
+        await post_voice_turn_escalation(
+            db=db,
+            tenant_id=tenant_id,
+            agent_id=agent_id,
+            session_id=session_id,
+            user_message=query,
+            assistant_message=full_response,
+            flow_definition=ctx.get("flowDefinition"),
+            workflow_response_node_id=wf_response_node_id,
+            voice_context=voice_escalation_context,
+        )

@@ -242,6 +242,11 @@ function chatApp() {
         case 'state':
           this.liveState = msg.state;
           break;
+        case 'partial_transcript':
+          if (this.liveState === 'listening') {
+            this.liveText = msg.text || '';
+          }
+          break;
         case 'transcript':
           this.liveText = msg.text;
           this.liveMessages.push({role: 'user', text: msg.text});

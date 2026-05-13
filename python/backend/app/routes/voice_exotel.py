@@ -43,8 +43,11 @@ from app.config import settings
 from app.database import AsyncSessionLocal
 from app.models import Agent, CallLog, Tenant
 from app.services.credentials import decrypt_safe
+from app.services.semantic_vad import get_min_silence_ms
 from app.services.stt_service import stt_service
 from app.services.tts_router import TTSRouter
+from app.services.voice_turn_merge import clear_turn_merge, integrate_user_text
+from app.routes.voice_twilio_stream import _groq_key_for_tenant
 
 logger = logging.getLogger("voiceflow.exotel")
 router = APIRouter()
@@ -52,8 +55,10 @@ _tts = TTSRouter()
 
 # Exotel audio: PCM 8kHz 16-bit mono (same frame size as Twilio μ-law)
 _FRAME_BYTES = 320          # 20ms × 8000Hz × 2 bytes/sample
-_SILENCE_FRAMES_THRESHOLD = 24  # ~480ms of silence → flush utterance
-_INTERRUPT_RMS_THRESHOLD = 800.0
+_SENSITIVITY_FRAMES = {"high": 12, "medium": 24, "low": 40}
+_DEFAULT_SIL_FRAMES = 24
+_INTERRUPT_RMS_THRESHOLD = 520.0   # 8k PCM RMS — responsive barge-in vs noise floor
+_SILENCE_RMS_8K = 80.0
 
 
 def _validate_exotel_webhook(request: Request, form_data: dict) -> bool:
@@ -255,6 +260,13 @@ async def exotel_stream(websocket: WebSocket, agent_id: str):
         if agent.configuration:
             voice_id = agent.configuration.voiceId or voice_id
 
+        prefs = agent.llmPreferences or {}
+        turn_sensitivity = prefs.get("turnDetectionSensitivity", "medium")
+        base_silence_frames = _SENSITIVITY_FRAMES.get(turn_sensitivity, _DEFAULT_SIL_FRAMES)
+        te = prefs.get("ttsEngine")
+        if isinstance(te, str) and te.strip():
+            tts_engine = te.strip()
+
     call_started = datetime.now(timezone.utc)
     call_sid = ""
     stream_sid = ""
@@ -263,6 +275,7 @@ async def exotel_stream(websocket: WebSocket, agent_id: str):
     agent_speaking = asyncio.Event()
     full_transcript: list[dict] = []
     pending_tasks: set[asyncio.Task] = set()
+    vad_context: dict[str, str] = {"last_user": ""}
 
     def _track(coro):
         t = asyncio.create_task(coro)
@@ -300,16 +313,21 @@ async def exotel_stream(websocket: WebSocket, agent_id: str):
                     agent_speaking.clear()
                     pcm_buffer.clear()
                     silence_frames = 0
+                    clear_turn_merge(call_sid)
                     continue
 
                 pcm_buffer.extend(pcm_16k)
 
-                if rms < 80.0:
+                vad_tail_ms = get_min_silence_ms(vad_context["last_user"])
+                vad_frames = max(12, vad_tail_ms // 20)
+                effective_silence_frames = max(base_silence_frames, vad_frames)
+
+                if rms < _SILENCE_RMS_8K:
                     silence_frames += 1
                 else:
                     silence_frames = 0
 
-                if silence_frames >= _SILENCE_FRAMES_THRESHOLD and len(pcm_buffer) > 0:
+                if silence_frames >= effective_silence_frames and len(pcm_buffer) > 0:
                     utterance = bytes(pcm_buffer)
                     pcm_buffer.clear()
                     silence_frames = 0
@@ -321,8 +339,10 @@ async def exotel_stream(websocket: WebSocket, agent_id: str):
                         call_sid=call_sid,
                         voice_id=voice_id,
                         tts_engine=tts_engine,
+                        groq_key=groq_key,
                         full_transcript=full_transcript,
                         agent_speaking=agent_speaking,
+                        vad_context=vad_context,
                     ))
 
             elif event == "stop":
@@ -337,6 +357,7 @@ async def exotel_stream(websocket: WebSocket, agent_id: str):
             task.cancel()
         if pending_tasks:
             await asyncio.gather(*pending_tasks, return_exceptions=True)
+        clear_turn_merge(call_sid)
         await _save_call_log(
             tenant_id=tenant_id,
             agent_id=agent_id,
@@ -363,26 +384,81 @@ async def _handle_utterance(
     call_sid: str,
     voice_id: str,
     tts_engine: str,
+    groq_key: str | None,
     full_transcript: list[dict],
     agent_speaking: asyncio.Event,
+    vad_context: dict[str, str],
 ) -> None:
-    """STT → RAG → TTS → send PCM 8kHz back to Exotel."""
+    """STT → merge incomplete turns → RAG → TTS."""
     transcript = await stt_service.transcribe_bytes(
-        utterance, sample_rate=16000, engine="faster-whisper",
+        utterance,
+        sample_rate=16000,
+        engine="faster-whisper",
+        groq_api_key=groq_key,
+        call_sid=call_sid or None,
     )
     if not transcript:
         return
 
+    mk = call_sid or f"exo-{agent_id}"
+
+    async def _flush(merged: str) -> None:
+        vad_context["last_user"] = merged[:280]
+        await _exotel_run_agent_turn(
+            websocket=websocket,
+            transcript=merged,
+            agent_id=agent_id,
+            tenant_id=tenant_id,
+            call_sid=call_sid,
+            voice_id=voice_id,
+            tts_engine=tts_engine,
+            full_transcript=full_transcript,
+            agent_speaking=agent_speaking,
+        )
+
+    await integrate_user_text(mk, transcript, on_complete=_flush)
+
+
+async def _exotel_run_agent_turn(
+    *,
+    websocket: WebSocket,
+    transcript: str,
+    agent_id: str,
+    tenant_id: str,
+    call_sid: str,
+    voice_id: str,
+    tts_engine: str,
+    full_transcript: list[dict],
+    agent_speaking: asyncio.Event,
+) -> None:
+    """Append caller turn and stream assistant audio to Exotel."""
     full_transcript.append({"role": "user", "content": transcript})
 
+    from app.services.human_escalation_service import voice_escalation_ctx
     from app.services.rag_service import process_query_streaming
 
     session_id = f"exotel-{call_sid or uuid.uuid4().hex[:8]}"
     response_parts: list[str] = []
 
+    voice_ctx = {
+        "call_sid": call_sid or "",
+        "caller_phone": "",
+        "provider": "exotel",
+        "tenant_id": tenant_id,
+        "agent_id": agent_id,
+    }
+    _ev_ctx_tok = voice_escalation_ctx.set(voice_ctx)
+
     async def _tokens():
         async with AsyncSessionLocal() as db:
-            async for token in process_query_streaming(db, tenant_id, agent_id, transcript, session_id):
+            async for token in process_query_streaming(
+                db,
+                tenant_id,
+                agent_id,
+                transcript,
+                session_id,
+                voice_escalation_context=voice_ctx,
+            ):
                 if isinstance(token, str):
                     response_parts.append(token)
                     yield token
@@ -393,7 +469,6 @@ async def _handle_utterance(
             text_stream=_tokens(), engine=tts_engine, voice_id=voice_id,
         ):
             pcm_8k = _wav16k_to_pcm8k(wav_chunk)
-            # Send in 20ms frames
             for i in range(0, len(pcm_8k), _FRAME_BYTES):
                 if not agent_speaking.is_set():
                     break
@@ -410,6 +485,7 @@ async def _handle_utterance(
         logger.exception("[exotel] TTS pipeline failed call=%s", call_sid)
     finally:
         agent_speaking.clear()
+        voice_escalation_ctx.reset(_ev_ctx_tok)
 
     full_response = "".join(response_parts)
     if full_response:

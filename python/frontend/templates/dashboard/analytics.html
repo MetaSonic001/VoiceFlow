@@ -44,6 +44,61 @@
     </div>
   </div>
 
+  <!-- BI layer: conversion, qualification, recording coverage, quick links -->
+  <div class="grid md:grid-cols-4 gap-6 mb-6 stagger">
+    <div class="vf-card p-5">
+      <div class="text-sm text-gray-500 dark:text-gray-400">Conversion rate</div>
+      <div class="text-2xl font-bold mt-1 text-teal-600 dark:text-teal-400" x-text="bi.conversion != null && bi.conversion.ratePercent != null ? bi.conversion.ratePercent+'%' : '—'"></div>
+      <div class="text-xs text-gray-400 mt-1" x-text="(bi.conversion?.count!=null && bi.totals?.interactions!=null) ? (bi.conversion.count+' conversions · '+bi.totals.interactions+' total') : 'Enable post-call analysis for richer signals'"></div>
+    </div>
+    <div class="vf-card p-5">
+      <div class="text-sm text-gray-500 dark:text-gray-400">Qualification rate</div>
+      <div class="text-2xl font-bold mt-1 text-indigo-600 dark:text-indigo-400" x-text="bi.qualification != null && bi.qualification.ratePercent != null ? bi.qualification.ratePercent+'%' : '—'"></div>
+      <div class="text-xs text-gray-400 mt-1" x-text="bi.qualification?.definition ? bi.qualification.definition.slice(0,72)+'…' : 'Captured fields & flags'"></div>
+    </div>
+    <div class="vf-card p-5">
+      <div class="text-sm text-gray-500 dark:text-gray-400">Recording coverage</div>
+      <div class="text-2xl font-bold mt-1 dark:text-white" x-text="bi.totals?.recordingCoveragePercent != null ? bi.totals.recordingCoveragePercent+'%' : '—'"></div>
+      <div class="text-xs text-gray-400 mt-1" x-text="(bi.totals?.withRecording||0)+' with recording URL'"></div>
+    </div>
+    <div class="vf-card p-5 flex flex-col justify-between">
+      <div class="text-sm text-gray-500 dark:text-gray-400">Channels (avg duration)</div>
+      <div class="text-sm mt-2 space-y-1 dark:text-gray-200">
+        <div>Phone: <span class="font-semibold" x-text="bi.totals?.avgDurationSecondsPhone != null ? bi.totals.avgDurationSecondsPhone+'s' : '—'"></span> <span class="text-gray-400 text-xs" x-text="'('+ (bi.totals?.phoneSessions||0) +')'"></span></div>
+        <div>Chat: <span class="font-semibold" x-text="bi.totals?.avgDurationSecondsChat != null ? bi.totals.avgDurationSecondsChat+'s' : '—'"></span> <span class="text-gray-400 text-xs" x-text="'('+ (bi.totals?.chatSessions||0) +')'"></span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="flex flex-wrap gap-2 mb-8">
+    <a :href="bi.deepLinks?.conversations || '/dashboard/calls/'" class="vf-btn px-3 py-1.5 rounded-lg text-sm border border-gray-200 dark:border-gray-600 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800">Conversations</a>
+    <a :href="bi.deepLinks?.liveMonitor || '/dashboard/live-monitor/'" class="vf-btn px-3 py-1.5 rounded-lg text-sm border border-gray-200 dark:border-gray-600 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800">Live monitor</a>
+    <a :href="bi.deepLinks?.campaigns || '/dashboard/campaigns/'" class="vf-btn px-3 py-1.5 rounded-lg text-sm border border-gray-200 dark:border-gray-600 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800">Campaigns</a>
+    <a :href="bi.deepLinks?.recordings || '/dashboard/recordings/'" class="vf-btn px-3 py-1.5 rounded-lg text-sm border border-gray-200 dark:border-gray-600 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800">Recordings</a>
+    <a href="#" class="vf-btn px-3 py-1.5 rounded-lg text-sm bg-teal-600 text-white hover:bg-teal-700" @click.prevent="window.location='/api/analytics/export.csv?timeRange='+range">Export CSV</a>
+  </div>
+
+  <div class="vf-card p-6 mb-8" x-show="bi.agentLeaderboard && bi.agentLeaderboard.length">
+    <h3 class="font-semibold mb-4 dark:text-white">Agent leaderboard</h3>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead><tr class="text-left text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-gray-700">
+          <th class="pb-2">Agent</th><th class="pb-2">Interactions</th><th class="pb-2">Conv. rate</th><th class="pb-2">Avg duration</th>
+        </tr></thead>
+        <tbody>
+          <template x-for="row in (bi.agentLeaderboard||[])" :key="row.agentId">
+            <tr class="border-b border-gray-50 dark:border-gray-800">
+              <td class="py-2 font-medium dark:text-gray-100" x-text="row.agentName"></td>
+              <td class="py-2 dark:text-gray-300" x-text="row.interactions"></td>
+              <td class="py-2 dark:text-gray-300" x-text="row.conversionRatePercent != null ? row.conversionRatePercent+'%' : '—'"></td>
+              <td class="py-2 dark:text-gray-300" x-text="row.avgDurationSeconds != null ? row.avgDurationSeconds+'s' : '—'"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
   <!-- Row 3: Charts -->
   <div class="grid md:grid-cols-2 gap-6 mb-6">
     <div class="vf-card p-6">
@@ -98,9 +153,17 @@ function analyticsPage(){return{
   resStats:{resolutionRate:null,escalationRate:null,resolvedCalls:0,escalatedCalls:0,totalCalls:0,avgQualityScore:null},
   costData:{estimatedAvgCostPerCallUSD:null,estimatedTotalCostUSD:0},
   failModes:{topMissedOpportunities:[],hallucinationRiskCalls:0,hallucinationRate:0},
+  bi:{ totals:{}, conversion:{}, qualification:{}, agentLeaderboard:[], deepLinks:{} },
 
   async loadAll(){
-    await Promise.all([this.loadChart(), this.loadResStats(), this.loadCost(), this.loadFailModes(), this.loadIntents()]);
+    await Promise.all([this.loadChart(), this.loadResStats(), this.loadCost(), this.loadFailModes(), this.loadIntents(), this.loadBi()]);
+  },
+
+  async loadBi(){
+    try{
+      const r=await fetch('/api/analytics/bi-summary/?timeRange='+this.range,{headers:{'X-CSRFToken':getCookie('csrftoken')}});
+      if(r.ok) this.bi=await r.json();
+    }catch(e){console.warn('BI summary failed',e)}
   },
 
   async loadChart(){

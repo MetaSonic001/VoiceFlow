@@ -217,7 +217,11 @@ function webhookManager() {
     },
 
     async deleteEndpoint(id) {
-      if (!confirm('Delete this webhook endpoint?')) return;
+      if (!(await vfConfirm({
+        title: 'Delete webhook?',
+        message: 'Remove this webhook endpoint? Incoming events will stop being sent here.',
+        confirmText: 'Delete',
+      }))) return;
       try {
         await fetch(`/api/webhooks/${id}`, {
           method: 'DELETE',

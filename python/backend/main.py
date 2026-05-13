@@ -161,25 +161,14 @@ async def lifespan(app: FastAPI):
         logger.warning(f"[db] Table creation failed (non-fatal): {e}")
 
     # ── Add missing columns to existing tables (idempotent via IF NOT EXISTS) ─
-    # This mirrors what Alembic migration 0002 does, but runs automatically so
-    # the server starts correctly without requiring a manual `alembic upgrade head`.
-    _column_migrations = [
-        # tenants — billing / plan fields (added after initial schema)
-        'ALTER TABLE tenants ADD COLUMN IF NOT EXISTS "planType" TEXT NOT NULL DEFAULT \'free\'',
-        'ALTER TABLE tenants ADD COLUMN IF NOT EXISTS "planTier" TEXT NOT NULL DEFAULT \'free\'',
-        'ALTER TABLE tenants ADD COLUMN IF NOT EXISTS "stripeCustomerId" TEXT',
-        'ALTER TABLE tenants ADD COLUMN IF NOT EXISTS "stripeSubscriptionId" TEXT',
-        'ALTER TABLE tenants ADD COLUMN IF NOT EXISTS "managedMinutesBalance" INTEGER NOT NULL DEFAULT 0',
-        'ALTER TABLE tenants ADD COLUMN IF NOT EXISTS "pilotPlanEndDate" TIMESTAMPTZ',
-        'ALTER TABLE tenants ADD COLUMN IF NOT EXISTS "totalCallCount" INTEGER NOT NULL DEFAULT 0',
-        # agents — flow definition JSON
-        'ALTER TABLE agents ADD COLUMN IF NOT EXISTS "flowDefinition" JSONB',
-    ]
+    # Mirrors Alembic revisions, but runs automatically so existing DBs match
+    # SQLAlchemy models without requiring `alembic upgrade head`. (create_all
+    # does not add columns to tables that already exist.)
     try:
+        from app.column_patches import apply_column_patches
         from app.database import engine
-        async with engine.begin() as conn:
-            for stmt in _column_migrations:
-                await conn.execute(text(stmt))
+
+        await apply_column_patches(engine)
         logger.info("[db] Column migrations applied")
     except Exception as e:
         logger.warning(f"[db] Column migration failed (non-fatal): {e}")
@@ -240,14 +229,35 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
         status_code=429,
     )
 
-# CORS — same config as Express
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[settings.FRONTEND_URL, "http://localhost:8050", "http://127.0.0.1:8050"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["Content-Type", "Authorization", "x-tenant-id", "x-user-id", "x-user-email", "X-API-Key"],
+# CORS — same config as Express, plus ngrok / extra origins for tunneling (ngrok http <port>).
+def _cors_allow_origins() -> list[str]:
+    origins: set[str] = {
+        settings.FRONTEND_URL.rstrip("/"),
+        "http://localhost:8050",
+        "http://127.0.0.1:8050",
+    }
+    for part in (settings.CORS_EXTRA_ORIGINS or "").split(","):
+        p = part.strip().rstrip("/")
+        if p:
+            origins.add(p)
+    return sorted(origins)
+
+
+# Multi-label subdomains (e.g. *.eu.ngrok.io) and ngrok-free.app preview URLs.
+_NGROK_CORS_ORIGIN_REGEX = (
+    r"^https?://[\w\-.]+(?:\.[\w\-.]+)*\.(?:ngrok-free\.app|ngrok\.io|ngrok\.app)(?::\d+)?$"
 )
+
+_cors_kw: dict = {
+    "allow_origins": _cors_allow_origins(),
+    "allow_credentials": True,
+    "allow_methods": ["*"],
+    "allow_headers": ["Content-Type", "Authorization", "x-tenant-id", "x-user-id", "x-user-email", "X-API-Key"],
+}
+if settings.CORS_ALLOW_NGROK:
+    _cors_kw["allow_origin_regex"] = _NGROK_CORS_ORIGIN_REGEX
+
+app.add_middleware(CORSMiddleware, **_cors_kw)
 app.add_middleware(RequestLoggingMiddleware)
 
 # ── Health check ─────────────────────────────────────────────────────────────

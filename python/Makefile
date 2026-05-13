@@ -25,7 +25,7 @@ UV     := uv
 help: ## Show this help
 	@Write-Host ''
 	@Write-Host '  VoiceFlow Commands' -ForegroundColor Cyan
-	@Write-Host '  ═══════════════════════════════════════════════════' -ForegroundColor Cyan
+	@Write-Host '  ===================================================' -ForegroundColor Cyan
 	@Write-Host ''
 	@Write-Host '  QUICKSTART' -ForegroundColor Yellow
 	@Write-Host '    make init              One-time full setup (venv + deps + env + docker + migrate)'
@@ -72,6 +72,7 @@ help: ## Show this help
 	@Write-Host ''
 	@Write-Host '  UTILS' -ForegroundColor Yellow
 	@Write-Host '    make status            Show status of all services'
+	@Write-Host '    make ngrok-hint        Reminder: ngrok must forward port 8050 for the UI'
 	@Write-Host '    make logs              Tail Docker logs'
 	@Write-Host '    make clean             Remove __pycache__ and .pyc files'
 	@Write-Host '    make reset             Stop everything + clean'
@@ -84,13 +85,13 @@ help: ## Show this help
 .PHONY: init
 init: venv install env docker wait db-check ensure-langfuse-db migrate create-tables seed ## One-time full setup
 	@Write-Host ''
-	@Write-Host '  ═══════════════════════════════════════════════════' -ForegroundColor Cyan
+	@Write-Host '  ===================================================' -ForegroundColor Cyan
 	@Write-Host '  Setup complete!' -ForegroundColor Green
 	@Write-Host ''
 	@Write-Host '  Run "make all" to start all services, then open:'
 	@Write-Host '    Frontend : http://localhost:8050'
 	@Write-Host '    Backend  : http://localhost:8040/health'
-	@Write-Host '  ═══════════════════════════════════════════════════' -ForegroundColor Cyan
+	@Write-Host '  ===================================================' -ForegroundColor Cyan
 
 .PHONY: venv
 venv: ## Create Python virtual environment (Python 3.12 via uv)
@@ -105,7 +106,7 @@ env: ## Create .env from .env.example if missing
 .PHONY: all
 all: docker wait backend-bg frontend-bg ## Start everything
 	@Write-Host ''
-	@Write-Host '  ═══════════════════════════════════════════════════' -ForegroundColor Cyan
+	@Write-Host '  ===================================================' -ForegroundColor Cyan
 	@Write-Host '  All services started!' -ForegroundColor Green
 	@Write-Host ''
 	@Write-Host '  Frontend   : http://localhost:8050'
@@ -117,8 +118,9 @@ all: docker wait backend-bg frontend-bg ## Start everything
 	@Write-Host '  Kokoro TTS : localhost:8880'
 	@Write-Host '  Piper TTS  : localhost:8890'
 	@Write-Host ''
-	@Write-Host '  Optional:  make langfuse  →  http://localhost:3001' -ForegroundColor DarkGray
-	@Write-Host '  ═══════════════════════════════════════════════════' -ForegroundColor Cyan
+	@Write-Host '  Optional:  make langfuse  ->  http://localhost:3001' -ForegroundColor DarkGray
+	@Write-Host '  Expose UI : ngrok http 8050  (Django port; not 8000)' -ForegroundColor DarkGray
+	@Write-Host '  ===================================================' -ForegroundColor Cyan
 
 .PHONY: docker
 docker: ## Start Docker services (Postgres, MinIO, ChromaDB, Redis, TTS)
@@ -281,6 +283,16 @@ status: ## Show status of all services
 	@$$b = netstat -aon | Select-String ':8040.*LISTENING'; if ($$b) { $$b | ForEach-Object { Write-Host "    $$_" } } else { Write-Host '    Not running' -ForegroundColor Gray }
 	@Write-Host '  Port 8050 (Frontend):' -ForegroundColor Yellow
 	@$$f = netstat -aon | Select-String ':8050.*LISTENING'; if ($$f) { $$f | ForEach-Object { Write-Host "    $$_" } } else { Write-Host '    Not running' -ForegroundColor Gray }
+	@Write-Host ''
+
+.PHONY: ngrok-hint
+ngrok-hint: ## Show ngrok command for the Django UI (port 8050)
+	@Write-Host ''
+	@Write-Host '  Expose the frontend (Django on 8050):' -ForegroundColor Yellow
+	@Write-Host '    ngrok http 8050' -ForegroundColor Cyan
+	@Write-Host ''
+	@Write-Host '  Expose only the FastAPI API (port 8040):' -ForegroundColor Yellow
+	@Write-Host '    ngrok http 8040' -ForegroundColor Cyan
 	@Write-Host ''
 
 .PHONY: logs
