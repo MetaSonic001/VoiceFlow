@@ -1,0 +1,391 @@
+"""
+VoiceFlow Python Backend — main.py
+Drop-in replacement for Express backend. Same port (8000), same routes, same DB.
+Patent Claims: 9 (encryption), 13 (rate-limiting), 7 (scheduler), 8/12/15 (voice).
+"""
+import logging
+import time
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, Request, Response, Depends
+from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import settings
+from app.database import AsyncSessionLocal, get_db
+from app.auth import AuthContext, get_auth
+from app.models import Tenant, User, AgentTemplate
+from app.middleware import RequestLoggingMiddleware
+
+logger = logging.getLogger("voiceflow")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+start_time = time.time()
+
+
+async def seed_defaults():
+    """Seed default agent templates if missing (non-user data)."""
+    async with AsyncSessionLocal() as db:
+        try:
+            # Seed agent templates if empty
+            tmpl_result = await db.execute(select(AgentTemplate).limit(1))
+            if not tmpl_result.scalar_one_or_none():
+                templates = [
+                    AgentTemplate(
+                        id="customer-support", name="Customer Support",
+                        description="Handle customer inquiries, resolve issues, and provide product information",
+                        baseSystemPrompt="You are a helpful and professional customer support agent. Answer questions accurately, resolve issues empathetically, and escalate when needed.",
+                        defaultCapabilities=["faq", "ticketing", "escalation"],
+                        suggestedKnowledgeCategories=["product_docs", "faq", "policies"],
+                        defaultTools=["search_knowledge", "create_ticket"],
+                        icon="headset",
+                    ),
+                    AgentTemplate(
+                        id="cold-calling", name="Cold Calling",
+                        description="Outbound sales calls, lead generation, and appointment setting",
+                        baseSystemPrompt="You are a persuasive and friendly sales agent. Engage prospects, qualify their needs, and book meetings with the sales team.",
+                        defaultCapabilities=["lead_gen", "appointment_booking", "objection_handling"],
+                        suggestedKnowledgeCategories=["product_info", "pricing", "competitor_analysis"],
+                        defaultTools=["search_knowledge", "book_appointment"],
+                        icon="phone-outgoing",
+                    ),
+                    AgentTemplate(
+                        id="lead-qualification", name="Lead Qualification",
+                        description="Qualify and score inbound leads based on criteria",
+                        baseSystemPrompt="You are a knowledgeable lead qualification specialist. Ask targeted questions to assess fit, budget, and timeline.",
+                        defaultCapabilities=["scoring", "routing", "data_collection"],
+                        suggestedKnowledgeCategories=["ideal_customer_profile", "qualification_criteria"],
+                        defaultTools=["search_knowledge", "update_crm"],
+                        icon="filter",
+                    ),
+                    AgentTemplate(
+                        id="technical-support", name="Technical Support",
+                        description="Troubleshoot technical issues and guide users through solutions",
+                        baseSystemPrompt="You are an expert technical support engineer. Diagnose issues systematically, provide step-by-step solutions, and escalate complex problems.",
+                        defaultCapabilities=["troubleshooting", "diagnostics", "escalation"],
+                        suggestedKnowledgeCategories=["technical_docs", "known_issues", "release_notes"],
+                        defaultTools=["search_knowledge", "create_ticket", "run_diagnostic"],
+                        icon="wrench",
+                    ),
+                    AgentTemplate(
+                        id="receptionist", name="Receptionist",
+                        description="Greet callers, route calls, and handle basic inquiries",
+                        baseSystemPrompt="You are a professional and friendly receptionist. Greet callers warmly, understand their needs, and route them appropriately.",
+                        defaultCapabilities=["call_routing", "scheduling", "faq"],
+                        suggestedKnowledgeCategories=["company_directory", "office_hours", "faq"],
+                        defaultTools=["search_knowledge", "transfer_call", "book_appointment"],
+                        icon="phone",
+                    ),
+                    AgentTemplate(
+                        id="survey", name="Survey Agent",
+                        description="Conduct customer satisfaction surveys and collect feedback",
+                        baseSystemPrompt="You are a friendly survey agent. Ask questions naturally, record responses accurately, and thank participants.",
+                        defaultCapabilities=["data_collection", "sentiment_analysis", "reporting"],
+                        suggestedKnowledgeCategories=["survey_questions", "product_info"],
+                        defaultTools=["search_knowledge", "record_response"],
+                        icon="clipboard",
+                    ),
+                    AgentTemplate(
+                        id="debt-collection", name="Debt Collection",
+                        description="Professional debt recovery calls with compliance and empathy",
+                        baseSystemPrompt="You are a professional debt collection agent. Follow FDCPA guidelines strictly. Be firm but empathetic. Verify identity before disclosing debt details. Offer payment plans and document all interactions.",
+                        defaultCapabilities=["payment_negotiation", "compliance", "escalation", "payment_plan"],
+                        suggestedKnowledgeCategories=["debt_policies", "compliance_rules", "payment_options"],
+                        defaultTools=["search_knowledge", "record_payment", "schedule_callback"],
+                        icon="banknotes",
+                    ),
+                    AgentTemplate(
+                        id="appointment-reminder", name="Appointment Reminder",
+                        description="Automated appointment reminders with rescheduling capability",
+                        baseSystemPrompt="You are a friendly appointment reminder assistant. Confirm upcoming appointments, offer rescheduling options, and handle cancellations gracefully. Always confirm the new time.",
+                        defaultCapabilities=["scheduling", "confirmation", "rescheduling", "cancellation"],
+                        suggestedKnowledgeCategories=["scheduling_rules", "availability", "policies"],
+                        defaultTools=["search_knowledge", "book_appointment", "cancel_appointment"],
+                        icon="calendar",
+                    ),
+                    AgentTemplate(
+                        id="order-status", name="Order Status",
+                        description="Check and communicate order status, tracking, and delivery updates",
+                        baseSystemPrompt="You are a helpful order status assistant. Look up orders by ID or customer info, provide tracking details, estimated delivery dates, and handle basic order modifications.",
+                        defaultCapabilities=["order_lookup", "tracking", "modification", "refund_request"],
+                        suggestedKnowledgeCategories=["shipping_policies", "return_policies", "order_faq"],
+                        defaultTools=["search_knowledge", "lookup_order", "create_ticket"],
+                        icon="truck",
+                    ),
+                    AgentTemplate(
+                        id="customer-onboarding", name="Customer Onboarding",
+                        description="Guide new customers through product setup and first steps",
+                        baseSystemPrompt="You are a patient and enthusiastic onboarding specialist. Walk new customers through account setup, key features, and best practices. Celebrate their progress and offer help proactively.",
+                        defaultCapabilities=["guided_setup", "feature_tour", "data_collection", "faq"],
+                        suggestedKnowledgeCategories=["onboarding_guide", "feature_docs", "best_practices"],
+                        defaultTools=["search_knowledge", "update_crm", "send_email"],
+                        icon="rocket",
+                    ),
+                ]
+                for t in templates:
+                    db.add(t)
+                await db.flush()
+                logger.info("[seed] Created %d agent templates", len(templates))
+
+            await db.commit()
+        except Exception as e:
+            logger.warning(f"[seed] Default template seed failed (non-fatal): {e}")
+            await db.rollback()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    logger.info("Starting VoiceFlow Python backend...")
+
+    # Verify DB connection
+    try:
+        async with AsyncSessionLocal() as db:
+            await db.execute(text("SELECT 1"))
+        logger.info("[db] PostgreSQL connection OK")
+    except Exception as e:
+        logger.error(f"[db] PostgreSQL connection failed: {e}")
+
+    # Auto-create tables if they don't exist
+    try:
+        from app.database import engine
+        from app.models import Base
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("[db] Tables verified/created")
+    except Exception as e:
+        logger.warning(f"[db] Table creation failed (non-fatal): {e}")
+
+    # ── Add missing columns to existing tables (idempotent via IF NOT EXISTS) ─
+    # Mirrors Alembic revisions, but runs automatically so existing DBs match
+    # SQLAlchemy models without requiring `alembic upgrade head`. (create_all
+    # does not add columns to tables that already exist.)
+    try:
+        from app.column_patches import apply_column_patches
+        from app.database import engine
+
+        await apply_column_patches(engine)
+        logger.info("[db] Column migrations applied")
+    except Exception as e:
+        logger.warning(f"[db] Column migration failed (non-fatal): {e}")
+
+    await seed_defaults()
+
+    # Initialise STT service (downloads Vosk model on first run, loads faster-whisper)
+    try:
+        from app.services.stt_service import stt_service
+        await stt_service.initialize()
+        logger.info("[stt] STT service initialised")
+    except Exception as e:
+        logger.warning(f"[stt] STT init failed (non-fatal): {e}")
+
+    # Pre-warm RAG pipeline: ChromaDB connection + embedding model.
+    # Without this the first real customer call pays a 3-5s cold-start penalty.
+    try:
+        import asyncio as _asyncio
+        from app.services.rag_service import _get_chroma_client
+        # ChromaDB client uses a blocking HTTP call — run it off the event loop.
+        await _asyncio.get_event_loop().run_in_executor(None, _get_chroma_client)
+        logger.info("[rag] ChromaDB pre-warmed")
+    except Exception as e:
+        logger.warning(f"[rag] ChromaDB pre-warm failed (non-fatal): {e}")
+
+    logger.info(f"Python backend ready on port {settings.PORT}")
+
+    # Start retraining scheduler (Claim 7)
+    from app.services.scheduler import start_scheduler, stop_scheduler
+    start_scheduler()
+
+    yield
+    # Shutdown
+    stop_scheduler()
+    logger.info("Shutting down...")
+
+
+app = FastAPI(
+    title="VoiceFlow API",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+# ── Per-tenant rate limiting (Claim 13) ──────────────────────────────────────
+
+def _tenant_key(request: Request) -> str:
+    """Rate-limit key: tenant ID from header, falling back to IP."""
+    return request.headers.get("x-tenant-id", get_remote_address(request))
+
+limiter = Limiter(key_func=_tenant_key, storage_uri=f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}/1")
+app.state.limiter = limiter
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        {"error": "Rate limit exceeded. Please slow down.", "retry_after": str(exc.detail)},
+        status_code=429,
+    )
+
+# CORS — same config as Express, plus ngrok / extra origins for tunneling (ngrok http <port>).
+def _cors_allow_origins() -> list[str]:
+    origins: set[str] = {
+        settings.FRONTEND_URL.rstrip("/"),
+        "http://localhost:8050",
+        "http://127.0.0.1:8050",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    }
+    for part in (settings.CORS_EXTRA_ORIGINS or "").split(","):
+        p = part.strip().rstrip("/")
+        if p:
+            origins.add(p)
+    return sorted(origins)
+
+
+# Multi-label subdomains (e.g. *.eu.ngrok.io) and ngrok-free.app preview URLs.
+_NGROK_CORS_ORIGIN_REGEX = (
+    r"^https?://[\w\-.]+(?:\.[\w\-.]+)*\.(?:ngrok-free\.app|ngrok\.io|ngrok\.app)(?::\d+)?$"
+)
+
+_cors_kw: dict = {
+    "allow_origins": _cors_allow_origins(),
+    "allow_credentials": True,
+    "allow_methods": ["*"],
+    "allow_headers": ["Content-Type", "Authorization", "x-tenant-id", "x-user-id", "x-user-email", "X-API-Key"],
+}
+if settings.CORS_ALLOW_NGROK:
+    _cors_kw["allow_origin_regex"] = _NGROK_CORS_ORIGIN_REGEX
+
+app.add_middleware(CORSMiddleware, **_cors_kw)
+app.add_middleware(RequestLoggingMiddleware)
+
+# ── Health check ─────────────────────────────────────────────────────────────
+
+@app.get("/health")
+@app.post("/health")
+async def health():
+    uptime = int(time.time() - start_time)
+    return {
+        "status": "ok",
+        "version": "1.0.0",
+        "uptime": uptime,
+        "timestamp": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+        "backend": "python-fastapi",
+    }
+
+
+# ── Register all routers (same mount paths as Express index.ts) ──────────────
+
+from app.routes import auth, onboarding, agents, documents, templates, runner
+from app.routes import analytics, logs, brands, settings as settings_routes
+from app.routes import ingestion, users, retraining, admin, tts, rag
+from app.routes import widget, voice_ws, platform, data_explorer
+from app.routes import voice_twilio_stream, voice_twilio_gather, voice_inbound_router
+from app.routes import voice_live
+from app.routes import voice_exotel
+from app.routes import voices as voices_routes
+from app.routes import campaigns, whatsapp, webhooks
+from app.routes import ab_testing
+from app.routes import kb as kb_routes
+from app.routes import dnd
+from app.routes import simulate
+from app.routes import ivr, recordings, coaching, contacts
+from app.routes import integrations as integrations_routes
+from app.routes import phone_numbers as phone_numbers_routes
+from app.routes import live_monitor
+from app.routes import speaker_verification as speaker_verification_routes
+from app.routes import background_sound as background_sound_routes
+from app.routes import sip_trunking as sip_trunking_routes
+from app.routes import crm as crm_routes
+from app.routes import billing as billing_routes
+
+# WITHOUT /api prefix (matches Express)
+app.include_router(auth.router, prefix="/auth", tags=["Auth"])
+app.include_router(onboarding.router, prefix="/onboarding", tags=["Onboarding"])
+app.include_router(analytics.router, prefix="/analytics", tags=["Analytics"])
+app.include_router(admin.router, prefix="/admin", tags=["Admin"])
+
+# WITH /api prefix (matches Express)
+app.include_router(agents.router, prefix="/api/agents", tags=["Agents"])
+app.include_router(documents.router, prefix="/api/documents", tags=["Documents"])
+app.include_router(templates.router, prefix="/api/templates", tags=["Templates"])
+app.include_router(runner.router, prefix="/api/runner", tags=["Runner"])
+app.include_router(rag.router, prefix="/api/rag", tags=["RAG"])
+app.include_router(ingestion.router, prefix="/api/ingestion", tags=["Ingestion"])
+app.include_router(settings_routes.router, prefix="/api/settings", tags=["Settings"])
+app.include_router(users.router, prefix="/api/users", tags=["Users"])
+app.include_router(logs.router, prefix="/api/logs", tags=["Logs"])
+app.include_router(retraining.router, prefix="/api/retraining", tags=["Retraining"])
+app.include_router(brands.router, prefix="/api/brands", tags=["Brands"])
+app.include_router(tts.router, prefix="/api/tts", tags=["TTS"])
+app.include_router(widget.router, prefix="/api/widget", tags=["Widget"])
+app.include_router(voice_ws.router, prefix="/api/voice", tags=["VoiceWS"])
+app.include_router(voice_live.router, prefix="/api/voice", tags=["VoiceLive"])
+app.include_router(voice_twilio_gather.router, prefix="/api/voice", tags=["VoiceTwilioGather"])
+app.include_router(voice_twilio_stream.router, prefix="/api/voice", tags=["VoiceTwilioStream"])
+app.include_router(voice_inbound_router.router, prefix="/api/voice", tags=["VoiceInboundRouter"])
+app.include_router(voice_exotel.router, prefix="/api/voice/exotel", tags=["VoiceExotel"])
+app.include_router(campaigns.router, prefix="/api/campaigns", tags=["Campaigns"])
+app.include_router(whatsapp.router, prefix="/api/whatsapp", tags=["WhatsApp"])
+app.include_router(webhooks.router, prefix="/api/webhooks", tags=["Webhooks"])
+app.include_router(ab_testing.router)
+app.include_router(dnd.router, prefix="/api/dnd", tags=["DND"])
+app.include_router(simulate.router, prefix="/api/simulate", tags=["Simulation"])
+app.include_router(voices_routes.router, prefix="/api/voices", tags=["Voices"])
+app.include_router(kb_routes.router, prefix="/api/kb", tags=["Knowledge Base"])
+app.include_router(ivr.router, prefix="/api/ivr", tags=["IVR"])
+app.include_router(recordings.router, prefix="/api/recordings", tags=["Recordings"])
+app.include_router(coaching.router, prefix="/api/coaching", tags=["Coaching"])
+app.include_router(contacts.router, prefix="/api/contacts", tags=["Contacts"])
+app.include_router(crm_routes.router, prefix="/api/crm", tags=["CRM"])
+app.include_router(integrations_routes.router, prefix="/api", tags=["Integrations"])
+app.include_router(platform.router, prefix="/api", tags=["Platform"])
+app.include_router(data_explorer.router, prefix="/api/data-explorer", tags=["DataExplorer"])
+app.include_router(phone_numbers_routes.router, prefix="/api/phone-numbers", tags=["PhoneNumbers"])
+app.include_router(live_monitor.router, prefix="/api/live-monitor", tags=["LiveMonitor"])
+app.include_router(speaker_verification_routes.router, prefix="/api/speaker-verification", tags=["SpeakerVerification"])
+app.include_router(background_sound_routes.router, prefix="/api/background-sound", tags=["BackgroundSound"])
+app.include_router(sip_trunking_routes.router, prefix="/api/sip-trunking", tags=["SIPTrunking"])
+app.include_router(billing_routes.router, prefix="/api/billing", tags=["Billing"])
+
+
+# ── Twilio proxy (matches Express /twilio/numbers) ──────────────────────────
+
+@app.get("/twilio/numbers")
+async def twilio_numbers(auth: AuthContext = Depends(get_auth), db: AsyncSession = Depends(get_db)):
+    """Return Twilio numbers. Requires Twilio credentials in tenant settings."""
+    result = await db.execute(select(Tenant).where(Tenant.id == auth.tenant_id))
+    tenant = result.scalar_one_or_none()
+    s = (tenant.settings or {}) if tenant else {}
+    sid = s.get("twilioAccountSid")
+    token_enc = s.get("twilioAuthToken")
+    if not sid or not token_enc:
+        return {"numbers": []}
+    from app.services.credentials import decrypt_safe
+    token = decrypt_safe(token_enc)
+    try:
+        import httpx as _httpx
+        async with _httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"https://api.twilio.com/2010-04-01/Accounts/{sid}/IncomingPhoneNumbers.json",
+                auth=(sid, token),
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                return {
+                    "numbers": [
+                        {"sid": n.get("sid"), "phone_number": n.get("phone_number"), "friendly_name": n.get("friendly_name")}
+                        for n in data.get("incoming_phone_numbers", [])
+                    ]
+                }
+    except Exception:
+        pass
+    return {"numbers": []}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=settings.PORT, reload=True)
