@@ -2,188 +2,32 @@
 
 A multi-tenant SaaS platform for building, deploying, and managing AI-powered voice and chat agents. Businesses onboard through a guided wizard, upload their knowledge base, and receive a domain-specific AI agent that answers customer queries over phone (Twilio), browser-based WebSocket voice calls, or a web chat interface — using Retrieval-Augmented Generation (RAG) over their own documents with hierarchical context injection and policy-based retrieval scoring.
 
-> **Status (May 2026):** The full pipeline is functional end-to-end — **43 route files (~225 endpoints), 31 service modules, 26 ORM models, 33 dashboard pages.** The Architecture Bible is **fully implemented**: coaching cards with auto-generation, simulation CI/CD auto-gates, live whisper injection, pre-call CRM enrichment wired to voice pipeline, background ambient sound service, SIP Trunking / BYOC dashboard, mid-call language switching (Sarvam + Whisper), analytics KPIs (resolution rate, escalation rate, top intents, failure modes, cost estimate), IVR visual SVG node editor, and MCP `batch_campaign` + `get_real_time_call_status` tools. **Billing system implemented:** `UsageLog` model, `billing_service.py` with Stripe Billing Meter integration, platform-key fallback for managed tenants, owner-account bypass, and `/api/billing/*` endpoints. Full `pip install voiceflow` developer SDK with plugin architecture. MCP server for Claude Desktop integration. **Modern UI: glassmorphism, micro-interactions, 15+ CSS animations, dark mode on all 33 pages.** Stack: Django 6 (HTMX + Alpine.js) frontend + FastAPI backend + Docker services (Postgres, Redis, ChromaDB, MinIO). See [What's New (May 2026 — Security & Production Hardening)](#whats-new-may-2026--security--production-hardening) and [What's New (May 2026)](#whats-new-may-2026) and [Implementation Status](#implementation-status) for the full breakdown.
-
 ---
 
 ## Table of Contents
 
-1. [What This Project Does](#what-this-project-does)
-2. [What's New (May 2026 — Security & Production Hardening)](#whats-new-may-2026--security--production-hardening)
-3. [What's New (May 2026)](#whats-new-may-2026)
-3. [System Architecture](#system-architecture)
-3. [Repository Structure](#repository-structure)
-4. [Tech Stack](#tech-stack)
-5. [How It Works — End to End](#how-it-works--end-to-end)
-6. [Voice Pipeline Architecture](#voice-pipeline-architecture)
-7. [RAG Engine Deep Dive](#rag-engine-deep-dive)
-8. [LLM & AI Architecture](#llm--ai-architecture)
-9. [Running the Project](#running-the-project)
-10. [Environment Variables](#environment-variables)
-11. [Services & Ports](#services--ports)
-12. [Service Inventory](#service-inventory)
-13. [API Reference](#api-reference)
-14. [Security Architecture](#security-architecture)
-15. [Implementation Status](#implementation-status)
-16. [Data Models](#data-models)
-17. [Testing](#testing)
-18. [Known Limitations & Technical Debt](#known-limitations--technical-debt)
-19. [Patent — Multi-Tenant RAG Voice Agent System](#patent--multi-tenant-rag-voice-agent-system)
-20. [What Remains — Startup Readiness Checklist](#what-remains--startup-readiness-checklist)
-21. [Business Model & Pricing](#business-model--pricing)
-22. [Deployment Guide](#deployment-guide)
+1. [System Architecture](#system-architecture)
+2. [Repository Structure](#repository-structure)
+3. [Tech Stack](#tech-stack)
+4. [How It Works — End to End](#how-it-works--end-to-end)
+5. [Voice Pipeline Architecture](#voice-pipeline-architecture)
+6. [RAG Engine Deep Dive](#rag-engine-deep-dive)
+7. [LLM & AI Architecture](#llm--ai-architecture)
+8. [Running the Project](#running-the-project)
+9. [Environment Variables](#environment-variables)
+10. [Services & Ports](#services--ports)
+11. [Service Inventory](#service-inventory)
+12. [API Reference](#api-reference)
+13. [Security Architecture](#security-architecture)
+14. [Implementation Status](#implementation-status)
+15. [Data Models](#data-models)
+16. [Testing](#testing)
+17. [Known Limitations & Technical Debt](#known-limitations--technical-debt)
+18. [Patent — Multi-Tenant RAG Voice Agent System](#patent--multi-tenant-rag-voice-agent-system)
+29. [What Remains — Startup Readiness Checklist](#what-remains--startup-readiness-checklist)
+20. [Business Model & Pricing](#business-model--pricing)
+21. [Deployment Guide](#deployment-guide)
 
----
-
-## What's New (May 2026 — Security & Production Hardening)
-
-### Architecture Bible — Final Completion Pass
-
-All Architecture & Feature Bible items are now fully implemented end-to-end:
-
-| Feature | Status | Details |
-|---------|--------|---------|
-| Pre-call CRM enrichment | ✅ Complete | `enrich_caller()` now called in `handle_inbound_call()`, context stored in Redis and injected as effective query |
-| AI Coaching Card generation | ✅ Complete | `_generate_coaching_cards()` background task wired after `analyze_call()` — up to 3 cards per call with computed `impactScore` |
-| Simulation CI/CD auto-trigger | ✅ Complete | `update_agent()` detects `systemPrompt` change → fires `_auto_simulate_on_prompt_change()` → warns if pass rate < 75% |
-| Live whisper injection | ✅ Complete | `POST /api/live-monitor/calls/{call_sid}/whisper` stores supervisor hint in Redis → consumed once by next `voice_gather()` turn |
-| Background Ambient Sound | ✅ Complete | `background_sound_service.py` — synthetic PCM generation (office/callcenter/cafe/street), `mix_ambient_into_pcm()`, per-agent config, Voice Agent UI |
-| SIP Trunking / BYOC | ✅ Complete | `sip_trunking.py` — CRUD, test endpoint, webhook URI generator; dedicated dashboard `/dashboard/sip-trunking/`; sidebar link |
-| Mid-call language switching | ✅ Complete | `stt_service.py`: detected language stored in Redis at `call_lang:{call_sid}`; subsequent turns auto-resolve language; `get_call_language()` / `update_call_language()` exported |
-| Analytics KPIs | ✅ Complete | 4 new endpoints: `/analytics/resolution-stats`, `/analytics/top-intents`, `/analytics/failure-modes`, `/analytics/cost-estimate`; analytics page rewritten with 8-card layout + top intents chart |
-| IVR visual node editor | ✅ Complete | SVG-based drag-and-drop canvas in IVR modal — "Visual Editor" tab with drag nodes, edge drawing from parentId, selected node inline edit panel |
-| MCP batch_campaign | ✅ Complete | `batch_campaign()` tool — creates campaign, uploads contacts CSV, starts campaign immediately or scheduled |
-| MCP get_real_time_call_status | ✅ Complete | `get_real_time_call_status()` tool — reads live call state + transcript from Redis via `/api/live-monitor/calls/` |
-| Billing & Platform Key System | ✅ Complete | `UsageLog` ORM model, `billing_service.py` (Stripe Billing Meters), `/api/billing/*` (usage/invoices/plan/estimate/pricing/**calculator**), `pricing_config.yaml`, `get_api_key()` platform-key fallback in `credentials.py`, onboarding MCP/Pro branch, owner-account bypass via `OWNER_TENANT_IDS`, pilot plan (`pilotPlanEndDate`) + free-tier cap (`totalCallCount`) on `Tenant` model |
-| Voice Pipeline Resilience | ✅ Complete | `voice_twilio_gather.py`: 6-second `asyncio.wait_for` timeout on RAG pipeline (filler phrase on dead air), JSON-leak detection in `_sanitize_for_twiml`, LLM refusal rephrasing, inner `_rag_with_tools()` coroutine isolates errors |
-| Cold-Start Pre-Warm | ✅ Complete | `main.py` lifespan now calls `_get_chroma_client()` in executor at startup — first real call doesn’t pay 3–5s ChromaDB cold-start penalty |
-| Exotel Service Layer | ✅ Complete | `exotel_service.py` — `ExotelService` class with `search_available_numbers(locality)`, `purchase_number(number)`, `assign_number_to_agent(number, agent_id, webhook_url)` |
-| Onboarding Cost Calculator | ✅ Complete | Step 8 added to 9-step wizard — calls/day × avg duration → live MCP vs Pro monthly estimate + competitor savings; `GET /api/billing/calculator/` Django proxy added |
-
-## What's New (May 2026)
-
-Three commits implement the **Architecture & Feature Bible** — deeper implementations of existing features, 10 new backend modules, and a `pip install voiceflow` developer SDK. All are **locally committed (commits `1f6086c`, `e82585d`, `4989a8d`) but not yet pushed to remote**.
-
-### Commit 1 — `1f6086c` chore: Alembic + priority fixes
-- Alembic migrations initialised (`python/backend/migrations/`)
-- Settings double-mount bug fixed in `main.py`
-- `assemble_context()` parallelised (concurrent ChromaDB + BM25 fetch)
-- BM25 index LRU-cached per tenant in Redis (db=2)
-
-### Commit 2 — `e82585d` feat: 12 platform enhancements
-| # | Feature | File(s) |
-|---|---------|---------|
-| 1–5 | Multi-engine STT: Sarvam, Groq Whisper, Deepgram, Vosk, language-detect | `stt_service.py` |
-| 6 | Web search via Tavily in RAG | `rag_service.py` |
-| 7 | HubSpot + Salesforce pre-call context | `crm_enrichment_service.py` |
-| 8–9 | Adversarial simulation + CI/CD gate endpoint | `simulation_service.py`, `simulate.py` |
-| 10–11 | Agent revision delta + FAQ auto-generator | `agents.py` |
-| 12 | MCP server: 6 tools + 3 Resources + 4 Prompts (Claude Desktop) | `mcp_server.py` |
-
-### Commit 3 — `4989a8d` feat: Architecture Bible (current HEAD)
-
-#### New Backend Services
-| Service | Purpose |
-|---------|---------|
-| `crm_enrichment_service.py` | Bidirectional HubSpot/Salesforce sync; injects enriched context into system prompt before each call |
-| `ivr_service.py` | IVR tree routing — TwiML `<Gather>` menus, BFS node traversal, DTMF-to-agent handoff |
-| `call_recording_service.py` | MinIO WAV storage, 1-sample/sec waveform, timestamped transcripts, 24h presigned download |
-| `auto_retry_service.py` | Redis ZSET retry scheduler — calling hours (8am–9pm), DND compliance, max-retries |
-| `live_transfer_service.py` | Escalation detection (regex + LLM), HMAC-signed context handoff webhook, TwiML `<Dial>` transfer |
-| `observability.py` | `async with trace_span("llm"):` — Langfuse tracing or structured JSON fallback |
-| `semantic_vad.py` | ML turn detection (distilbert-base-uncased-mnli) + rule-based fallback, adaptive silence threshold |
-| `latency_tracker.py` | `.mark("stt_start")` / P50/P95/P99 ring buffer, auto-optimisation hints (ANN, fast model) |
-
-#### New Backend Routes
-| Route | Prefix | Key Endpoints |
-|-------|--------|---------------|
-| `ivr.py` | `/api/ivr` | CRUD + `/voice/{tree_id}` Twilio webhook + `/voice/{tree_id}/gather` DTMF handler |
-| `recordings.py` | `/api/recordings` | List, detail (waveform + transcript), presigned download, delete |
-| `coaching.py` | `/api/coaching` | List, approve (merges delta into live prompt), reject, per-agent report |
-| `contacts.py` | `/api/contacts` | OmniCRM CRUD, phone lookup, timestamped note append |
-
-#### New Database Models
-| Model | Key Fields |
-|-------|-----------|
-| `Contact` | `phoneNumber`, `intentLevel`, `totalCalls`, `crmContext` (JSON), `hubspotContactId`, `salesforceLeadId` |
-| `IVRTree` | `nodes` (JSON adjacency list), `isActive`, `phoneNumber` |
-| `CallRecording` | `minioKey`, `waveformData` (JSON), `timestampedTranscript` (JSON), FK→`CallLog` |
-| `CoachingCard` | `status`, `suggestedPromptDelta`, `impactScore`, `approvedBy`, FK→`Agent` |
-
-#### `voiceflow/` — pip-installable developer SDK
-```
-voiceflow/
-├── agent.py         # VoiceAgent class
-├── tools.py         # @voice_tool decorator (auto JSON schema)
-├── knowledge_base.py# KnowledgeBase (ChromaDB + multilingual embeddings)
-├── mcp.py           # build_mcp_server(agent) → FastMCP for Claude Desktop
-├── cli.py           # voiceflow new / test / deploy / call <phone>
-└── plugins/
-    ├── stt.py       # WhisperSTT, SarvamSTT, GroqSTT, DeepgramSTT, VoskSTT
-    ├── tts.py       # KokoroTTS, SarvamTTS, EdgeTTS, ElevenLabsTTS
-    ├── llm.py       # GroqLLM, OpenAILLM, AnthropicLLM, OllamaLLM, GeminiLLM
-    └── telephony.py # TwilioTelephony, WebSocketTelephony
-```
-```python
-# 3-line quick start
-from voiceflow import VoiceAgent, voice_tool
-@voice_tool
-def book_demo(name: str, time: str) -> str:
-    """Book a product demo."""
-    return f"Demo booked for {name} at {time}."
-agent = VoiceAgent(name="Sales Bot", system_prompt="You are a friendly sales agent.")
-agent.add_tool(book_demo)
-agent.start()  # FastAPI on :8000, Twilio-ready
-```
-```bash
-pip install voiceflow[twilio,sarvam,mcp]
-voiceflow new my-agent && cd my-agent && python agent.py
-```
-
-#### New Dashboard Pages (fully wired: template → view → proxy → api_client → FastAPI)
-| Page | URL | Description |
-|------|-----|-------------|
-| **IVR Trees** | `/dashboard/ivr/` | Build DTMF routing menus with a node editor. Copy Twilio webhook URL. Activate/deactivate trees. |
-| **Call Recordings** | `/dashboard/recordings/` | Inline waveform bar chart, audio player, timestamped transcript, presigned WAV download, filter by agent. |
-| **Contacts (CRM)** | `/dashboard/contacts/` | OmniCRM table with Hot/Warm/Cold intent badges, HubSpot/Salesforce enrichment, call count, CRM context JSON viewer, note append. |
-| **AI Coaching** | `/dashboard/coaching/` | Review AI-generated prompt improvement cards filtered by status/agent. Approve → applies `suggestedPromptDelta` to live agent prompt instantly. Impact score leaderboard. |
-
-**Sidebar additions:**
-- Channels section: **IVR Trees**
-- Intelligence section: **Recordings**, **AI Coaching**
-- Data section: **Contacts (CRM)** (moved up; was unnamed)
-
-### Commit — `365af7d` feat: numbers shop, live call monitor, speaker verification, caller enrichment
-
-| Feature | Description |
-|---------|-------------|
-| **Phone Numbers Shop** | `/dashboard/phone-numbers/` — search Twilio inventory, purchase, release, and assign numbers to agents. Full purchase flow with country/area-code filters. |
-| **Live Call Monitor** | `/dashboard/live-monitor/` — real-time supervisor console with 3-second polling. Live transcript feed, whisper coaching, takeover, end call, and timestamped notes. |
-| **Caller Enrichment** | 4-layer enrichment pipeline: Redis cache → Contacts DB → `phonenumbers` lib → Truecaller Business API. Pre-fills caller context before every conversation. |
-| **Truecaller BYOK** | Settings > Telephony tab — tenants supply their own Truecaller Business API partner key (AES-256-GCM encrypted). |
-
-### Commit — `speaker-verification-api` feat: voice biometrics API + contacts UI
-
-| Feature | Description |
-|---------|-------------|
-| **Speaker Verification HTTP layer** | `POST /api/speaker-verification/enroll` (multipart audio + phone_number), `POST /api/speaker-verification/verify`, `GET /api/speaker-verification/`, `DELETE /api/speaker-verification/{id}`. |
-| **WAV header stripping** | RIFF/WAVE chunk walk extracts raw PCM frame; raw PCM fallback for non-WAV uploads. |
-| **Voice Biometrics UI** | Contacts page gains a "Voice Biometrics / Voiceprints" section — enroll modal (file upload + phone + label), voiceprints table with delete, Alpine.js toast notifications. |
-| **Django proxy wired** | `urls.py` → `api_proxy.py` (multipart file forwarding) → `api_client.py` (httpx multipart) → FastAPI route. |
-
----
-
-## What This Project Does
-
-1. **Sign up** → Django authentication (email/password)
-2. **Onboarding wizard** (9 steps) → configure company profile, agent persona, knowledge base, voice settings, deployment channels, **cost estimate**, testing sandbox
-3. **Documents are ingested** → scraped from URLs or uploaded as files → chunked, embedded, stored in a per-tenant vector store in ChromaDB
-4. **Agent is live** → receives questions via web chat, phone call (Twilio), or browser call (WebSocket) → hierarchical context injection (5 layers) → policy-scored retrieval from tenant-isolated store → dynamic 7-section prompt assembly → Groq LLM generation → TTS synthesis → voice or text response
-5. **Continuous improvement** → bad calls are flagged → nightly pipeline extracts Q&A pairs → admins review and edit ideal responses → approved examples are injected as few-shot learning in the system prompt
-
-The primary market is Indian SMBs. Every tenant and agent is logically isolated — one tenant cannot query another's documents.
-
----
 
 ## System Architecture
 
